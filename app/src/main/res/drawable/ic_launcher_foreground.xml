@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Back card tilted -->
+    <path
+        android:fillColor="#818CF8"
+        android:pathData="M34,26 L78,26 C82.4,26 86,29.6 86,34 L86,76 C86,80.4 82.4,84 78,84 L34,84 C29.6,84 26,80.4 26,76 L26,34 C26,29.6 29.6,26 34,26 Z" />
+    <!-- Front card -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M30,30 L74,30 C78.4,30 82,33.6 82,38 L82,80 C82,84.4 78.4,88 74,88 L30,88 C25.6,88 22,84.4 22,80 L22,38 C22,33.6 25.6,30 30,30 Z" />
+    <!-- Front card header band -->
+    <path
+        android:fillColor="#4F46E5"
+        android:pathData="M22,38 C22,33.6 25.6,30 30,30 L74,30 C78.4,30 82,33.6 82,38 L82,46 L22,46 Z" />
+    <!-- Letter M / Flashcard content -->
+    <path
+        android:fillColor="#4F46E5"
+        android:pathData="M34,54 L41,54 L52,70 L63,54 L70,54 L70,78 L63,78 L63,64 L54,76 L50,76 L41,64 L41,78 L34,78 Z" />
+    <!-- Glowing check spark indicator -->
+    <path
+        android:fillColor="#10B981"
+        android:pathData="M66,22 C66,19.8 67.8,18 70,18 C72.2,18 74,19.8 74,22 C74,24.2 72.2,26 70,26 C67.8,26 66,24.2 66,22 Z" />
+    <path
+        android:fillColor="#F59E0B"
+        android:pathData="M78,28 C78,26.9 78.9,26 80,26 C81.1,26 82,26.9 82,28 C82,29.1 81.1,30 80,30 C78.9,30 78,29.1 78,28 Z" />
+</vector>
+

@@ -1,0 +1,7 @@
+{
+  "name": "Memorizer",
+  "description": "Vocabulary flashcard learning, progress tracking, practice games, and question bank memorizer with cloud and local backup.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
