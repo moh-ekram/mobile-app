@@ -57,19 +57,22 @@ import com.example.ui.theme.*
 fun Flashcard(
     word: VocabularyWordEntity,
     status: String = "unrated",
+    isFlipAnimationEnabled: Boolean = true,
+    isFocusMode: Boolean = false,
     onRate: (String) -> Unit,
     onNext: () -> Unit,
     onSpeak: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val palette = LocalAppPalette.current
     var isFlipped by remember(word.id) { mutableStateOf(false) }
     var hasFlippedCurrentCard by remember(word.id) { mutableStateOf(false) }
 
-    // 3D rotation animation
+    // 3D rotation animation (if flip animation is enabled)
     val rotation by animateFloatAsState(
         targetValue = if (isFlipped) 180f else 0f,
-        animationSpec = tween(durationMillis = 480, easing = FastOutSlowInEasing),
+        animationSpec = if (isFlipAnimationEnabled) tween(durationMillis = 460, easing = FastOutSlowInEasing) else tween(durationMillis = 0),
         label = "card_flip_rotation"
     )
 
@@ -97,23 +100,31 @@ fun Flashcard(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp)
+            .padding(horizontal = if (isFocusMode) 4.dp else 8.dp)
             .testTag("flashcard_container"),
         contentAlignment = Alignment.Center
     ) {
         // 3D Perspective Card Container
+        val cardHeightMod = if (isFocusMode) {
+            Modifier.fillMaxWidth().heightIn(min = 520.dp, max = 640.dp)
+        } else {
+            Modifier.fillMaxWidth().heightIn(min = 470.dp, max = 540.dp)
+        }
+
         Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 470.dp, max = 540.dp)
-                .graphicsLayer {
-                    rotationY = rotation
-                    cameraDistance = 16f * density
-                }
-                .shadow(elevation = 12.dp, shape = RoundedCornerShape(28.dp), spotColor = Color(0x264F46E5))
+            modifier = cardHeightMod
+                .then(
+                    if (isFlipAnimationEnabled) {
+                        Modifier.graphicsLayer {
+                            rotationY = rotation
+                            cameraDistance = 16f * density
+                        }
+                    } else Modifier
+                )
+                .shadow(elevation = if (palette.isDark) 4.dp else 12.dp, shape = RoundedCornerShape(28.dp), spotColor = Color(0x264F46E5))
                 .clip(RoundedCornerShape(28.dp))
-                .background(Color.White)
-                .border(1.dp, CardBorder, RoundedCornerShape(28.dp))
+                .background(palette.cardBackground)
+                .border(1.dp, palette.cardBorder, RoundedCornerShape(28.dp))
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
@@ -121,9 +132,10 @@ fun Flashcard(
                     hasFlippedCurrentCard = true
                     isFlipped = !isFlipped
                 }
-                .padding(20.dp)
+                .padding(if (isFocusMode) 22.dp else 20.dp)
         ) {
-            if (rotation <= 90f) {
+            val showFront = if (isFlipAnimationEnabled) rotation <= 90f else !isFlipped
+            if (showFront) {
                 // ================= FRONT FACE =================
                 FrontFaceContent(
                     word = word,
@@ -131,6 +143,7 @@ fun Flashcard(
                     isFlipped = isFlipped,
                     hasFlipped = hasFlippedCurrentCard,
                     bounceY = bounceY,
+                    isFocusMode = isFocusMode,
                     onSearch = { openGoogleSearch(word.word) },
                     onSpeak = { onSpeak(word.word) },
                     onRate = onRate,
@@ -138,15 +151,17 @@ fun Flashcard(
                 )
             } else {
                 // ================= BACK FACE =================
-                // Inverted 180 degrees so text renders correctly on the back
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .graphicsLayer { rotationY = 180f }
+                        .then(
+                            if (isFlipAnimationEnabled) Modifier.graphicsLayer { rotationY = 180f } else Modifier
+                        )
                 ) {
                     BackFaceContent(
                         word = word,
                         status = status,
+                        isFocusMode = isFocusMode,
                         onSearch = { openGoogleSearch(word.word) },
                         onSpeak = { onSpeak(word.word) },
                         onRate = onRate,
@@ -165,11 +180,13 @@ private fun FrontFaceContent(
     isFlipped: Boolean,
     hasFlipped: Boolean,
     bounceY: Float,
+    isFocusMode: Boolean = false,
     onSearch: () -> Unit,
     onSpeak: () -> Unit,
     onRate: (String) -> Unit,
     onNext: () -> Unit
 ) {
+    val palette = LocalAppPalette.current
     Column(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.SpaceBetween,
@@ -192,10 +209,10 @@ private fun FrontFaceContent(
         ) {
             Text(
                 text = "WORD",
-                fontFamily = FontFamily.SansSerif,
+                fontFamily = PoppinsFontFamily,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Medium,
-                color = SlateLight,
+                color = palette.textMuted,
                 letterSpacing = 1.sp
             )
 
@@ -205,19 +222,35 @@ private fun FrontFaceContent(
                 "know" -> EmeraldSuccess
                 "dont_know" -> RoseError
                 "confusion" -> AmberWarning
-                else -> SlateText
+                else -> palette.textPrimary
             }
+
+            val wordLen = word.word.length
+            val dynamicFontSize = when {
+                wordLen <= 6 -> if (isFocusMode) 38.sp else 34.sp
+                wordLen <= 10 -> if (isFocusMode) 32.sp else 28.sp
+                wordLen <= 14 -> if (isFocusMode) 26.sp else 23.sp
+                wordLen <= 18 -> if (isFocusMode) 22.sp else 20.sp
+                wordLen <= 24 -> if (isFocusMode) 19.sp else 17.sp
+                else -> if (isFocusMode) 16.sp else 15.sp
+            }
+            val dynamicLineHeight = (dynamicFontSize.value * 1.22f).sp
 
             Text(
                 text = word.word,
                 fontFamily = selectFontForText(word.word),
-                fontSize = 38.sp,
+                fontSize = dynamicFontSize,
                 fontWeight = FontWeight.ExtraBold,
                 color = wordColor,
                 letterSpacing = (-0.5).sp,
                 textAlign = TextAlign.Center,
-                lineHeight = 44.sp,
-                modifier = Modifier.padding(horizontal = 8.dp)
+                lineHeight = dynamicLineHeight,
+                maxLines = 4,
+                softWrap = true,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Clip,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp)
             )
 
             AnimatedVisibility(
@@ -230,8 +263,8 @@ private fun FrontFaceContent(
                         .padding(top = 22.dp)
                         .offset(y = bounceY.dp)
                         .clip(CircleShape)
-                        .background(IndigoLight)
-                        .border(1.dp, Color(0xFFC7D2FE), CircleShape)
+                        .background(if (palette.isDark) Color(0xFF312E81) else IndigoLight)
+                        .border(1.dp, if (palette.isDark) Color(0xFF4338CA) else Color(0xFFC7D2FE), CircleShape)
                         .padding(horizontal = 14.dp, vertical = 7.dp)
                 ) {
                     Row(
@@ -241,15 +274,15 @@ private fun FrontFaceContent(
                         Icon(
                             imageVector = Icons.Default.TouchApp,
                             contentDescription = null,
-                            tint = IndigoPrimary,
+                            tint = if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary,
                             modifier = Modifier.size(15.dp)
                         )
                         Text(
                             text = "Click to Flip",
-                            fontFamily = FontFamily.SansSerif,
+                            fontFamily = PoppinsFontFamily,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = IndigoPrimary
+                            color = if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary
                         )
                     }
                 }
@@ -259,6 +292,7 @@ private fun FrontFaceContent(
         // Response Rating Buttons Footer
         RatingFooter(
             status = status,
+            isFocusMode = isFocusMode,
             onRate = onRate,
             onNext = onNext
         )
@@ -269,6 +303,7 @@ private fun FrontFaceContent(
 private fun BackFaceContent(
     word: VocabularyWordEntity,
     status: String,
+    isFocusMode: Boolean = false,
     onSearch: () -> Unit,
     onSpeak: () -> Unit,
     onRate: (String) -> Unit,
@@ -319,10 +354,37 @@ private fun BackFaceContent(
         ) {
             if (customPlacesList.isNotEmpty()) {
                 // Dynamically show ONLY columns present in the uploaded course excel file
-                customPlacesList.forEach { (label, value) ->
+                customPlacesList.forEachIndexed { index, (label, value) ->
                     val isBengali = isBengaliText(value)
                     val font = selectFontForText(value)
-                    val isMeaning = label.contains("meaning", ignoreCase = true) || label.contains("অর্থ", ignoreCase = true) || label.contains("place2", ignoreCase = true)
+                    val labelLower = label.lowercase().trim()
+                    // Place 2 detection (Meaning / Bengali Definition / Place 2)
+                    val isPlace2 = labelLower.startsWith("place2") || labelLower.contains("place 2") ||
+                            labelLower.contains("meaning") || labelLower.contains("definition") ||
+                            labelLower.contains("translation") || index == 0
+                    // Place 4 or Place 5 detection (Forms, Synonyms, Derivatives, Sentences, etc.)
+                    val isPlace4or5 = labelLower.startsWith("place4") || labelLower.contains("place 4") ||
+                            labelLower.startsWith("place5") || labelLower.contains("place 5") ||
+                            labelLower.contains("synonym") || labelLower.contains("extra") ||
+                            labelLower.contains("example") || labelLower.contains("form") ||
+                            labelLower.contains("sentence")
+
+                    val displayLabel = run {
+                        var cleaned = label.trim()
+                        if (cleaned.contains(":")) cleaned = cleaned.substringAfter(":").trim()
+                        cleaned = cleaned.replace(Regex("""(?i)^place\s*\d+\s*[-_:]?\s*"""), "").trim()
+                        cleaned = cleaned.replace(Regex("""(?i)\s*\(place\s*\d+\)"""), "").trim()
+                        if (cleaned.isBlank()) {
+                            when {
+                                labelLower.contains("1") -> "Word"
+                                labelLower.contains("2") -> "Meaning"
+                                labelLower.contains("3") -> "Example"
+                                labelLower.contains("4") -> "Synonyms"
+                                labelLower.contains("5") -> "Forms"
+                                else -> label.trim()
+                            }
+                        } else cleaned
+                    }
 
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -331,8 +393,8 @@ private fun BackFaceContent(
                             .padding(vertical = 3.dp)
                     ) {
                         Text(
-                            text = label.uppercase(),
-                            fontFamily = FontFamily.SansSerif,
+                            text = displayLabel.uppercase(),
+                            fontFamily = PoppinsFontFamily,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = SlateLight,
@@ -340,17 +402,18 @@ private fun BackFaceContent(
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = if (label.contains("synonym", ignoreCase = true) || label.contains("extra", ignoreCase = true) || label.contains("form", ignoreCase = true)) {
-                                formatLineWithRedWord(value, word.word)
-                            } else {
+                            text = if (isPlace2) {
                                 AnnotatedString(value)
+                            } else {
+                                // If place4/place5 contains place1's word, highlight it in red (RoseError)
+                                formatLineWithRedWord(value, word.word)
                             },
                             fontFamily = font,
-                            fontSize = if (isMeaning) 21.sp else if (isBengali) 16.sp else 14.sp,
-                            fontWeight = if (isMeaning) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isMeaning) EmeraldSuccess else SlateText,
+                            fontSize = if (isPlace2) 21.sp else if (isBengali) 16.sp else 14.sp,
+                            fontWeight = if (isPlace2) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isPlace2) EmeraldSuccess else SlateText,
                             textAlign = TextAlign.Center,
-                            lineHeight = if (isMeaning) 26.sp else 20.sp
+                            lineHeight = if (isPlace2) 26.sp else 20.sp
                         )
                     }
                 }
@@ -363,7 +426,7 @@ private fun BackFaceContent(
                     ) {
                         Text(
                             text = "MEANING",
-                            fontFamily = FontFamily.SansSerif,
+                            fontFamily = PoppinsFontFamily,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = SlateLight,
@@ -391,7 +454,7 @@ private fun BackFaceContent(
                     ) {
                         Text(
                             text = "EXAMPLE SENTENCE",
-                            fontFamily = FontFamily.SansSerif,
+                            fontFamily = PoppinsFontFamily,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = SlateLight,
@@ -399,7 +462,7 @@ private fun BackFaceContent(
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = word.example,
+                            text = formatLineWithRedWord(word.example, word.word),
                             fontFamily = selectFontForText(word.example),
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Medium,
@@ -419,7 +482,7 @@ private fun BackFaceContent(
                     ) {
                         Text(
                             text = "DERIVATIVE / FORMS",
-                            fontFamily = FontFamily.SansSerif,
+                            fontFamily = PoppinsFontFamily,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = SlateLight,
@@ -446,7 +509,7 @@ private fun BackFaceContent(
                     ) {
                         Text(
                             text = "SYNONYMS",
-                            fontFamily = FontFamily.SansSerif,
+                            fontFamily = PoppinsFontFamily,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = SlateLight,
@@ -473,7 +536,7 @@ private fun BackFaceContent(
                     ) {
                         Text(
                             text = "MNEMONIC / TRICK",
-                            fontFamily = FontFamily.SansSerif,
+                            fontFamily = PoppinsFontFamily,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = SlateLight,
@@ -498,6 +561,7 @@ private fun BackFaceContent(
         // Response Rating Buttons Footer
         RatingFooter(
             status = status,
+            isFocusMode = isFocusMode,
             onRate = onRate,
             onNext = onNext
         )
@@ -524,7 +588,7 @@ private fun TopBarSection(
         ) {
             Text(
                 text = if (group != null && group > 0) "GROUP $group" else "VOCABULARY",
-                fontFamily = FontFamily.SansSerif,
+                fontFamily = PoppinsFontFamily,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 color = IndigoPrimary,
@@ -578,22 +642,24 @@ private fun TopBarSection(
 @Composable
 private fun RatingFooter(
     status: String,
+    isFocusMode: Boolean = false,
     onRate: (String) -> Unit,
     onNext: () -> Unit
 ) {
+    val palette = LocalAppPalette.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 10.dp)
+            .padding(top = if (isFocusMode) 16.dp else 10.dp, bottom = if (isFocusMode) 8.dp else 0.dp)
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(1.dp)
-                .background(Color(0xFFF1F5F9))
+                .background(palette.cardBorder)
         )
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(if (isFocusMode) 16.dp else 12.dp))
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -606,8 +672,8 @@ private fun RatingFooter(
                 isActive = status == "dont_know",
                 activeBg = RoseError,
                 activeBorder = Color(0xFFBE123C),
-                inactiveBg = RoseLight,
-                inactiveBorder = RoseBorder,
+                inactiveBg = if (palette.isDark) Color(0xFF381219) else RoseLight,
+                inactiveBorder = if (palette.isDark) Color(0xFF4C1D24) else RoseBorder,
                 tint = if (status == "dont_know") Color.White else RoseError,
                 icon = {
                     Icon(
@@ -626,8 +692,8 @@ private fun RatingFooter(
                 isActive = status == "confusion",
                 activeBg = AmberWarning,
                 activeBorder = Color(0xFFB45309),
-                inactiveBg = AmberLight,
-                inactiveBorder = AmberBorder,
+                inactiveBg = if (palette.isDark) Color(0xFF362005) else AmberLight,
+                inactiveBorder = if (palette.isDark) Color(0xFF4D2E07) else AmberBorder,
                 tint = if (status == "confusion") Color.White else AmberWarning,
                 icon = {
                     Icon(
@@ -644,16 +710,16 @@ private fun RatingFooter(
             RatingItem(
                 title = "skip",
                 isActive = false,
-                activeBg = Color(0xFFE2E8F0),
-                activeBorder = Color(0xFFCBD5E1),
-                inactiveBg = Color(0xFFF1F5F9),
-                inactiveBorder = Color(0xFFE2E8F0),
-                tint = Color(0xFF475569),
+                activeBg = if (palette.isDark) Color(0xFF334155) else Color(0xFFE2E8F0),
+                activeBorder = if (palette.isDark) Color(0xFF475569) else Color(0xFFCBD5E1),
+                inactiveBg = if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9),
+                inactiveBorder = if (palette.isDark) Color(0xFF334155) else Color(0xFFE2E8F0),
+                tint = if (palette.isDark) Color(0xFF94A3B8) else Color(0xFF475569),
                 icon = {
                     Icon(
                         imageVector = Icons.Default.SkipNext,
                         contentDescription = "Skip",
-                        tint = Color(0xFF475569),
+                        tint = if (palette.isDark) Color(0xFF94A3B8) else Color(0xFF475569),
                         modifier = Modifier.size(22.dp)
                     )
                 },
@@ -666,8 +732,8 @@ private fun RatingFooter(
                 isActive = status == "know",
                 activeBg = EmeraldSuccess,
                 activeBorder = Color(0xFF047857),
-                inactiveBg = EmeraldLight,
-                inactiveBorder = EmeraldBorder,
+                inactiveBg = if (palette.isDark) Color(0xFF064E3B) else EmeraldLight,
+                inactiveBorder = if (palette.isDark) Color(0xFF065F46) else EmeraldBorder,
                 tint = if (status == "know") Color.White else EmeraldSuccess,
                 icon = {
                     Icon(
@@ -695,6 +761,7 @@ private fun RatingItem(
     icon: @Composable () -> Unit,
     onClick: () -> Unit
 ) {
+    val palette = LocalAppPalette.current
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -713,10 +780,10 @@ private fun RatingItem(
 
         Text(
             text = title,
-            fontFamily = FontFamily.SansSerif,
+            fontFamily = PoppinsFontFamily,
             fontSize = 10.sp,
             fontWeight = FontWeight.Medium,
-            color = if (isActive) SlateText else SlateLight
+            color = if (isActive) (if (palette.isDark) Color.White else SlateText) else palette.textMuted
         )
     }
 }
@@ -747,7 +814,7 @@ fun formatLineWithRedWord(valText: String, targetWord: String): AnnotatedString 
             val endMatch = matchIndex + targetWord.length
             pushStyle(
                 SpanStyle(
-                    color = Color(0xFFDC2626), // red-600
+                    color = RoseError, // exact don't know tag color
                     fontWeight = FontWeight.Bold
                 )
             )

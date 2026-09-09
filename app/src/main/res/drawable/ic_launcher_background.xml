@@ -15,13 +15,14 @@
                 android:endY="108"
                 android:type="linear">
                 <item android:offset="0.0" android:color="#4F46E5" />
-                <item android:offset="0.5" android:color="#4338CA" />
+                <item android:offset="0.6" android:color="#312E81" />
                 <item android:offset="1.0" android:color="#1E1B4B" />
             </gradient>
         </aapt:attr>
     </path>
+    <!-- Soft ambient circle in center -->
     <path
         android:fillColor="#15FFFFFF"
-        android:pathData="M10,20 L98,20 L98,22 L10,22 Z M10,50 L98,50 L98,52 L10,52 Z M10,80 L98,80 L98,82 L10,82 Z" />
+        android:pathData="M54,20 A34,34 0 1,0 54,88 A34,34 0 1,0 54,20 Z" />
 </vector>
 

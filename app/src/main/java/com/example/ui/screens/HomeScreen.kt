@@ -1,25 +1,30 @@
 package com.example.ui.screens
 
+import android.speech.tts.TextToSpeech
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -30,6 +35,7 @@ import com.example.data.model.UserProgressEntity
 import com.example.data.model.UserSession
 import com.example.data.model.VocabularyWordEntity
 import com.example.ui.theme.*
+import java.util.Locale
 
 @Composable
 fun HomeScreen(
@@ -42,19 +48,199 @@ fun HomeScreen(
     onCreateCourseClick: () -> Unit = {},
     onNavigate: (String) -> Unit,
     onSelectGroup: (Int?) -> Unit,
+    widgetWord: VocabularyWordEntity? = null,
+    widgetCategory: String = "all",
+    onSetWidgetCategory: (String) -> Unit = {},
+    onCycleWidgetWord: () -> Unit = {},
+    onRateWidgetWord: (String, String) -> Unit = { _, _ -> },
+    onRefreshWidget: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val totalWords = words.size
-    val knowCount = words.count { it.status == "know" }
-    val confusionCount = words.count { it.status == "confusion" }
-    val dontKnowCount = words.count { it.status == "dont_know" }
-    val unratedCount = words.count { it.status == "unrated" }
+    // Cycle word every time home screen appears
+    LaunchedEffect(Unit) {
+        onRefreshWidget()
+    }
+
+    // Filter data specifically for the currently selected active course
+    val selectedCourse = courses.find { it.id == activeCourseId } ?: courses.firstOrNull()
+    val activeWords = if (selectedCourse != null) {
+        words.filter { it.courseId == selectedCourse.id }
+    } else {
+        words
+    }
+
+    val totalWords = activeWords.size
+    val knowCount = activeWords.count { it.status == "know" }
+    val confusionCount = activeWords.count { it.status == "confusion" }
+    val dontKnowCount = activeWords.count { it.status == "dont_know" }
+    val unratedCount = activeWords.count { it.status == "unrated" }
     val masteryPercent = if (totalWords > 0) ((knowCount.toFloat() / totalWords) * 100).toInt() else 0
+
+    val palette = LocalAppPalette.current
+
+    var showCourseDialog by remember { mutableStateOf(false) }
+
+    // Course Selection Dialog Popup
+    if (showCourseDialog) {
+        AlertDialog(
+            onDismissRequest = { showCourseDialog = false },
+            shape = RoundedCornerShape(24.dp),
+            containerColor = Color.White,
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Select Course",
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = SlateText
+                    )
+                    IconButton(
+                        onClick = { showCourseDialog = false },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = SlateLight)
+                    }
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 380.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (courses.isEmpty()) {
+                        Text(
+                            text = "No courses available. Create a new course below.",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 13.sp,
+                            color = SlateMuted
+                        )
+                    } else {
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            items(courses, key = { it.id }) { course ->
+                                val isSelected = course.id == activeCourseId
+                                val courseWords = words.filter { it.courseId == course.id }
+                                val courseTotal = courseWords.size
+                                val courseKnown = courseWords.count { it.status == "know" }
+                                val coursePercent = if (courseTotal > 0) ((courseKnown.toFloat() / courseTotal) * 100).toInt() else 0
+
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            onSelectCourse(course.id)
+                                            showCourseDialog = false
+                                        },
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (isSelected) Color(0xFFEEF2FF) else Color(0xFFF8FAFC)
+                                    ),
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (isSelected) IndigoPrimary else Color(0xFFE2E8F0)
+                                    )
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(14.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Text(
+                                                    text = course.title,
+                                                    fontFamily = PoppinsFontFamily,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (isSelected) IndigoPrimary else SlateText
+                                                )
+                                                if (isSelected) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .clip(CircleShape)
+                                                            .background(EmeraldLight)
+                                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = "SELECTED",
+                                                            fontFamily = PoppinsFontFamily,
+                                                            fontSize = 8.sp,
+                                                            fontWeight = FontWeight.ExtraBold,
+                                                            color = EmeraldSuccess
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = "$courseKnown / $courseTotal words ($coursePercent%)",
+                                                fontFamily = PoppinsFontFamily,
+                                                fontSize = 11.sp,
+                                                color = SlateMuted
+                                            )
+                                        }
+
+                                        RadioButton(
+                                            selected = isSelected,
+                                            onClick = {
+                                                onSelectCourse(course.id)
+                                                showCourseDialog = false
+                                            },
+                                            colors = RadioButtonDefaults.colors(
+                                                selectedColor = IndigoPrimary
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    OutlinedButton(
+                        onClick = {
+                            showCourseDialog = false
+                            onCreateCourseClick()
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        border = BorderStroke(1.dp, IndigoPrimary)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp), tint = IndigoPrimary)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "New Course",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = IndigoPrimary
+                        )
+                    }
+                }
+            },
+            confirmButton = {}
+        )
+    }
 
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
-            .background(SlateBg)
+            .background(palette.background)
             .padding(horizontal = 16.dp),
         contentPadding = PaddingValues(top = 16.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -80,14 +266,14 @@ fun HomeScreen(
                         Column {
                             Text(
                                 text = "Welcome back,",
-                                fontFamily = FontFamily.SansSerif,
+                                fontFamily = PoppinsFontFamily,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Normal,
                                 color = Color.White.copy(alpha = 0.85f)
                             )
                             Text(
                                 text = user?.displayName ?: "Vocabulary Learner",
-                                fontFamily = FontFamily.SansSerif,
+                                fontFamily = PoppinsFontFamily,
                                 fontSize = 22.sp,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = Color.White
@@ -113,7 +299,7 @@ fun HomeScreen(
                                 )
                                 Text(
                                     text = "${progress?.streakDays ?: 1} Day Streak",
-                                    fontFamily = FontFamily.SansSerif,
+                                    fontFamily = PoppinsFontFamily,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
@@ -126,7 +312,7 @@ fun HomeScreen(
 
                     Text(
                         text = "Mastery Progress",
-                        fontFamily = FontFamily.SansSerif,
+                        fontFamily = PoppinsFontFamily,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = Color.White.copy(alpha = 0.8f)
@@ -152,14 +338,14 @@ fun HomeScreen(
                     ) {
                         Text(
                             text = "$masteryPercent% Mastered",
-                            fontFamily = FontFamily.SansSerif,
+                            fontFamily = PoppinsFontFamily,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
                         Text(
                             text = "$knowCount of $totalWords words",
-                            fontFamily = FontFamily.SansSerif,
+                            fontFamily = PoppinsFontFamily,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
                             color = Color.White.copy(alpha = 0.85f)
@@ -169,114 +355,111 @@ fun HomeScreen(
             }
         }
 
-        // Course List & Selection Section
+        // Course Selection Section with 'Select course' button
         item {
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showCourseDialog = true },
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                border = CardDefaults.outlinedCardBorder().copy(
+                    brush = androidx.compose.ui.graphics.SolidColor(SlateBorder)
+                )
+            ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Courses / কোর্সসমূহ",
-                        fontFamily = FontFamily.SansSerif,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = SlateText
-                    )
-                    TextButton(
-                        onClick = onCreateCourseClick,
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp), tint = IndigoPrimary)
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("New Course", fontSize = 12.sp, color = IndigoPrimary, fontWeight = FontWeight.Bold)
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    items(courses, key = { it.id }) { course ->
-                        val isSelected = course.id == activeCourseId
-                        Card(
+                        Box(
                             modifier = Modifier
-                                .width(220.dp)
-                                .clickable { onSelectCourse(course.id) },
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (isSelected) Color(0xFFEEF2FF) else Color.White
-                            ),
-                            border = CardDefaults.outlinedCardBorder().copy(
-                                brush = androidx.compose.ui.graphics.SolidColor(
-                                    if (isSelected) IndigoPrimary else SlateBorder
-                                )
-                            ),
-                            elevation = CardDefaults.cardElevation(defaultElevation = if (isSelected) 3.dp else 1.dp)
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(IndigoLight),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(14.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.School,
-                                        contentDescription = null,
-                                        tint = if (isSelected) IndigoPrimary else SlateMuted,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    if (isSelected) {
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(CircleShape)
-                                                .background(EmeraldLight)
-                                                .padding(horizontal = 8.dp, vertical = 2.dp)
-                                        ) {
-                                            Text(
-                                                text = "SELECTED",
-                                                fontSize = 9.sp,
-                                                fontWeight = FontWeight.ExtraBold,
-                                                color = EmeraldSuccess
-                                            )
-                                        }
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(8.dp))
-
-                                Text(
-                                    text = course.title,
-                                    fontFamily = FontFamily.SansSerif,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isSelected) IndigoPrimary else SlateText,
-                                    maxLines = 1
-                                )
-
-                                Text(
-                                    text = course.description ?: "Vocab memorization course",
-                                    fontSize = 11.sp,
-                                    color = SlateMuted,
-                                    maxLines = 2,
-                                    lineHeight = 15.sp,
-                                    modifier = Modifier.padding(top = 2.dp)
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.Default.School,
+                                contentDescription = null,
+                                tint = IndigoPrimary,
+                                modifier = Modifier.size(22.dp)
+                            )
                         }
+                        Column {
+                            Text(
+                                text = selectedCourse?.title ?: "Select Course",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = SlateText,
+                                maxLines = 1
+                            )
+                            Text(
+                                text = "${activeWords.size} words • ${masteryPercent}% mastered",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 11.sp,
+                                color = SlateMuted
+                            )
+                        }
+                    }
+
+                    Button(
+                        onClick = { showCourseDialog = true },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = "Select course",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(
+                            Icons.Default.KeyboardArrowDown,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
                     }
                 }
             }
         }
 
-        // Stats Matrix
+        // Stats Matrix for Selected Course
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${selectedCourse?.title ?: "Course"} Statistics",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = SlateText
+                )
+                Text(
+                    text = "$knowCount / $totalWords mastered",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = EmeraldSuccess
+                )
+            }
+        }
+
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -321,7 +504,7 @@ fun HomeScreen(
         item {
             Text(
                 text = "Quick Practice",
-                fontFamily = FontFamily.SansSerif,
+                fontFamily = PoppinsFontFamily,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 color = SlateText,
@@ -330,9 +513,8 @@ fun HomeScreen(
         }
 
         item {
-            ActionTile(
-                title = "Study Flashcards",
-                subtitle = "3D flip cards with audio pronunciation & definitions",
+            QuickPracticeTile(
+                title = "Flashcard",
                 icon = Icons.Default.Style,
                 accent = IndigoPrimary,
                 onClick = { onNavigate("flashcard") }
@@ -340,9 +522,8 @@ fun HomeScreen(
         }
 
         item {
-            ActionTile(
-                title = "Odd One Out & Practice Games",
-                subtitle = "Interactive games: OOO, Analogy, and practice quizzes",
+            QuickPracticeTile(
+                title = "Practice",
                 icon = Icons.Default.SportsEsports,
                 accent = EmeraldSuccess,
                 onClick = { onNavigate("games") }
@@ -350,9 +531,8 @@ fun HomeScreen(
         }
 
         item {
-            ActionTile(
-                title = "Question Bank (QB) Test",
-                subtitle = "Custom filter tests with question count selector",
+            QuickPracticeTile(
+                title = "Question Bank",
                 icon = Icons.Default.Quiz,
                 accent = AmberWarning,
                 onClick = { onNavigate("games") }
@@ -360,9 +540,8 @@ fun HomeScreen(
         }
 
         item {
-            ActionTile(
-                title = "Read Article (Smart Vocab Highlighter)",
-                subtitle = "Interactive passages highlighting Place1 & Place2 with tap meanings",
+            QuickPracticeTile(
+                title = "Read Article",
                 icon = Icons.Default.MenuBook,
                 accent = Color(0xFF7C3AED),
                 onClick = { onNavigate("article_reader") }
@@ -371,21 +550,35 @@ fun HomeScreen(
 
         // Word Groups Breakdown
         item {
-            Text(
-                text = "Course Groups",
-                fontFamily = FontFamily.SansSerif,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = SlateText,
-                modifier = Modifier.padding(top = 8.dp)
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${selectedCourse?.title ?: "Course"} Groups",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = SlateText
+                )
+                Text(
+                    text = "${activeWords.size} words",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = SlateMuted
+                )
+            }
         }
 
-        val groups = words.map { it.group }.distinct().sorted()
+        val groups = activeWords.map { it.group }.distinct().sorted()
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 groups.forEach { grp ->
-                    val grpWords = words.filter { it.group == grp }
+                    val grpWords = activeWords.filter { it.group == grp }
                     val grpKnow = grpWords.count { it.status == "know" }
                     val grpPercent = if (grpWords.isNotEmpty()) (grpKnow * 100 / grpWords.size) else 0
 
@@ -410,14 +603,14 @@ fun HomeScreen(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = "Group $grp",
-                                    fontFamily = FontFamily.SansSerif,
+                                    fontFamily = PoppinsFontFamily,
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = SlateText
                                 )
                                 Text(
-                                    text = "${grpWords.size} Vocabulary Words • $grpPercent% Mastered",
-                                    fontFamily = FontFamily.SansSerif,
+                                    text = "${grpWords.size} words • $grpPercent% mastered",
+                                    fontFamily = PoppinsFontFamily,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = SlateMuted
@@ -457,7 +650,7 @@ private fun StatCard(
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 text = count.toString(),
-                fontFamily = FontFamily.SansSerif,
+                fontFamily = PoppinsFontFamily,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Black,
                 color = textColor
@@ -465,7 +658,7 @@ private fun StatCard(
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = title,
-                fontFamily = FontFamily.SansSerif,
+                fontFamily = PoppinsFontFamily,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = textColor.copy(alpha = 0.9f)
@@ -475,9 +668,8 @@ private fun StatCard(
 }
 
 @Composable
-private fun ActionTile(
+private fun QuickPracticeTile(
     title: String,
-    subtitle: String,
     icon: ImageVector,
     accent: Color,
     onClick: () -> Unit
@@ -486,20 +678,20 @@ private fun ActionTile(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() },
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(SlateBorder))
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(18.dp),
+                .padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
-                    .size(46.dp)
-                    .clip(RoundedCornerShape(14.dp))
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(12.dp))
                     .background(accent.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center
             ) {
@@ -507,29 +699,20 @@ private fun ActionTile(
                     imageVector = icon,
                     contentDescription = null,
                     tint = accent,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(22.dp)
                 )
             }
 
             Spacer(modifier = Modifier.width(14.dp))
 
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    fontFamily = FontFamily.SansSerif,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = SlateText
-                )
-                Text(
-                    text = subtitle,
-                    fontFamily = FontFamily.SansSerif,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Normal,
-                    color = SlateMuted,
-                    lineHeight = 16.sp
-                )
-            }
+            Text(
+                text = title,
+                fontFamily = PoppinsFontFamily,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = SlateText,
+                modifier = Modifier.weight(1f)
+            )
 
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.ArrowForward,
@@ -540,3 +723,5 @@ private fun ActionTile(
         }
     }
 }
+
+

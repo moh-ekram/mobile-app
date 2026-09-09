@@ -68,7 +68,7 @@ fun LoginScreen(
                 ) {
                     Text(
                         text = "M",
-                        fontFamily = FontFamily.SansSerif,
+                        fontFamily = PoppinsFontFamily,
                         fontSize = 32.sp,
                         fontWeight = FontWeight.Black,
                         color = Color.White
@@ -79,7 +79,7 @@ fun LoginScreen(
 
                 Text(
                     text = "Memorizer",
-                    fontFamily = FontFamily.SansSerif,
+                    fontFamily = PoppinsFontFamily,
                     fontSize = 28.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = SlateText,
@@ -88,7 +88,7 @@ fun LoginScreen(
 
                 Text(
                     text = "Master vocabulary with 3D flashcards",
-                    fontFamily = FontFamily.SansSerif,
+                    fontFamily = PoppinsFontFamily,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                     color = SlateMuted,
@@ -109,14 +109,14 @@ fun LoginScreen(
                     Column {
                         Text(
                             text = "Default Credentials (Online/Offline):",
-                            fontFamily = FontFamily.SansSerif,
+                            fontFamily = PoppinsFontFamily,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = IndigoPrimary
                         )
                         Text(
                             text = "User ID: 1235  •  Password: testrun012",
-                            fontFamily = FontFamily.SansSerif,
+                            fontFamily = PoppinsFontFamily,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
                             color = IndigoDark
@@ -174,7 +174,7 @@ fun LoginScreen(
                 ) {
                     Text(
                         text = "Sign In",
-                        fontFamily = FontFamily.SansSerif,
+                        fontFamily = PoppinsFontFamily,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
@@ -191,7 +191,7 @@ fun LoginScreen(
                     Text(
                         text = "OR",
                         modifier = Modifier.padding(horizontal = 12.dp),
-                        fontFamily = FontFamily.SansSerif,
+                        fontFamily = PoppinsFontFamily,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = SlateLight
@@ -228,7 +228,7 @@ fun LoginScreen(
                         ) {
                             Text(
                                 text = "G",
-                                fontFamily = FontFamily.SansSerif,
+                                fontFamily = PoppinsFontFamily,
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Black,
                                 color = Color(0xFF4285F4)
@@ -237,7 +237,7 @@ fun LoginScreen(
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
                             text = "Log in with Google",
-                            fontFamily = FontFamily.SansSerif,
+                            fontFamily = PoppinsFontFamily,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = SlateText
@@ -259,8 +259,8 @@ fun LoginScreen(
                         modifier = Modifier.size(16.dp)
                     )
                     Text(
-                        text = "Supabase Cloud & Local Storage Connected",
-                        fontFamily = FontFamily.SansSerif,
+                        text = "Cloud & local storage connected",
+                        fontFamily = PoppinsFontFamily,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium,
                         color = SlateMuted

@@ -19,6 +19,7 @@ data class ArticleEntity(
     @PrimaryKey val id: String,
     val title: String,
     val content: String,
+    val author: String = "Unknown Author",
     val courseId: String = "course_default",
     val createdAt: Long = System.currentTimeMillis(),
     val wordCount: Int = 0
@@ -93,5 +94,9 @@ data class UserSession(
     val email: String? = null,
     val displayName: String,
     val isGuest: Boolean = false,
-    val isGoogleUser: Boolean = false
+    val isGoogleUser: Boolean = false,
+    val avatarUri: String? = null,
+    val targetExam: String = "GRE / IELTS",
+    val dailyWordGoal: Int = 20,
+    val bio: String = "Aiming for GRE 330+ and IELTS 8.0"
 )

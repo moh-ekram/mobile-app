@@ -29,27 +29,66 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
     // Navigation State: "home", "flashcard", "games", "admin", "profile", "article_reader"
     private val _currentRoute = MutableStateFlow("home")
     val currentRoute: StateFlow<String> = _currentRoute.asStateFlow()
+    private val routeBackStack = mutableListOf<String>()
 
     fun setRoute(route: String) {
-        _currentRoute.value = route
+        if (_currentRoute.value != route) {
+            if (routeBackStack.isEmpty() || routeBackStack.last() != _currentRoute.value) {
+                routeBackStack.add(_currentRoute.value)
+            }
+            _currentRoute.value = route
+        }
+    }
+
+    fun navigateBack(): Boolean {
+        if (activeArticle.value != null) {
+            activeArticle.value = null
+            return true
+        }
+        while (routeBackStack.isNotEmpty()) {
+            val prev = routeBackStack.removeAt(routeBackStack.lastIndex)
+            if (prev != _currentRoute.value) {
+                _currentRoute.value = prev
+                return true
+            }
+        }
+        if (_currentRoute.value != "home") {
+            _currentRoute.value = "home"
+            return true
+        }
+        return false
     }
 
     // Courses State
     val allCourses: StateFlow<List<CourseEntity>> = repository.allCourses
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val activeCourseId = MutableStateFlow("course_default")
+    val activeCourseId = MutableStateFlow("")
 
     fun selectCourse(id: String) {
         activeCourseId.value = id
         currentWordIndex.value = 0
     }
 
-    fun createCourse(title: String, description: String? = null) {
+    fun createCourse(title: String, description: String? = null, initialContent: String? = null, isJson: Boolean = false) {
         viewModelScope.launch {
             val course = repository.createCourse(title, description)
             activeCourseId.value = course.id
             _statusMessage.value = "Course '${course.title}' created & selected!"
+            if (!initialContent.isNullOrBlank()) {
+                val uid = _currentUser.value?.userId ?: "1235"
+                val res = repository.importCourseFile(initialContent, isJson, course.id, uid)
+                res.onSuccess { count ->
+                    _statusMessage.value = "Course '${course.title}' created with $count words!"
+                }
+            }
+        }
+    }
+
+    fun updateCourseTitle(courseId: String, newTitle: String) {
+        viewModelScope.launch {
+            repository.updateCourseTitle(courseId, newTitle)
+            _statusMessage.value = "Course renamed to '$newTitle'"
         }
     }
 
@@ -58,7 +97,8 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
             val uid = _currentUser.value?.userId ?: "1235"
             repository.deleteCourse(courseId, uid)
             if (activeCourseId.value == courseId) {
-                activeCourseId.value = "course_default"
+                val remaining = allCourses.value.filter { it.id != courseId }
+                activeCourseId.value = remaining.firstOrNull()?.id ?: ""
             }
             _statusMessage.value = "Course removed"
         }
@@ -74,9 +114,69 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         activeArticle.value = article
     }
 
-    fun saveArticle(title: String, content: String) {
+    private val prefs = application.getSharedPreferences("memorizer_prefs", android.content.Context.MODE_PRIVATE)
+
+    // Dark / Night Theme State
+    val isDarkTheme = MutableStateFlow(prefs.getBoolean("is_dark_theme", false))
+
+    fun toggleDarkTheme() {
+        val next = !isDarkTheme.value
+        isDarkTheme.value = next
+        prefs.edit().putBoolean("is_dark_theme", next).apply()
+    }
+
+    // Flashcard Flip Animation Setting (Toggle in Profile: On/Off)
+    val isFlipAnimationEnabled = MutableStateFlow(prefs.getBoolean("is_flip_animation_enabled", true))
+
+    fun setFlipAnimationEnabled(enabled: Boolean) {
+        isFlipAnimationEnabled.value = enabled
+        prefs.edit().putBoolean("is_flip_animation_enabled", enabled).apply()
+        _statusMessage.value = if (enabled) "Card flip animation enabled" else "Card flip animation disabled"
+    }
+
+    // Flashcard Focus Mode (Hides bottom nav, enlarges card, positions tag buttons at bottom)
+    val isFocusMode = MutableStateFlow(false)
+
+    fun toggleFocusMode() {
+        isFocusMode.value = !isFocusMode.value
+    }
+
+    fun setFocusMode(enabled: Boolean) {
+        isFocusMode.value = enabled
+    }
+
+    // Home Widget State
+    val widgetCategory = MutableStateFlow("all") // "all", "know", "confusion", "dont_know", "unrated"
+    val currentWidgetWord = MutableStateFlow<VocabularyWordEntity?>(null)
+
+    fun setWidgetCategory(category: String) {
+        widgetCategory.value = category
+        cycleNextWidgetWord()
+    }
+
+    fun cycleNextWidgetWord() {
+        val cat = widgetCategory.value
+        val all = allWords.value
+        val candidates = when (cat) {
+            "all" -> all
+            "know" -> all.filter { it.status == "know" }
+            "confusion" -> all.filter { it.status == "confusion" }
+            "dont_know" -> all.filter { it.status == "dont_know" }
+            "unrated" -> all.filter { it.status == "unrated" }
+            else -> all
+        }
+        if (candidates.isNotEmpty()) {
+            val currentId = currentWidgetWord.value?.id
+            val pool = if (candidates.size > 1) candidates.filter { it.id != currentId } else candidates
+            currentWidgetWord.value = pool.randomOrNull() ?: candidates.first()
+        } else {
+            currentWidgetWord.value = null
+        }
+    }
+
+    fun saveArticle(title: String, content: String, author: String = "Unknown Author", id: String? = null) {
         viewModelScope.launch {
-            val saved = repository.saveArticle(title, content, activeCourseId.value)
+            val saved = repository.saveArticle(title, content, author, activeCourseId.value, id)
             activeArticle.value = saved
             _statusMessage.value = "Article '${saved.title}' saved locally!"
         }
@@ -109,26 +209,154 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
     val allWords: StateFlow<List<VocabularyWordEntity>> = repository.allWords
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val distinctGroups: StateFlow<List<Int>> = repository.distinctGroups
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf(1, 2, 3))
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val distinctGroups: StateFlow<List<Int>> = activeCourseId.flatMapLatest { cId ->
+        if (cId.isBlank()) kotlinx.coroutines.flow.flowOf(emptyList())
+        else repository.getDistinctGroupsForCourse(cId)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Flashcard Screen Filters & Index
-    val selectedGroup = MutableStateFlow<Int?>(null) // null = all groups
-    val selectedStatusFilter = MutableStateFlow("all") // "all", "unrated", "dont_know", "confusion", "know"
+    // Flashcard Screen Filters, Sorting & Navigation (Persisted across sessions)
+    private val savedGroups = prefs.getStringSet("selected_card_groups", emptySet())
+        ?.mapNotNull { it.toIntOrNull() }?.toSet() ?: emptySet()
+    private val savedStatuses = prefs.getStringSet("selected_card_statuses", emptySet()) ?: emptySet()
+    private val savedSortOrder = prefs.getString("card_sort_order", "default") ?: "default"
+
+    val selectedGroups = MutableStateFlow<Set<Int>>(savedGroups) // empty = all groups
+    val selectedStatuses = MutableStateFlow<Set<String>>(savedStatuses) // empty = all statuses
+    val cardSortOrder = MutableStateFlow(savedSortOrder) // "default", "a_z", "z_a", "random"
+    private val randomSeed = MutableStateFlow(System.currentTimeMillis())
     val currentWordIndex = MutableStateFlow(0)
 
+    // Legacy compatibility accessors
+    val selectedGroup = MutableStateFlow<Int?>(null)
+    val selectedStatusFilter = MutableStateFlow("all")
+
+    private fun persistFilters() {
+        prefs.edit()
+            .putStringSet("selected_card_groups", selectedGroups.value.map { it.toString() }.toSet())
+            .putStringSet("selected_card_statuses", selectedStatuses.value)
+            .putString("card_sort_order", cardSortOrder.value)
+            .apply()
+    }
+
+    fun toggleGroup(group: Int) {
+        val current = selectedGroups.value
+        selectedGroups.value = if (current.contains(group)) current - group else current + group
+        currentWordIndex.value = 0
+        persistFilters()
+    }
+
+    fun clearGroups() {
+        selectedGroups.value = emptySet()
+        currentWordIndex.value = 0
+        persistFilters()
+    }
+
+    fun selectGroup(group: Int?) {
+        selectedGroups.value = if (group == null) emptySet() else setOf(group)
+        selectedGroup.value = group
+        currentWordIndex.value = 0
+        persistFilters()
+    }
+
+    fun toggleStatus(status: String) {
+        val current = selectedStatuses.value
+        selectedStatuses.value = if (current.contains(status)) current - status else current + status
+        currentWordIndex.value = 0
+        persistFilters()
+    }
+
+    fun clearStatuses() {
+        selectedStatuses.value = emptySet()
+        currentWordIndex.value = 0
+        persistFilters()
+    }
+
+    fun selectStatusFilter(status: String) {
+        selectedStatuses.value = if (status == "all") emptySet() else setOf(status)
+        selectedStatusFilter.value = status
+        currentWordIndex.value = 0
+        persistFilters()
+    }
+
+    fun setCardSortOrder(order: String) {
+        cardSortOrder.value = order
+        currentWordIndex.value = 0
+        persistFilters()
+    }
+
+    fun reshuffleCards() {
+        randomSeed.value = System.currentTimeMillis()
+        currentWordIndex.value = 0
+    }
+
+    fun resetAllCardFilters() {
+        selectedGroups.value = emptySet()
+        selectedStatuses.value = emptySet()
+        cardSortOrder.value = "default"
+        currentWordIndex.value = 0
+        persistFilters()
+    }
+
     val filteredWords: StateFlow<List<VocabularyWordEntity>> = combine(
-        allWords,
-        activeCourseId,
-        selectedGroup,
-        selectedStatusFilter
-    ) { words, courseId, group, status ->
-        words.filter { w ->
-            (courseId == "all" || w.courseId == courseId || courseId.isBlank()) &&
-            (group == null || w.group == group) &&
-            (status == "all" || w.status == status)
+        combine(allWords, activeCourseId, selectedGroups) { words, courseId, groups ->
+            Triple(words, courseId, groups)
+        },
+        selectedStatuses,
+        cardSortOrder,
+        randomSeed
+    ) { (words, courseId, groups), statuses, sortOrder, seed ->
+        if (courseId.isBlank()) {
+            // Without active course, show no flashcard data
+            emptyList()
+        } else {
+            val filtered = words.filter { w ->
+                w.courseId == courseId &&
+                (groups.isEmpty() || groups.contains(w.group)) &&
+                (statuses.isEmpty() || statuses.contains(w.status))
+            }
+
+            when (sortOrder) {
+                "a_z" -> filtered.sortedBy { it.word.lowercase() }
+                "z_a" -> filtered.sortedByDescending { it.word.lowercase() }
+                "random" -> {
+                    val rng = java.util.Random(seed)
+                    filtered.shuffled(rng)
+                }
+                else -> filtered // Default course/insertion order
+            }
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    init {
+        viewModelScope.launch {
+            allCourses.collect { list ->
+                if (activeCourseId.value.isBlank() && list.isNotEmpty()) {
+                    activeCourseId.value = list.first().id
+                } else if (list.isNotEmpty() && list.none { it.id == activeCourseId.value }) {
+                    activeCourseId.value = list.first().id
+                } else if (list.isEmpty()) {
+                    activeCourseId.value = ""
+                }
+            }
+        }
+        viewModelScope.launch {
+            filteredWords.collect { list ->
+                if (list.isEmpty()) {
+                    currentWordIndex.value = 0
+                } else if (currentWordIndex.value >= list.size) {
+                    currentWordIndex.value = list.size - 1
+                }
+            }
+        }
+        viewModelScope.launch {
+            allWords.collect { words ->
+                if (currentWidgetWord.value == null && words.isNotEmpty()) {
+                    cycleNextWidgetWord()
+                }
+            }
+        }
+    }
 
     // Games State
     val allGames: StateFlow<List<GamePracticeEntity>> = repository.allGames
@@ -154,6 +382,19 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun showMessage(msg: String) {
         _statusMessage.value = msg
+    }
+
+    // Profile Management
+    fun updateProfile(displayName: String, avatarUri: String?, targetExam: String, dailyGoal: Int, bio: String) {
+        val current = _currentUser.value ?: UserSession(userId = "1235", displayName = displayName)
+        _currentUser.value = current.copy(
+            displayName = displayName,
+            avatarUri = avatarUri,
+            targetExam = targetExam,
+            dailyWordGoal = dailyGoal,
+            bio = bio
+        )
+        _statusMessage.value = "Profile updated successfully!"
     }
 
     // Auth Actions
@@ -186,15 +427,36 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         _statusMessage.value = "Signed out"
     }
 
-    // Flashcard Actions
+    // Flashcard Actions: Fix skipping bug by pre-targeting exact next word
     fun rateWord(wordId: String, status: String) {
         viewModelScope.launch {
             val uid = _currentUser.value?.userId ?: "1235"
-            repository.updateWordStatus(wordId, status, uid)
-            // advance to next word automatically
             val currentList = filteredWords.value
-            if (currentList.isNotEmpty() && currentWordIndex.value < currentList.size - 1) {
-                currentWordIndex.value += 1
+            val currentIndex = currentWordIndex.value.coerceIn(0, (currentList.size - 1).coerceAtLeast(0))
+
+            // Identify the exact card that should follow the current card
+            val nextCardId = if (currentList.size > 1) {
+                if (currentIndex < currentList.size - 1) {
+                    currentList[currentIndex + 1].id
+                } else {
+                    currentList[0].id // Wrap to start if at end
+                }
+            } else null
+
+            // Update database
+            repository.updateWordStatus(wordId, status, uid)
+
+            // Safely navigate to nextCardId in the updated list
+            if (nextCardId != null) {
+                val updatedList = filteredWords.value
+                val targetIdx = updatedList.indexOfFirst { it.id == nextCardId }
+                if (targetIdx != -1) {
+                    currentWordIndex.value = targetIdx
+                } else {
+                    currentWordIndex.value = currentIndex.coerceIn(0, (updatedList.size - 1).coerceAtLeast(0))
+                }
+            } else {
+                currentWordIndex.value = 0
             }
         }
     }
@@ -229,9 +491,81 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
             result.onSuccess {
                 _statusMessage.value = "Backup files successfully updated in: ${repository.backupManager.getBackupPathString()}"
             }.onFailure { err ->
-                _statusMessage.value = "Backup failed: ${err.message}"
+                _statusMessage.value = err.message ?: "Backup failed"
             }
         }
+    }
+
+    fun backupDirectlyToLinkedFolder() {
+        viewModelScope.launch {
+            val uid = _currentUser.value?.userId ?: "1235"
+            val result = repository.backupManager.backupDirectlyToLinkedFolder(uid)
+            result.onSuccess { msg ->
+                _statusMessage.value = msg
+            }.onFailure { err ->
+                _statusMessage.value = err.message ?: "Drive backup failed"
+            }
+        }
+    }
+
+    fun restoreDirectlyFromLinkedFolder() {
+        viewModelScope.launch {
+            val uid = _currentUser.value?.userId ?: "1235"
+            val result = repository.backupManager.restoreDirectlyFromLinkedFolder(uid)
+            result.onSuccess { count ->
+                _statusMessage.value = "Successfully restored $count items from linked Drive folder!"
+                repository.refreshProgressAndSync(uid)
+                val courses = repository.allCourses.firstOrNull() ?: emptyList()
+                if (activeCourseId.value.isBlank() && courses.isNotEmpty()) {
+                    activeCourseId.value = courses.first().id
+                }
+            }.onFailure { err ->
+                _statusMessage.value = err.message ?: "Drive restore failed"
+            }
+        }
+    }
+
+    fun refreshWidget() {
+        viewModelScope.launch {
+            try {
+                com.example.widget.DailyVocabWidgetProvider.updateAllWidgets(getApplication())
+                _statusMessage.value = "Home screen widget refreshed!"
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun exportBackupToUri(uri: Uri) {
+        viewModelScope.launch {
+            val uid = _currentUser.value?.userId ?: "1235"
+            val result = repository.backupManager.exportBackupToUri(uri, uid)
+            result.onSuccess { msg ->
+                _statusMessage.value = "Backup successfully saved to Google Drive / Storage!"
+            }.onFailure { err ->
+                _statusMessage.value = err.message ?: "Export failed"
+            }
+        }
+    }
+
+    fun restoreFromUri(uri: Uri) {
+        viewModelScope.launch {
+            val uid = _currentUser.value?.userId ?: "1235"
+            val result = repository.backupManager.restoreFromUri(uri, uid)
+            result.onSuccess { count ->
+                _statusMessage.value = "Successfully restored $count items from Google Drive / Storage!"
+                repository.refreshProgressAndSync(uid)
+                val courses = repository.allCourses.firstOrNull() ?: emptyList()
+                if (activeCourseId.value.isBlank() && courses.isNotEmpty()) {
+                    activeCourseId.value = courses.first().id
+                }
+            }.onFailure { err ->
+                _statusMessage.value = "Restore failed: ${err.message}"
+            }
+        }
+    }
+
+    suspend fun getBackupJsonText(): String {
+        val uid = _currentUser.value?.userId ?: "1235"
+        return repository.backupManager.generateBackupJsonString(uid)
     }
 
     fun triggerCloudSync() {
@@ -247,31 +581,44 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun restoreBackupContent(content: String, isJson: Boolean) {
         viewModelScope.launch {
-            val result = repository.backupManager.restoreFromFileContent(content, isJson)
+            val uid = _currentUser.value?.userId ?: "1235"
+            val result = repository.backupManager.restoreFromFileContent(content, isJson, uid)
             result.onSuccess { count ->
-                _statusMessage.value = "Successfully restored $count vocabulary words!"
-                val uid = _currentUser.value?.userId ?: "1235"
+                _statusMessage.value = "Successfully restored $count vocabulary words across courses!"
                 repository.refreshProgressAndSync(uid)
+                val courses = repository.allCourses.firstOrNull() ?: emptyList()
+                if (activeCourseId.value.isBlank() && courses.isNotEmpty()) {
+                    activeCourseId.value = courses.first().id
+                }
             }.onFailure { err ->
                 _statusMessage.value = "Restore failed: ${err.message}"
             }
         }
     }
 
-    fun setCustomBackupTreeUri(uriString: String) {
-        repository.backupManager.setCustomTreeUri(uriString)
-        _statusMessage.value = "Custom backup folder configured!"
-    }
-
     // Admin Panel Uploads
-    fun importCourseFile(content: String, isJson: Boolean, courseId: String = activeCourseId.value) {
+    fun importCourseFile(content: String, isJson: Boolean, courseId: String = activeCourseId.value, customTitle: String? = null) {
         viewModelScope.launch {
+            if (!customTitle.isNullOrBlank() && courseId.isNotBlank()) {
+                repository.updateCourseTitle(courseId, customTitle.trim())
+            }
             val uid = _currentUser.value?.userId ?: "1235"
             val result = repository.importCourseFile(content, isJson, courseId, uid)
             result.onSuccess { count ->
-                _statusMessage.value = "Imported $count words from course file!"
+                _statusMessage.value = "Imported $count words into course!"
             }.onFailure { err ->
                 _statusMessage.value = "Import failed: ${err.message}"
+            }
+        }
+    }
+
+    fun importGameItems(items: List<GamePracticeEntity>) {
+        viewModelScope.launch {
+            val result = repository.importGameItems(items)
+            result.onSuccess { count ->
+                _statusMessage.value = "Imported $count game questions successfully!"
+            }.onFailure { err ->
+                _statusMessage.value = "Game import failed: ${err.message}"
             }
         }
     }

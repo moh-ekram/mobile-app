@@ -11,6 +11,55 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
+
+data class AppPalette(
+    val isDark: Boolean,
+    val background: Color,
+    val surface: Color,
+    val cardBackground: Color,
+    val textPrimary: Color,
+    val textMuted: Color,
+    val border: Color,
+    val cardBorder: Color
+)
+
+val LocalAppPalette = staticCompositionLocalOf {
+    AppPalette(
+        isDark = false,
+        background = Color(0xFFF8FAFC),
+        surface = Color.White,
+        cardBackground = Color.White,
+        textPrimary = Color(0xFF0F172A),
+        textMuted = Color(0xFF64748B),
+        border = Color(0xFFE2E8F0),
+        cardBorder = Color(0xFFF1F5F9)
+    )
+}
+
+private val DarkAppPalette = AppPalette(
+    isDark = true,
+    background = Color(0xFF0B0F19),
+    surface = Color(0xFF151C2C),
+    cardBackground = Color(0xFF1E293B),
+    textPrimary = Color(0xFFF1F5F9),
+    textMuted = Color(0xFF94A3B8),
+    border = Color(0xFF334155),
+    cardBorder = Color(0xFF334155)
+)
+
+private val LightAppPalette = AppPalette(
+    isDark = false,
+    background = Color(0xFFF8FAFC),
+    surface = Color.White,
+    cardBackground = Color.White,
+    textPrimary = Color(0xFF0F172A),
+    textMuted = Color(0xFF64748B),
+    border = Color(0xFFE2E8F0),
+    cardBorder = Color(0xFFF1F5F9)
+)
+
 private val DarkColorScheme =
   darkColorScheme(
     primary = IndigoSecondary,
@@ -42,7 +91,7 @@ private val LightColorScheme =
 fun MyApplicationTheme(
   darkTheme: Boolean = isSystemInDarkTheme(),
   // Dynamic color is available on Android 12+
-  dynamicColor: Boolean = true,
+  dynamicColor: Boolean = false,
   content: @Composable () -> Unit,
 ) {
   val colorScheme =
@@ -56,5 +105,9 @@ fun MyApplicationTheme(
       else -> LightColorScheme
     }
 
-  MaterialTheme(colorScheme = colorScheme, typography = Typography, content = content)
+  val palette = if (darkTheme) DarkAppPalette else LightAppPalette
+
+  CompositionLocalProvider(LocalAppPalette provides palette) {
+    MaterialTheme(colorScheme = colorScheme, typography = Typography, content = content)
+  }
 }

@@ -11,6 +11,20 @@ import org.json.JSONObject
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 
+data class ParsedSheet(
+    val sheetName: String,
+    val rows: List<List<String>>
+)
+
+data class GameValidationSummary(
+    val totalQuestionsFound: Int,
+    val validCount: Int,
+    val anomalyCount: Int,
+    val sheetBreakdown: Map<String, Int>,
+    val anomalies: List<String>,
+    val validGames: List<GamePracticeEntity>
+)
+
 object FileParsers {
 
     /**
@@ -37,6 +51,9 @@ object FileParsers {
         // Map column indices
         var idIndex = -1
         var groupIndex = -1
+        var courseIdIndex = -1
+        var courseTitleIndex = -1
+        var statusIndex = -1
         var wordIndex = -1
         var meaningIndex = -1
         var exampleIndex = -1
@@ -48,15 +65,30 @@ object FileParsers {
 
         headers.forEachIndexed { index, rawHeader ->
             val lower = rawHeader.lowercase()
-            val cleanLabel = if (rawHeader.contains(":")) rawHeader.substringAfter(":").trim() else rawHeader.trim()
+            var cleanLabel = if (rawHeader.contains(":")) rawHeader.substringAfter(":").trim() else rawHeader.trim()
+            cleanLabel = cleanLabel.replace(Regex("""(?i)^place\s*\d+\s*[-_:]?\s*"""), "").trim()
+            cleanLabel = cleanLabel.replace(Regex("""(?i)\s*\(place\s*\d+\)"""), "").trim()
+            if (cleanLabel.isBlank()) {
+                cleanLabel = when {
+                    lower.contains("1") -> "Word"
+                    lower.contains("2") -> "Meaning"
+                    lower.contains("3") -> "Example"
+                    lower.contains("4") -> "Synonyms"
+                    lower.contains("5") -> "Forms"
+                    else -> rawHeader.trim()
+                }
+            }
 
             when {
                 lower == "id" -> idIndex = index
                 lower == "group" -> groupIndex = index
+                lower == "courseid" || lower == "course_id" -> courseIdIndex = index
+                lower == "coursetitle" || lower == "course_title" || lower == "coursename" -> courseTitleIndex = index
+                lower == "status" -> statusIndex = index
                 lower.startsWith("place1") || (wordIndex == -1 && (lower.contains("word") || lower == "term" || lower == "vocabulary")) -> {
                     wordIndex = index
                 }
-                lower.startsWith("place2") || (meaningIndex == -1 && (lower.contains("meaning") || lower.contains("definition") || lower.contains("bangla") || lower.contains("অর্থ"))) -> {
+                lower.startsWith("place2") || (meaningIndex == -1 && (lower.contains("meaning") || lower.contains("definition") || lower.contains("translation"))) -> {
                     meaningIndex = index
                     customPlacesMap[index] = cleanLabel
                 }
@@ -65,7 +97,7 @@ object FileParsers {
                     val labelLower = cleanLabel.lowercase()
                     when {
                         labelLower.contains("word") && wordIndex == -1 -> wordIndex = index
-                        labelLower.contains("meaning") || labelLower.contains("bangla") || labelLower.contains("অর্থ") -> {
+                        labelLower.contains("meaning") || labelLower.contains("definition") || labelLower.contains("translation") -> {
                             if (meaningIndex == -1) meaningIndex = index
                         }
                         labelLower.contains("example") || labelLower.contains("sentence") -> exampleIndex = index
@@ -93,7 +125,12 @@ object FileParsers {
             val values = parseCsvLine(lines[i])
             if (values.isEmpty()) continue
 
-            val id = if (idIndex in values.indices && values[idIndex].isNotBlank()) values[idIndex].trim() else "word_${courseId}_$i"
+            val rowCourseId = if (courseIdIndex in values.indices && values[courseIdIndex].isNotBlank()) {
+                values[courseIdIndex].trim()
+            } else {
+                courseId
+            }
+            val id = if (idIndex in values.indices && values[idIndex].isNotBlank()) values[idIndex].trim() else "word_${rowCourseId}_$i"
             val group = if (groupIndex in values.indices) values[groupIndex].trim().toIntOrNull() ?: 1 else 1
             val word = if (wordIndex in values.indices) values[wordIndex].trim() else "Word $i"
             val meaning = if (meaningIndex in values.indices) values[meaningIndex].trim() else ""
@@ -101,6 +138,7 @@ object FileParsers {
             val synonyms = if (synonymsIndex in values.indices && values[synonymsIndex].isNotBlank()) values[synonymsIndex].trim() else null
             val extraWord = if (extraIndex in values.indices && values[extraIndex].isNotBlank()) values[extraIndex].trim() else null
             val mnemonic = if (mnemonicIndex in values.indices && values[mnemonicIndex].isNotBlank()) values[mnemonicIndex].trim() else null
+            val status = if (statusIndex in values.indices && values[statusIndex].isNotBlank()) values[statusIndex].trim() else "unrated"
 
             // Record custom places exactly as present in this row
             val placeJsonObj = JSONObject()
@@ -121,8 +159,9 @@ object FileParsers {
                         extraWord = extraWord,
                         example = example,
                         mnemonic = mnemonic,
+                        status = status,
                         customPlacesJson = if (placeJsonObj.length() > 0) placeJsonObj.toString() else null,
-                        courseId = courseId
+                        courseId = rowCourseId
                     )
                 )
             }
@@ -132,84 +171,154 @@ object FileParsers {
 
     /**
      * Parses Game/Practice CSV/Excel.
-     * Columns: Id*, Question*, Opt1*, Opt2*, Opt3*, Opt4*, Ans*, Explanation
-     * If Ans is missing or empty, detects which Opt has '#'
+     * Validates and returns valid GamePracticeEntity items.
      */
     fun parseGameCsv(content: String, defaultSheetType: String = "practice"): List<GamePracticeEntity> {
+        return validateAndParseGameCsv(content, defaultSheetType).validGames
+    }
+
+    /**
+     * Validates and parses Game/Practice data from CSV text with detailed anomaly reporting.
+     */
+    fun validateAndParseGameCsv(content: String, defaultSheetType: String = "practice"): GameValidationSummary {
         val lines = content.lines().filter { it.isNotBlank() }
-        if (lines.size < 2) return emptyList()
+        val rows = lines.map { parseCsvLine(it) }
+        return validateAndParseGameSheets(listOf(ParsedSheet(defaultSheetType, rows)))
+    }
 
-        val headers = parseCsvLine(lines[0]).map { it.trim().lowercase() }
-        val idIdx = headers.indexOfFirst { it == "id" || it == "id*" }
-        val qIdx = headers.indexOfFirst { it.contains("question") }
-        val opt1Idx = headers.indexOfFirst { it.contains("opt1") }
-        val opt2Idx = headers.indexOfFirst { it.contains("opt2") }
-        val opt3Idx = headers.indexOfFirst { it.contains("opt3") }
-        val opt4Idx = headers.indexOfFirst { it.contains("opt4") }
-        val ansIdx = headers.indexOfFirst { it.contains("ans") }
-        val expIdx = headers.indexOfFirst { it.contains("explanation") }
+    /**
+     * Validates and parses multiple sheets of Game/Practice data.
+     * Identifies anomalies such as missing questions, answers, or insufficient options.
+     */
+    fun validateAndParseGameSheets(sheets: List<ParsedSheet>): GameValidationSummary {
+        var totalFound = 0
+        val validGames = mutableListOf<GamePracticeEntity>()
+        val anomalies = mutableListOf<String>()
+        val sheetBreakdown = mutableMapOf<String, Int>()
 
-        val result = mutableListOf<GamePracticeEntity>()
+        for (sheet in sheets) {
+            if (sheet.rows.size < 2) continue
+            val headers = sheet.rows[0].map { it.trim().lowercase() }
 
-        for (i in 1 until lines.size) {
-            val values = parseCsvLine(lines[i])
-            if (values.size <= maxOf(opt1Idx, qIdx)) continue
+            var qIdx = headers.indexOfFirst {
+                it.contains("question") || it.contains("ques") || it.contains("prompt") || it.contains("sentence")
+            }
+            var opt1Idx = headers.indexOfFirst {
+                it.contains("opt1") || it.contains("opt 1") || it.contains("option 1") || it.contains("choice 1") || it == "a" || it == "opt_1"
+            }
+            var opt2Idx = headers.indexOfFirst {
+                it.contains("opt2") || it.contains("opt 2") || it.contains("option 2") || it.contains("choice 2") || it == "b" || it == "opt_2"
+            }
+            var opt3Idx = headers.indexOfFirst {
+                it.contains("opt3") || it.contains("opt 3") || it.contains("option 3") || it.contains("choice 3") || it == "c" || it == "opt_3"
+            }
+            var opt4Idx = headers.indexOfFirst {
+                it.contains("opt4") || it.contains("opt 4") || it.contains("option 4") || it.contains("choice 4") || it == "d" || it == "opt_4"
+            }
+            var ansIdx = headers.indexOfFirst {
+                it.contains("ans") || it.contains("answer") || it.contains("correct") || it.contains("solution") || it.contains("key")
+            }
+            val expIdx = headers.indexOfFirst {
+                it.contains("expl") || it.contains("hint") || it.contains("note") || it.contains("reason")
+            }
+            val idIdx = headers.indexOfFirst { it == "id" || it == "id*" || it.contains("qid") }
+            val typeIdx = headers.indexOfFirst { it.contains("sheettype") || it.contains("gametype") || it == "type" || it == "mode" }
 
-            val id = if (idIdx in values.indices && values[idIdx].isNotBlank()) values[idIdx].trim() else "game_$i"
-            val question = if (qIdx in values.indices) values[qIdx].trim() else ""
-            var opt1 = if (opt1Idx in values.indices) values[opt1Idx].trim() else ""
-            var opt2 = if (opt2Idx in values.indices) values[opt2Idx].trim() else ""
-            var opt3 = if (opt3Idx in values.indices) values[opt3Idx].trim() else ""
-            var opt4 = if (opt4Idx in values.indices) values[opt4Idx].trim() else ""
-            var answer = if (ansIdx in values.indices) values[ansIdx].trim() else ""
-            val explanation = if (expIdx in values.indices) values[expIdx].trim() else null
-
-            // If answer is empty, check which option has '#'
-            if (answer.isBlank()) {
-                when {
-                    opt1.contains("#") -> {
-                        opt1 = opt1.replace("#", "").trim()
-                        answer = opt1
-                    }
-                    opt2.contains("#") -> {
-                        opt2 = opt2.replace("#", "").trim()
-                        answer = opt2
-                    }
-                    opt3.contains("#") -> {
-                        opt3 = opt3.replace("#", "").trim()
-                        answer = opt3
-                    }
-                    opt4.contains("#") -> {
-                        opt4 = opt4.replace("#", "").trim()
-                        answer = opt4
-                    }
-                    else -> answer = opt1
-                }
-            } else {
-                // If answer was specified e.g. "Opt1" or "1" or exact text
-                if (answer.equals("Opt1", true) || answer == "1") answer = opt1
-                else if (answer.equals("Opt2", true) || answer == "2") answer = opt2
-                else if (answer.equals("Opt3", true) || answer == "3") answer = opt3
-                else if (answer.equals("Opt4", true) || answer == "4") answer = opt4
+            // Intelligent fallbacks if column headers are non-standard
+            if (qIdx == -1 && headers.isNotEmpty()) {
+                qIdx = if (headers.size >= 2 && (headers[0].contains("id") || headers[0] == "#")) 1 else 0
+            }
+            if (opt1Idx == -1 && headers.size >= 5) {
+                opt1Idx = qIdx + 1
+                opt2Idx = qIdx + 2
+                opt3Idx = qIdx + 3
+                opt4Idx = qIdx + 4
             }
 
-            if (question.isNotBlank()) {
-                result.add(
-                    GamePracticeEntity(
-                        id = id,
-                        sheetType = defaultSheetType,
-                        question = question,
-                        opt1 = opt1,
-                        opt2 = opt2,
-                        opt3 = opt3,
-                        opt4 = opt4,
-                        answer = answer,
-                        explanation = explanation
+            var sheetValidCount = 0
+
+            for (r in 1 until sheet.rows.size) {
+                val row = sheet.rows[r]
+                if (row.all { it.isBlank() }) continue
+
+                totalFound++
+                val rowNum = r + 1
+
+                val id = if (idIdx in row.indices && row[idIdx].isNotBlank()) row[idIdx].trim() else "game_${sheet.sheetName.lowercase()}_$r"
+                val question = if (qIdx in row.indices) row[qIdx].trim() else ""
+                var opt1 = if (opt1Idx in row.indices) row[opt1Idx].trim() else ""
+                var opt2 = if (opt2Idx in row.indices) row[opt2Idx].trim() else ""
+                var opt3 = if (opt3Idx in row.indices) row[opt3Idx].trim() else ""
+                var opt4 = if (opt4Idx in row.indices) row[opt4Idx].trim() else ""
+                var answer = if (ansIdx in row.indices) row[ansIdx].trim() else ""
+                val explanation = if (expIdx in row.indices && row[expIdx].isNotBlank()) row[expIdx].trim() else null
+                val sheetType = if (typeIdx in row.indices && row[typeIdx].isNotBlank()) row[typeIdx].trim() else sheet.sheetName
+
+                // Handle '#' indicator in options if answer column is empty
+                if (answer.isBlank()) {
+                    when {
+                        opt1.contains("#") -> { opt1 = opt1.replace("#", "").trim(); answer = opt1 }
+                        opt2.contains("#") -> { opt2 = opt2.replace("#", "").trim(); answer = opt2 }
+                        opt3.contains("#") -> { opt3 = opt3.replace("#", "").trim(); answer = opt3 }
+                        opt4.contains("#") -> { opt4 = opt4.replace("#", "").trim(); answer = opt4 }
+                    }
+                } else {
+                    // Match option index / letter to actual option text
+                    when (answer.trim().lowercase()) {
+                        "opt1", "1", "a" -> answer = opt1
+                        "opt2", "2", "b" -> answer = opt2
+                        "opt3", "3", "c" -> answer = opt3
+                        "opt4", "4", "d" -> answer = opt4
+                    }
+                }
+
+                // Anomaly Detection
+                val rowAnomalies = mutableListOf<String>()
+                if (question.isBlank()) {
+                    rowAnomalies.add("Row $rowNum [${sheet.sheetName}]: Question is empty")
+                }
+                val validOptions = listOf(opt1, opt2, opt3, opt4).filter { it.isNotBlank() }
+                if (validOptions.size < 2) {
+                    rowAnomalies.add("Row $rowNum [${sheet.sheetName}]: At least 2 options required (found ${validOptions.size})")
+                }
+                if (answer.isBlank()) {
+                    val promptPreview = if (question.length > 22) question.take(22) + "..." else question
+                    rowAnomalies.add("Row $rowNum [${sheet.sheetName}] ('$promptPreview'): Missing Answer (no Ans column or '#' in option)")
+                }
+
+                if (rowAnomalies.isNotEmpty()) {
+                    anomalies.addAll(rowAnomalies)
+                } else {
+                    sheetValidCount++
+                    validGames.add(
+                        GamePracticeEntity(
+                            id = id,
+                            sheetType = sheetType.lowercase().trim(),
+                            question = question,
+                            opt1 = opt1,
+                            opt2 = opt2,
+                            opt3 = opt3,
+                            opt4 = opt4,
+                            answer = answer,
+                            explanation = explanation
+                        )
                     )
-                )
+                }
+            }
+
+            if (sheetValidCount > 0) {
+                sheetBreakdown[sheet.sheetName] = sheetValidCount
             }
         }
-        return result
+
+        return GameValidationSummary(
+            totalQuestionsFound = totalFound,
+            validCount = validGames.size,
+            anomalyCount = anomalies.size,
+            sheetBreakdown = sheetBreakdown,
+            anomalies = anomalies,
+            validGames = validGames
+        )
     }
 
     /**
@@ -330,7 +439,8 @@ object FileParsers {
 
         for (i in 0 until root.length()) {
             val item = root.getJSONObject(i)
-            val id = item.optString("id", "word_${courseId}_$i")
+            val rowCourseId = item.optString("courseId", courseId).ifBlank { courseId }
+            val id = item.optString("id", "word_${rowCourseId}_$i")
             val word = item.optString("word", item.optString("Word", ""))
             val meaning = item.optString("meaning", item.optString("Meaning", ""))
             val group = item.optInt("group", item.optInt("Group", 1))
@@ -352,7 +462,7 @@ object FileParsers {
                         example = example,
                         mnemonic = mnemonic,
                         status = status,
-                        courseId = courseId
+                        courseId = rowCourseId
                     )
                 )
             }
@@ -398,14 +508,27 @@ object FileParsers {
 
     /**
      * Parses an OpenXML Excel file (.xlsx) from an InputStream into a list of row values.
+     * Returns rows from the first sheet or combines rows.
      */
     fun parseXlsx(inputStream: InputStream): List<List<String>> {
+        val sheets = parseMultiSheetXlsx(inputStream)
+        return sheets.firstOrNull()?.rows ?: emptyList()
+    }
+
+    /**
+     * Parses all sheets in an OpenXML Excel file (.xlsx) preserving sheet names.
+     */
+    fun parseMultiSheetXlsx(inputStream: InputStream): List<ParsedSheet> {
         val entries = mutableMapOf<String, ByteArray>()
         ZipInputStream(inputStream).use { zis ->
             var entry = zis.nextEntry
             while (entry != null) {
                 val name = entry.name.lowercase()
-                if (name.endsWith("sharedstrings.xml") || (name.contains("worksheets/sheet") && name.endsWith(".xml"))) {
+                if (name.endsWith("sharedstrings.xml") ||
+                    name.endsWith("workbook.xml") ||
+                    name.endsWith("workbook.xml.rels") ||
+                    (name.contains("worksheets/sheet") && name.endsWith(".xml"))
+                ) {
                     entries[name] = zis.readBytes()
                 }
                 zis.closeEntry()
@@ -417,12 +540,91 @@ object FileParsers {
             parseSharedStrings(ByteArrayInputStream(it.value))
         } ?: emptyList()
 
-        // Prioritize sheet1.xml or first found worksheet
-        val sheetBytes = entries.entries.find { it.key.endsWith("sheet1.xml") }?.value
-            ?: entries.entries.find { it.key.contains("worksheets/sheet") && it.key.endsWith(".xml") }?.value
-            ?: return emptyList()
+        val sheetList = parseWorkbookSheetNames(entries)
+        val result = mutableListOf<ParsedSheet>()
 
-        return parseSheetXml(ByteArrayInputStream(sheetBytes), sharedStrings)
+        if (sheetList.isNotEmpty()) {
+            for (sheetInfo in sheetList) {
+                val targetClean = sheetInfo.filePath.lowercase().trimStart('/')
+                val bytes = entries[targetClean]
+                    ?: entries["xl/$targetClean"]
+                    ?: entries.entries.find { it.key.endsWith(targetClean) }?.value
+                if (bytes != null) {
+                    val rows = parseSheetXml(ByteArrayInputStream(bytes), sharedStrings)
+                    if (rows.isNotEmpty()) {
+                        result.add(ParsedSheet(sheetInfo.name, rows))
+                    }
+                }
+            }
+        }
+
+        // Fallback: If no sheets matched via workbook.xml, parse any sheet*.xml
+        if (result.isEmpty()) {
+            val sheetEntries = entries.entries
+                .filter { it.key.contains("worksheets/sheet") && it.key.endsWith(".xml") }
+                .sortedBy { it.key }
+            for (e in sheetEntries) {
+                val rows = parseSheetXml(ByteArrayInputStream(e.value), sharedStrings)
+                if (rows.isNotEmpty()) {
+                    val defaultName = e.key.substringAfterLast("/").removeSuffix(".xml")
+                        .replaceFirstChar { it.uppercase() }
+                    result.add(ParsedSheet(defaultName, rows))
+                }
+            }
+        }
+
+        return result
+    }
+
+    private data class SheetMeta(val name: String, val filePath: String)
+
+    private fun parseWorkbookSheetNames(entries: Map<String, ByteArray>): List<SheetMeta> {
+        val wbBytes = entries.entries.find { it.key.endsWith("workbook.xml") }?.value ?: return emptyList()
+        val relsBytes = entries.entries.find { it.key.endsWith("workbook.xml.rels") }?.value
+
+        val rIdToTarget = mutableMapOf<String, String>()
+        if (relsBytes != null) {
+            try {
+                val factory = XmlPullParserFactory.newInstance()
+                factory.isNamespaceAware = false
+                val parser = factory.newPullParser()
+                parser.setInput(ByteArrayInputStream(relsBytes), "UTF-8")
+                var event = parser.eventType
+                while (event != XmlPullParser.END_DOCUMENT) {
+                    if (event == XmlPullParser.START_TAG && parser.name.equals("relationship", ignoreCase = true)) {
+                        val id = parser.getAttributeValue(null, "Id")
+                        val target = parser.getAttributeValue(null, "Target")
+                        if (id != null && target != null) {
+                            rIdToTarget[id] = target
+                        }
+                    }
+                    event = parser.next()
+                }
+            } catch (_: Exception) {}
+        }
+
+        val result = mutableListOf<SheetMeta>()
+        try {
+            val factory = XmlPullParserFactory.newInstance()
+            factory.isNamespaceAware = false
+            val parser = factory.newPullParser()
+            parser.setInput(ByteArrayInputStream(wbBytes), "UTF-8")
+            var event = parser.eventType
+            var sheetIndex = 1
+            while (event != XmlPullParser.END_DOCUMENT) {
+                if (event == XmlPullParser.START_TAG && parser.name.equals("sheet", ignoreCase = true)) {
+                    val name = parser.getAttributeValue(null, "name") ?: "Sheet$sheetIndex"
+                    val rId = parser.getAttributeValue(null, "r:id")
+                        ?: parser.getAttributeValue("http://schemas.openxmlformats.org/officeDocument/2006/relationships", "id")
+                        ?: "rId$sheetIndex"
+                    val target = rIdToTarget[rId] ?: "worksheets/sheet$sheetIndex.xml"
+                    result.add(SheetMeta(name, target))
+                    sheetIndex++
+                }
+                event = parser.next()
+            }
+        } catch (_: Exception) {}
+        return result
     }
 
     private fun parseSharedStrings(input: InputStream): List<String> {

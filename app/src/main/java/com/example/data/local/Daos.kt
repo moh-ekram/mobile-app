@@ -26,12 +26,18 @@ interface CourseDao {
 
     @Query("DELETE FROM courses WHERE id = :id")
     suspend fun deleteCourseById(id: String)
+
+    @Query("UPDATE courses SET title = :newTitle WHERE id = :courseId")
+    suspend fun updateCourseTitle(courseId: String, newTitle: String)
 }
 
 @Dao
 interface ArticleDao {
     @Query("SELECT * FROM saved_articles ORDER BY createdAt DESC")
     fun getAllArticles(): Flow<List<ArticleEntity>>
+
+    @Query("SELECT * FROM saved_articles ORDER BY createdAt DESC")
+    suspend fun getAllArticlesList(): List<ArticleEntity>
 
     @Query("SELECT * FROM saved_articles WHERE courseId = :courseId ORDER BY createdAt DESC")
     fun getArticlesByCourse(courseId: String): Flow<List<ArticleEntity>>
@@ -41,6 +47,9 @@ interface ArticleDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertArticle(article: ArticleEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertArticles(articles: List<ArticleEntity>)
 
     @Delete
     suspend fun deleteArticle(article: ArticleEntity)

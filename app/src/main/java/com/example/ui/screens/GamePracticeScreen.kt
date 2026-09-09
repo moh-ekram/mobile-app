@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -11,10 +12,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CompareArrows
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.FilterAlt
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Quiz
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -28,8 +36,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.ArticleEntity
 import com.example.data.model.GamePracticeEntity
 import com.example.data.model.QuestionBankEntity
+import com.example.data.model.VocabularyWordEntity
 import com.example.ui.theme.*
 
 @Composable
@@ -37,10 +47,22 @@ fun GamePracticeScreen(
     games: List<GamePracticeEntity>,
     questions: List<QuestionBankEntity>,
     onCompleteQuiz: (score: Int, total: Int) -> Unit,
+    articles: List<ArticleEntity> = emptyList(),
+    activeArticle: ArticleEntity? = null,
+    words: List<VocabularyWordEntity> = emptyList(),
+    onSelectArticle: (ArticleEntity?) -> Unit = {},
+    onSaveArticle: (title: String, content: String, author: String, id: String?) -> Unit = { _, _, _, _ -> },
+    onDeleteArticle: (String) -> Unit = {},
+    onRateWord: (wordId: String, status: String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
-    // Top Tabs: "odd_one_out", "analogy", "practice", "question_bank"
-    var selectedTab by remember { mutableStateOf("odd_one_out") }
+    // Top Section: null means list menu of categories; non-null opens dedicated section
+    var selectedSection by remember { mutableStateOf<String?>(null) }
+
+    // Intercept back button when in a game/practice section to return to Games menu
+    BackHandler(enabled = selectedSection != null) {
+        selectedSection = null
+    }
 
     // Active Quiz State
     var activeQuestions by remember { mutableStateOf<List<QuizQuestionItem>>(emptyList()) }
@@ -56,8 +78,8 @@ fun GamePracticeScreen(
     var qbFilter3 by remember { mutableStateOf<String?>(null) }
     var qbQuestionCount by remember { mutableIntStateOf(5) }
 
-    fun startQuizForCategory(tab: String) {
-        val list = when (tab) {
+    fun startQuizForCategory(section: String) {
+        val list = when (section) {
             "odd_one_out" -> games.filter { it.sheetType == "odd_one_out" }.map { it.toQuizItem() }
             "analogy" -> games.filter { it.sheetType == "analogy" }.map { it.toQuizItem() }
             "practice" -> games.filter { it.sheetType == "practice" }.map { it.toQuizItem() }
@@ -79,81 +101,183 @@ fun GamePracticeScreen(
         isQuizCompleted = false
     }
 
-    // Auto-start or refresh when tab switches
-    LaunchedEffect(selectedTab, games, questions) {
-        if (selectedTab != "question_bank") {
-            startQuizForCategory(selectedTab)
-        }
-    }
-
     Column(
         modifier = modifier
             .fillMaxSize()
             .background(SlateBg)
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
-        // Tab Selector Row
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            val tabs = listOf(
-                "odd_one_out" to "Odd One Out",
-                "analogy" to "Analogy",
-                "practice" to "Practice Quiz",
-                "question_bank" to "Question Bank (QB)"
-            )
-            tabs.forEach { (tabId, label) ->
-                FilterChip(
-                    selected = selectedTab == tabId,
-                    onClick = {
-                        selectedTab = tabId
-                        if (tabId != "question_bank") {
-                            startQuizForCategory(tabId)
-                        } else {
-                            activeQuestions = emptyList() // Show filter setup first
+        if (selectedSection == null) {
+            // LIST VIEW: User sees the list-type buttons for each game & practice section
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                item {
+                    Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                        Text(
+                            text = "Games & Practice",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = SlateText
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Choose a practice mode",
+                            fontSize = 12.sp,
+                            color = SlateMuted
+                        )
+                    }
+                }
+
+                // 1. Odd One Out
+                item {
+                    GameCategoryCard(
+                        title = "Odd One Out",
+                        description = "Find the odd word out",
+                        count = games.count { it.sheetType == "odd_one_out" },
+                        icon = Icons.Default.FilterAlt,
+                        badgeColor = Color(0xFF8B5CF6),
+                        onClick = {
+                            selectedSection = "odd_one_out"
+                            startQuizForCategory("odd_one_out")
+                        }
+                    )
+                }
+
+                // 2. Analogy Practice
+                item {
+                    GameCategoryCard(
+                        title = "Analogy Practice",
+                        description = "Match word relationship pairs",
+                        count = games.count { it.sheetType == "analogy" },
+                        icon = Icons.Default.CompareArrows,
+                        badgeColor = Color(0xFF0284C7),
+                        onClick = {
+                            selectedSection = "analogy"
+                            startQuizForCategory("analogy")
+                        }
+                    )
+                }
+
+                // 3. Practice Quiz
+                item {
+                    GameCategoryCard(
+                        title = "Practice Quiz",
+                        description = "Test your vocabulary knowledge",
+                        count = games.count { it.sheetType == "practice" },
+                        icon = Icons.Default.Quiz,
+                        badgeColor = EmeraldSuccess,
+                        onClick = {
+                            selectedSection = "practice"
+                            startQuizForCategory("practice")
+                        }
+                    )
+                }
+
+                // 4. Question Bank
+                item {
+                    GameCategoryCard(
+                        title = "Question Bank (QB)",
+                        description = "Practice targeted exam questions",
+                        count = questions.size,
+                        icon = Icons.Default.AccountBalance,
+                        badgeColor = AmberWarning,
+                        onClick = {
+                            selectedSection = "question_bank"
+                            activeQuestions = emptyList()
                             isQuizCompleted = false
                         }
-                    },
-                    label = { Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) },
-                    shape = CircleShape,
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = IndigoPrimary,
-                        selectedLabelColor = Color.White
                     )
+                }
+
+                // 5. Read Article
+                item {
+                    GameCategoryCard(
+                        title = "Read Article",
+                        description = "Read articles with highlights",
+                        count = articles.size,
+                        icon = Icons.Default.MenuBook,
+                        badgeColor = RoseError,
+                        onClick = {
+                            selectedSection = "read_article"
+                            onSelectArticle(null)
+                        }
+                    )
+                }
+            }
+        } else {
+            // DEDICATED SECTION VIEW
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = {
+                        selectedSection = null
+                        activeQuestions = emptyList()
+                        isQuizCompleted = false
+                        onSelectArticle(null)
+                    }
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back to Games Hub",
+                        tint = SlateText
+                    )
+                }
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = when (selectedSection) {
+                        "odd_one_out" -> "Odd One Out"
+                        "analogy" -> "Analogy Practice"
+                        "practice" -> "Practice Quiz"
+                        "question_bank" -> "Question Bank (QB)"
+                        "read_article" -> "Read Article"
+                        else -> "Practice"
+                    },
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = SlateText
                 )
             }
-        }
 
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // Question Bank Filter Config View
-        if (selectedTab == "question_bank" && activeQuestions.isEmpty() && !isQuizCompleted) {
-            QuestionBankConfigView(
-                questions = questions,
-                selectedFilter1 = qbFilter1,
-                selectedFilter2 = qbFilter2,
-                selectedFilter3 = qbFilter3,
-                questionCount = qbQuestionCount,
-                onFilter1Change = { qbFilter1 = it },
-                onFilter2Change = { qbFilter2 = it },
-                onFilter3Change = { qbFilter3 = it },
-                onCountChange = { qbQuestionCount = it },
-                onStart = { startQuizForCategory("question_bank") }
-            )
-            return@Column
-        }
-
-        // Active Quiz or Result View
-        if (isQuizCompleted) {
-            QuizSummaryView(
-                score = currentScore,
-                total = activeQuestions.size,
-                onRetake = { startQuizForCategory(selectedTab) }
-            )
-        } else if (activeQuestions.isNotEmpty()) {
+            // Read Article View (Integrated inside Games)
+            if (selectedSection == "read_article") {
+                ArticleReaderView(
+                    articles = articles,
+                    activeArticle = activeArticle,
+                    words = words,
+                    onSelectArticle = onSelectArticle,
+                    onSaveArticle = onSaveArticle,
+                    onDeleteArticle = onDeleteArticle,
+                    onRateWord = onRateWord,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else if (selectedSection == "question_bank" && activeQuestions.isEmpty() && !isQuizCompleted) {
+                QuestionBankConfigView(
+                    questions = questions,
+                    selectedFilter1 = qbFilter1,
+                    selectedFilter2 = qbFilter2,
+                    selectedFilter3 = qbFilter3,
+                    questionCount = qbQuestionCount,
+                    onFilter1Change = { qbFilter1 = it },
+                    onFilter2Change = { qbFilter2 = it },
+                    onFilter3Change = { qbFilter3 = it },
+                    onCountChange = { qbQuestionCount = it },
+                    onStart = { startQuizForCategory("question_bank") }
+                )
+            } else if (isQuizCompleted) {
+                QuizSummaryView(
+                    score = currentScore,
+                    total = activeQuestions.size,
+                    onRetake = { startQuizForCategory(selectedSection ?: "odd_one_out") }
+                )
+            } else if (activeQuestions.isNotEmpty()) {
             val currentQ = activeQuestions[currentQuestionIdx]
 
             Card(
@@ -180,14 +304,14 @@ fun GamePracticeScreen(
                         ) {
                             Text(
                                 text = "Question ${currentQuestionIdx + 1} of ${activeQuestions.size}",
-                                fontFamily = FontFamily.SansSerif,
+                                fontFamily = PoppinsFontFamily,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = IndigoPrimary
                             )
                             Text(
                                 text = "Score: $currentScore",
-                                fontFamily = FontFamily.SansSerif,
+                                fontFamily = PoppinsFontFamily,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = EmeraldSuccess
@@ -211,7 +335,7 @@ fun GamePracticeScreen(
                         // Question Title
                         Text(
                             text = currentQ.question,
-                            fontFamily = FontFamily.SansSerif,
+                            fontFamily = PoppinsFontFamily,
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
                             color = SlateText,
@@ -258,7 +382,7 @@ fun GamePracticeScreen(
                                     ) {
                                         Text(
                                             text = "${('A' + idx)}.  $opt",
-                                            fontFamily = FontFamily.SansSerif,
+                                            fontFamily = PoppinsFontFamily,
                                             fontSize = 14.sp,
                                             fontWeight = if (isSelected || (isSubmitted && isCorrect)) FontWeight.Bold else FontWeight.Medium,
                                             color = btnText,
@@ -298,7 +422,7 @@ fun GamePracticeScreen(
                                 Column(modifier = Modifier.padding(14.dp)) {
                                     Text(
                                         text = "EXPLANATION",
-                                        fontFamily = FontFamily.SansSerif,
+                                        fontFamily = PoppinsFontFamily,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = IndigoPrimary
@@ -306,7 +430,7 @@ fun GamePracticeScreen(
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
                                         text = currentQ.explanation ?: "",
-                                        fontFamily = FontFamily.SansSerif,
+                                        fontFamily = PoppinsFontFamily,
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Normal,
                                         color = SlateText,
@@ -340,7 +464,7 @@ fun GamePracticeScreen(
                             ) {
                                 Text(
                                     text = if (currentQuestionIdx < activeQuestions.size - 1) "Next Question" else "Finish & View Results",
-                                    fontFamily = FontFamily.SansSerif,
+                                    fontFamily = PoppinsFontFamily,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
@@ -367,6 +491,7 @@ fun GamePracticeScreen(
             }
         }
     }
+}
 }
 
 @Composable
@@ -408,14 +533,14 @@ private fun QuestionBankConfigView(
                 ) {
                     Text(
                         text = "Customize Question Bank Test",
-                        fontFamily = FontFamily.SansSerif,
+                        fontFamily = PoppinsFontFamily,
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold,
                         color = SlateText
                     )
                     Text(
-                        text = "Configure filters and set the number of questions before starting.",
-                        fontFamily = FontFamily.SansSerif,
+                        text = "Set filters before starting test",
+                        fontFamily = PoppinsFontFamily,
                         fontSize = 12.sp,
                         color = SlateMuted
                     )
@@ -585,7 +710,7 @@ private fun QuizSummaryView(
 
             Text(
                 text = "Practice Complete!",
-                fontFamily = FontFamily.SansSerif,
+                fontFamily = PoppinsFontFamily,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = SlateText
@@ -593,15 +718,15 @@ private fun QuizSummaryView(
 
             Text(
                 text = "Your score: $score / $total ($percent%)",
-                fontFamily = FontFamily.SansSerif,
+                fontFamily = PoppinsFontFamily,
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Bold,
                 color = if (percent >= 70) EmeraldSuccess else RoseError
             )
 
             Text(
-                text = if (percent >= 70) "Awesome job! You are memorizing well." else "Keep practicing to reinforce your memory.",
-                fontFamily = FontFamily.SansSerif,
+                text = if (percent >= 70) "Great score, keep it up!" else "Keep practicing to improve scores",
+                fontFamily = PoppinsFontFamily,
                 fontSize = 13.sp,
                 color = SlateMuted,
                 textAlign = TextAlign.Center
@@ -625,6 +750,93 @@ private fun QuizSummaryView(
                     Text("Try Another Round", fontWeight = FontWeight.Bold)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun GameCategoryCard(
+    title: String,
+    description: String,
+    count: Int,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    badgeColor: Color,
+    onClick: () -> Unit
+) {
+    Card(
+        onClick = onClick,
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(SlateBorder)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("game_category_${title.lowercase().replace(" ", "_")}")
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(badgeColor.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = badgeColor,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = title,
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = SlateText
+                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(badgeColor.copy(alpha = 0.15f))
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "$count",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = badgeColor
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = description,
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    color = SlateMuted
+                )
+            }
+
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = SlateLight,
+                modifier = Modifier.size(22.dp)
+            )
         }
     }
 }

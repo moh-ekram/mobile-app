@@ -1,7 +1,12 @@
 package com.example
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.Crossfade
@@ -10,6 +15,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -27,17 +33,79 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.screens.*
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.MemorizerViewModel
+import com.example.widget.DailyVocabWidgetProvider
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val action = intent?.action
+            if (action == Intent.ACTION_SCREEN_ON || action == Intent.ACTION_USER_PRESENT) {
+                context?.let { ctx ->
+                    val prefs = ctx.getSharedPreferences(DailyVocabWidgetProvider.PREFS_NAME, Context.MODE_PRIVATE)
+                    val onHomeReturn = prefs.getBoolean(DailyVocabWidgetProvider.KEY_ROTATE_ON_HOME_RETURN, true)
+                    if (onHomeReturn) {
+                        DailyVocabWidgetProvider.updateAllWidgets(ctx)
+                    }
+                }
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // Start frequent 10-second background ticker
+        DailyVocabWidgetProvider.startFrequentTicker(this)
+
+        // Register screen wake / unlock receiver for instant widget updates
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_USER_PRESENT)
+        }
+        registerReceiver(screenReceiver, filter)
+
         setContent {
-            MyApplicationTheme {
-                MemorizerApp()
+            val viewModel: MemorizerViewModel = viewModel()
+            val isDarkTheme by viewModel.isDarkTheme.collectAsState()
+            MyApplicationTheme(darkTheme = isDarkTheme) {
+                MemorizerApp(viewModel = viewModel)
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        DailyVocabWidgetProvider.startFrequentTicker(this)
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        // Called when user presses Home or switches apps to leave to home screen
+        triggerHomeReturnUpdate()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Ensure widget is freshly updated when app goes into background/home
+        triggerHomeReturnUpdate()
+    }
+
+    private fun triggerHomeReturnUpdate() {
+        val prefs = getSharedPreferences(DailyVocabWidgetProvider.PREFS_NAME, Context.MODE_PRIVATE)
+        val onHomeReturn = prefs.getBoolean(DailyVocabWidgetProvider.KEY_ROTATE_ON_HOME_RETURN, true)
+        if (onHomeReturn) {
+            DailyVocabWidgetProvider.updateAllWidgets(applicationContext)
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try {
+            unregisterReceiver(screenReceiver)
+        } catch (_: Exception) {}
     }
 }
 
@@ -53,6 +121,9 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
     val currentWordIdx by viewModel.currentWordIndex.collectAsState()
     val selectedGroup by viewModel.selectedGroup.collectAsState()
     val selectedStatus by viewModel.selectedStatusFilter.collectAsState()
+    val selectedGroups by viewModel.selectedGroups.collectAsState()
+    val selectedStatuses by viewModel.selectedStatuses.collectAsState()
+    val cardSortOrder by viewModel.cardSortOrder.collectAsState()
     val distinctGroups by viewModel.distinctGroups.collectAsState()
     val allGames by viewModel.allGames.collectAsState()
     val allQuestions by viewModel.allQuestions.collectAsState()
@@ -61,6 +132,12 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
     val customBackupTreeUri by viewModel.customBackupTreeUri.collectAsState()
     val userProgress by viewModel.userProgress.collectAsState()
     val statusMessage by viewModel.statusMessage.collectAsState()
+    val isDarkTheme by viewModel.isDarkTheme.collectAsState()
+    val isFocusMode by viewModel.isFocusMode.collectAsState()
+    val isFlipAnimationEnabled by viewModel.isFlipAnimationEnabled.collectAsState()
+    val currentWidgetWord by viewModel.currentWidgetWord.collectAsState()
+    val widgetCategory by viewModel.widgetCategory.collectAsState()
+    val palette = LocalAppPalette.current
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -74,6 +151,16 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
         }
     }
 
+    // System Back Button Handling
+    val canNavigateBack = currentRoute != "home" || activeArticle != null
+    BackHandler(enabled = canNavigateBack) {
+        if (activeArticle != null) {
+            viewModel.selectArticle(null)
+        } else {
+            viewModel.navigateBack()
+        }
+    }
+
     if (currentUser == null) {
         LoginScreen(
             onLoginSuccess = { /* user state already updated */ },
@@ -81,109 +168,127 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
             onGoogleLogin = { viewModel.loginWithGoogle() }
         )
     } else {
+        val hideBarsInFocus = currentRoute == "flashcard" && isFocusMode
+        val hideBottomBar = currentRoute == "flashcard"
+
         Scaffold(
             topBar = {
-                TopAppBar(
-                    title = {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(IndigoPrimary),
-                                contentAlignment = Alignment.Center
+                if (!hideBarsInFocus) {
+                    TopAppBar(
+                        navigationIcon = {
+                            if (currentRoute == "flashcard") {
+                                IconButton(onClick = { viewModel.setRoute("home") }) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = "Back to Home",
+                                        tint = palette.textPrimary
+                                    )
+                                }
+                            }
+                        },
+                        title = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(IndigoPrimary),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "M",
+                                        fontFamily = PoppinsFontFamily,
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = Color.White
+                                    )
+                                }
                                 Text(
-                                    text = "M",
-                                    fontFamily = FontFamily.SansSerif,
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Black,
-                                    color = Color.White
+                                    text = if (currentRoute == "flashcard") "Flashcards" else "Memorizer",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = palette.textPrimary
                                 )
                             }
-                            Text(
-                                text = "Memorizer",
-                                fontFamily = FontFamily.SansSerif,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = SlateText
-                            )
-                        }
-                    },
-                    actions = {
-                        Box(
-                            modifier = Modifier
-                                .padding(end = 12.dp)
-                                .clip(CircleShape)
-                                .background(IndigoLight)
-                                .padding(horizontal = 10.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = currentUser?.displayName ?: "User #1235",
-                                fontFamily = FontFamily.SansSerif,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = IndigoPrimary
-                            )
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.White,
-                        titleContentColor = SlateText
+                        },
+                        actions = {
+                            Box(
+                                modifier = Modifier
+                                    .padding(end = 12.dp)
+                                    .clip(CircleShape)
+                                    .background(if (palette.isDark) Color(0xFF312E81) else IndigoLight)
+                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = currentUser?.displayName ?: "User #1235",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary
+                                )
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = palette.surface,
+                            titleContentColor = palette.textPrimary
+                        )
                     )
-                )
+                }
             },
             bottomBar = {
-                NavigationBar(
-                    containerColor = Color.White,
-                    tonalElevation = 8.dp,
-                    modifier = Modifier.testTag("main_navigation_bar")
-                ) {
-                    val navItems = listOf(
-                        NavigationItem("home", "Home", Icons.Default.Home),
-                        NavigationItem("flashcard", "Flashcard", Icons.Default.Style),
-                        NavigationItem("games", "Games", Icons.Default.SportsEsports),
-                        NavigationItem("admin", "Admin", Icons.Default.AdminPanelSettings),
-                        NavigationItem("profile", "Profile", Icons.Default.Person)
-                    )
-
-                    navItems.forEach { item ->
-                        val selected = currentRoute == item.route
-                        NavigationBarItem(
-                            selected = selected,
-                            onClick = { viewModel.setRoute(item.route) },
-                            icon = {
-                                Icon(
-                                    imageVector = item.icon,
-                                    contentDescription = item.label,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            },
-                            label = {
-                                Text(
-                                    text = item.label,
-                                    fontFamily = FontFamily.SansSerif,
-                                    fontSize = 10.sp,
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
-                                )
-                            },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = IndigoPrimary,
-                                selectedTextColor = IndigoPrimary,
-                                unselectedIconColor = SlateLight,
-                                unselectedTextColor = SlateMuted,
-                                indicatorColor = IndigoLight
-                            ),
-                            modifier = Modifier.testTag("nav_item_${item.route}")
+                if (!hideBottomBar && !hideBarsInFocus) {
+                    NavigationBar(
+                        containerColor = palette.surface,
+                        tonalElevation = 8.dp,
+                        modifier = Modifier.testTag("main_navigation_bar")
+                    ) {
+                        val navItems = listOf(
+                            NavigationItem("home", "Home", Icons.Default.Home),
+                            NavigationItem("flashcard", "Flashcard", Icons.Default.Style),
+                            NavigationItem("games", "Games", Icons.Default.SportsEsports),
+                            NavigationItem("admin", "Admin", Icons.Default.AdminPanelSettings),
+                            NavigationItem("profile", "Profile", Icons.Default.Person)
                         )
+
+                        navItems.forEach { item ->
+                            val selected = currentRoute == item.route
+                            NavigationBarItem(
+                                selected = selected,
+                                onClick = { viewModel.setRoute(item.route) },
+                                icon = {
+                                    Icon(
+                                        imageVector = item.icon,
+                                        contentDescription = item.label,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                },
+                                label = {
+                                    Text(
+                                        text = item.label,
+                                        fontFamily = PoppinsFontFamily,
+                                        fontSize = 10.sp,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                                    )
+                                },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary,
+                                    selectedTextColor = if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary,
+                                    unselectedIconColor = palette.textMuted,
+                                    unselectedTextColor = palette.textMuted,
+                                    indicatorColor = if (palette.isDark) Color(0xFF312E81) else IndigoLight
+                                ),
+                                modifier = Modifier.testTag("nav_item_${item.route}")
+                            )
+                        }
                     }
                 }
             },
             snackbarHost = { SnackbarHost(snackbarHostState) },
-            containerColor = SlateBg
+            containerColor = palette.background
         ) { paddingValues ->
             Box(
                 modifier = Modifier
@@ -201,16 +306,31 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             onSelectCourse = { cId -> viewModel.setActiveCourse(cId) },
                             onCreateCourseClick = { viewModel.setRoute("admin") },
                             onNavigate = { target -> viewModel.setRoute(target) },
-                            onSelectGroup = { grp -> viewModel.selectedGroup.value = grp }
+                            onSelectGroup = { grp -> viewModel.selectedGroup.value = grp },
+                            widgetWord = currentWidgetWord,
+                            widgetCategory = widgetCategory,
+                            onSetWidgetCategory = { cat -> viewModel.setWidgetCategory(cat) },
+                            onCycleWidgetWord = { viewModel.cycleNextWidgetWord() },
+                            onRateWidgetWord = { id, st -> viewModel.rateWord(id, st) },
+                            onRefreshWidget = { viewModel.cycleNextWidgetWord() }
                         )
                         "flashcard" -> FlashcardScreen(
                             words = filteredWords,
                             currentIndex = currentWordIdx,
-                            selectedGroup = selectedGroup,
-                            selectedStatus = selectedStatus,
+                            selectedGroups = selectedGroups,
+                            selectedStatuses = selectedStatuses,
+                            sortOrder = cardSortOrder,
                             availableGroups = distinctGroups,
-                            onSelectGroup = { grp -> viewModel.selectedGroup.value = grp },
-                            onSelectStatus = { st -> viewModel.selectedStatusFilter.value = st },
+                            isFocusMode = isFocusMode,
+                            isFlipAnimationEnabled = isFlipAnimationEnabled,
+                            onToggleFocusMode = { enable -> viewModel.setFocusMode(enable) },
+                            onToggleGroup = { grp -> viewModel.toggleGroup(grp) },
+                            onClearGroups = { viewModel.clearGroups() },
+                            onToggleStatus = { st -> viewModel.toggleStatus(st) },
+                            onClearStatuses = { viewModel.clearStatuses() },
+                            onSetSortOrder = { ord -> viewModel.setCardSortOrder(ord) },
+                            onReshuffle = { viewModel.reshuffleCards() },
+                            onResetAllFilters = { viewModel.resetAllCardFilters() },
                             onRate = { id, st -> viewModel.rateWord(id, st) },
                             onNext = { viewModel.nextWord() },
                             onPrevious = { viewModel.previousWord() }
@@ -220,14 +340,25 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             questions = allQuestions,
                             onCompleteQuiz = { score, total ->
                                 viewModel.recordQuizCompletion(score, total)
-                            }
+                            },
+                            articles = allArticles,
+                            activeArticle = activeArticle,
+                            words = allWords,
+                            onSelectArticle = { art -> viewModel.setActiveArticle(art) },
+                            onSaveArticle = { title, content, author, id ->
+                                viewModel.saveArticle(title, content, author, id)
+                            },
+                            onDeleteArticle = { id -> viewModel.deleteArticle(id) },
+                            onRateWord = { id, st -> viewModel.rateWord(id, st) }
                         )
                         "article_reader" -> ArticleReaderScreen(
                             articles = allArticles,
                             activeArticle = activeArticle,
                             words = allWords,
                             onSelectArticle = { art -> viewModel.setActiveArticle(art) },
-                            onSaveArticle = { title, content -> viewModel.saveArticle(title, content) },
+                            onSaveArticle = { title, content, author, id ->
+                                viewModel.saveArticle(title, content, author, id)
+                            },
                             onDeleteArticle = { id -> viewModel.deleteArticle(id) },
                             onRateWord = { id, st -> viewModel.rateWord(id, st) },
                             onBack = { viewModel.setRoute("home") }
@@ -238,15 +369,16 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             questions = allQuestions,
                             courses = allCourses,
                             activeCourseId = activeCourseId,
-                            onCreateCourse = { title, desc -> viewModel.createCourse(title, desc) },
+                            onCreateCourse = { title, desc, fileContent, isJson -> viewModel.createCourse(title, desc, fileContent, isJson) },
                             onSelectCourse = { cId -> viewModel.setActiveCourse(cId) },
                             onDeleteCourse = { cId -> viewModel.deleteCourse(cId) },
                             onAddWord = { word -> viewModel.addCustomWord(word) },
                             onDeleteWord = { id -> viewModel.deleteWord(id) },
                             onDeleteGame = { id -> viewModel.deleteGameItem(id) },
                             onDeleteQuestion = { id -> viewModel.deleteQuestionBankItem(id) },
-                            onImportCourse = { content, isJson, cId -> viewModel.importCourseFile(content, isJson, cId) },
+                            onImportCourse = { content, isJson, cId, title -> viewModel.importCourseFile(content, isJson, cId, title) },
                             onImportGame = { content, type -> viewModel.importGameFile(content, type) },
+                            onImportGameItems = { items -> viewModel.importGameItems(items) },
                             onImportQB = { content -> viewModel.importQuestionBankFile(content) },
                             onResetData = { viewModel.resetToSample() }
                         )
@@ -255,10 +387,26 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             progress = userProgress,
                             backupDirectoryPath = viewModel.repository.backupManager.getBackupPathString(),
                             customBackupTreeUri = customBackupTreeUri,
+                            courses = allCourses,
+                            activeCourseId = activeCourseId,
+                            isDarkTheme = isDarkTheme,
+                            isFlipAnimationEnabled = isFlipAnimationEnabled,
+                            isFocusMode = isFocusMode,
+                            onToggleDarkTheme = { viewModel.toggleDarkTheme() },
+                            onToggleFlipAnimation = { enable -> viewModel.setFlipAnimationEnabled(enable) },
+                            onToggleFocusMode = { enable -> viewModel.setFocusMode(enable) },
                             onSetCustomBackupTreeUri = { uri -> viewModel.setCustomBackupTreeUri(uri) },
                             onManualBackup = { viewModel.triggerManualBackup() },
+                            onBackupToDriveDirect = { viewModel.backupDirectlyToLinkedFolder() },
+                            onRestoreFromDriveDirect = { viewModel.restoreDirectlyFromLinkedFolder() },
+                            onRefreshWidget = { viewModel.refreshWidget() },
+                            onExportToUri = { uri -> viewModel.exportBackupToUri(uri) },
+                            onRestoreFromUri = { uri -> viewModel.restoreFromUri(uri) },
                             onCloudSync = { viewModel.triggerCloudSync() },
                             onRestoreBackup = { content, isJson -> viewModel.restoreBackupContent(content, isJson) },
+                            onUpdateProfile = { name, avatar, targetExam, goal, bio ->
+                                viewModel.updateProfile(name, avatar, targetExam, goal, bio)
+                            },
                             onLogout = { viewModel.logout() }
                         )
                     }

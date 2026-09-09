@@ -45,13 +45,7 @@ class MemorizerRepository(
         database.userProgressDao().getProgress(userId)
 
     init {
-        // Seed initial sample data if empty
-        CoroutineScope(Dispatchers.IO).launch {
-            val count = database.vocabularyDao().getAllWordsList().size
-            if (count == 0) {
-                seedInitialData()
-            }
-        }
+        // Default starts empty as requested by user. Data is imported or downloaded from Drive.
     }
 
     suspend fun seedInitialData() = withContext(Dispatchers.IO) {
@@ -107,19 +101,30 @@ class MemorizerRepository(
         course
     }
 
+    suspend fun updateCourseTitle(courseId: String, newTitle: String) = withContext(Dispatchers.IO) {
+        database.courseDao().updateCourseTitle(courseId, newTitle)
+    }
+
     suspend fun deleteCourse(courseId: String, userId: String = "1235") = withContext(Dispatchers.IO) {
         database.courseDao().deleteCourseById(courseId)
         database.vocabularyDao().deleteWordsByCourse(courseId)
         refreshProgressAndSync(userId)
     }
 
-    suspend fun saveArticle(title: String, content: String, courseId: String = "course_default"): ArticleEntity = withContext(Dispatchers.IO) {
-        val id = "art_" + System.currentTimeMillis()
+    suspend fun saveArticle(
+        title: String,
+        content: String,
+        author: String = "Unknown Author",
+        courseId: String = "course_default",
+        articleId: String? = null
+    ): ArticleEntity = withContext(Dispatchers.IO) {
+        val id = articleId ?: ("art_" + System.currentTimeMillis())
         val count = content.split("\\s+".toRegex()).count { it.isNotBlank() }
         val article = ArticleEntity(
             id = id,
             title = title.ifBlank { "Untitled Article" },
             content = content,
+            author = author.ifBlank { "Unknown Author" },
             courseId = courseId,
             wordCount = count
         )
@@ -222,6 +227,19 @@ class MemorizerRepository(
                 Result.success(words.size)
             } else {
                 Result.failure(Exception("No valid vocabulary rows found in course file"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun importGameItems(items: List<GamePracticeEntity>): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            if (items.isNotEmpty()) {
+                database.gamePracticeDao().insertItems(items)
+                Result.success(items.size)
+            } else {
+                Result.failure(Exception("No valid game questions found to import"))
             }
         } catch (e: Exception) {
             Result.failure(e)

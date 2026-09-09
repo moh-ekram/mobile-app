@@ -1,9 +1,14 @@
 package com.example.ui.screens
 
+import android.appwidget.AppWidgetManager
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -11,6 +16,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -19,15 +25,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import com.example.data.model.CourseEntity
 import com.example.data.model.UserProgressEntity
 import com.example.data.model.UserSession
 import com.example.ui.theme.*
+import com.example.widget.DailyVocabWidgetProvider
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -38,15 +49,31 @@ fun ProfileScreen(
     progress: UserProgressEntity?,
     backupDirectoryPath: String,
     customBackupTreeUri: String? = null,
+    courses: List<CourseEntity> = emptyList(),
+    activeCourseId: String = "",
+    isDarkTheme: Boolean = false,
+    isFlipAnimationEnabled: Boolean = true,
+    isFocusMode: Boolean = false,
+    onToggleDarkTheme: () -> Unit = {},
+    onToggleFlipAnimation: (Boolean) -> Unit = {},
+    onToggleFocusMode: (Boolean) -> Unit = {},
     onSetCustomBackupTreeUri: (Uri) -> Unit = {},
     onManualBackup: () -> Unit,
+    onBackupToDriveDirect: () -> Unit = {},
+    onRestoreFromDriveDirect: () -> Unit = {},
+    onRefreshWidget: () -> Unit = {},
+    onExportToUri: (Uri) -> Unit = {},
+    onRestoreFromUri: (Uri) -> Unit = {},
     onCloudSync: () -> Unit,
     onRestoreBackup: (String, Boolean) -> Unit,
+    onUpdateProfile: (displayName: String, avatarUri: String?, targetExam: String, dailyGoal: Int, bio: String) -> Unit = { _, _, _, _, _ -> },
     onLogout: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val palette = LocalAppPalette.current
     var showRestoreDialog by remember { mutableStateOf(false) }
+    var showEditProfileDialog by remember { mutableStateOf(false) }
     var restoreText by remember { mutableStateOf("") }
 
     val folderPickerLauncher = rememberLauncherForActivityResult(
@@ -61,6 +88,22 @@ fun ProfileScreen(
         }
     }
 
+    val driveExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri: Uri? ->
+        if (uri != null) {
+            onExportToUri(uri)
+        }
+    }
+
+    val driveRestoreLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            onRestoreFromUri(uri)
+        }
+    }
+
     val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()) }
     val lastBackupStr = if (progress != null && progress.lastBackupTimestamp > 0) {
         dateFormat.format(Date(progress.lastBackupTimestamp))
@@ -68,10 +111,38 @@ fun ProfileScreen(
         "Auto-saved recently"
     }
 
+    val widgetPrefs = remember { context.getSharedPreferences(DailyVocabWidgetProvider.PREFS_NAME, Context.MODE_PRIVATE) }
+    var selectedWidgetCourseId by remember {
+        mutableStateOf(widgetPrefs.getString(DailyVocabWidgetProvider.KEY_WIDGET_COURSE_ID, "all") ?: "all")
+    }
+    var selectedWidgetTagFilter by remember {
+        mutableStateOf(widgetPrefs.getString(DailyVocabWidgetProvider.KEY_WIDGET_TAG_FILTER, "all") ?: "all")
+    }
+    var selectedWidgetSize by remember {
+        mutableStateOf(widgetPrefs.getString(DailyVocabWidgetProvider.KEY_WIDGET_SIZE, "standard") ?: "standard")
+    }
+    var selectedWidgetFontSize by remember {
+        mutableStateOf(widgetPrefs.getString(DailyVocabWidgetProvider.KEY_WIDGET_FONT_SIZE, "medium") ?: "medium")
+    }
+    var rotateEvery10Seconds by remember {
+        mutableStateOf(widgetPrefs.getBoolean(DailyVocabWidgetProvider.KEY_ROTATE_10S, true))
+    }
+    var rotateOnHomeReturn by remember {
+        mutableStateOf(widgetPrefs.getBoolean(DailyVocabWidgetProvider.KEY_ROTATE_ON_HOME_RETURN, true))
+    }
+
+    val backupPrefs = remember { context.getSharedPreferences("backup_guide_prefs", Context.MODE_PRIVATE) }
+    var showDriveAccountCoachMark by remember {
+        mutableStateOf(backupPrefs.getBoolean("show_drive_account_coach", true))
+    }
+    var showSyncCoachMark by remember {
+        mutableStateOf(backupPrefs.getBoolean("show_sync_coach", true))
+    }
+
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
-            .background(SlateBg)
+            .background(palette.background)
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -90,24 +161,36 @@ fun ProfileScreen(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(72.dp)
+                            .size(76.dp)
                             .clip(CircleShape)
-                            .background(IndigoLight),
+                            .background(IndigoLight)
+                            .border(2.dp, IndigoPrimary.copy(alpha = 0.3f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.AccountCircle,
-                            contentDescription = null,
-                            tint = IndigoPrimary,
-                            modifier = Modifier.size(52.dp)
-                        )
+                        if (!user?.avatarUri.isNullOrBlank()) {
+                            AsyncImage(
+                                model = user?.avatarUri,
+                                contentDescription = "Profile Avatar",
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(CircleShape),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.AccountCircle,
+                                contentDescription = null,
+                                tint = IndigoPrimary,
+                                modifier = Modifier.size(54.dp)
+                            )
+                        }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     Text(
                         text = user?.displayName ?: "User #1235",
-                        fontFamily = FontFamily.SansSerif,
+                        fontFamily = PoppinsFontFamily,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = SlateText
@@ -115,26 +198,343 @@ fun ProfileScreen(
 
                     Text(
                         text = user?.email ?: "user1235@memorizer.app",
-                        fontFamily = FontFamily.SansSerif,
+                        fontFamily = PoppinsFontFamily,
                         fontSize = 13.sp,
                         color = SlateMuted
                     )
 
+                    if (!user?.bio.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "\"${user?.bio}\"",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = SlateMuted
+                        )
+                    }
+
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    Box(
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .background(EmeraldLight)
-                            .border(1.dp, EmeraldBorder, CircleShape)
-                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(EmeraldLight)
+                                .border(1.dp, EmeraldBorder, CircleShape)
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = if (user?.isGoogleUser == true) "Google Authenticated" else "ID: ${user?.userId ?: "1235"}",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EmeraldSuccess
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(IndigoLight)
+                                .border(1.dp, Color(0xFFC7D2FE), CircleShape)
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = user?.targetExam ?: "GRE / IELTS",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = IndigoPrimary
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    OutlinedButton(
+                        onClick = { showEditProfileDialog = true },
+                        shape = CircleShape,
+                        modifier = Modifier.height(36.dp)
+                    ) {
+                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Edit Profile Details", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
+
+        // Appearance & Theme Card
+        item {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = palette.surface),
+                border = CardDefaults.outlinedCardBorder().copy(
+                    brush = androidx.compose.ui.graphics.SolidColor(palette.cardBorder)
+                ),
+                modifier = Modifier.testTag("theme_appearance_card")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(if (isDarkTheme) Color(0xFF312E81) else Color(0xFFFEF3C7)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (isDarkTheme) Icons.Default.DarkMode else Icons.Default.LightMode,
+                                contentDescription = null,
+                                tint = if (isDarkTheme) Color(0xFFA5B4FC) else Color(0xFFD97706),
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                        Text(
+                            text = if (isDarkTheme) "Dark / Night Theme" else "Light / Day Theme",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = palette.textPrimary
+                        )
+                    }
+
+                    Switch(
+                        checked = isDarkTheme,
+                        onCheckedChange = { onToggleDarkTheme() },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = IndigoPrimary,
+                            uncheckedThumbColor = Color.White,
+                            uncheckedTrackColor = Color(0xFFCBD5E1)
+                        )
+                    )
+                }
+            }
+        }
+
+        // Flashcard Core Display & Animation Settings Card
+        item {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = palette.surface),
+                border = CardDefaults.outlinedCardBorder().copy(
+                    brush = androidx.compose.ui.graphics.SolidColor(palette.cardBorder)
+                ),
+                modifier = Modifier.testTag("flashcard_settings_card")
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(if (palette.isDark) Color(0xFF312E81) else IndigoLight),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Style,
+                                contentDescription = null,
+                                tint = if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        Text(
+                            text = "Flashcard Display Settings",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = palette.textPrimary
+                        )
+                    }
+
+                    HorizontalDivider(color = palette.cardBorder)
+
+                    // Flip Animation Option
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = if (user?.isGoogleUser == true) "Google Authenticated" else "Credentials ID: ${user?.userId ?: "1235"}",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = EmeraldSuccess
+                            text = "Flip Animation",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = palette.textPrimary
                         )
+                        Switch(
+                            checked = isFlipAnimationEnabled,
+                            onCheckedChange = onToggleFlipAnimation,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = IndigoPrimary,
+                                uncheckedThumbColor = Color.White,
+                                uncheckedTrackColor = Color(0xFFCBD5E1)
+                            )
+                        )
+                    }
+
+                    HorizontalDivider(color = palette.cardBorder)
+
+                    // Focus Mode Option
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Focus Mode",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = palette.textPrimary
+                        )
+                        Switch(
+                            checked = isFocusMode,
+                            onCheckedChange = onToggleFocusMode,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = IndigoPrimary,
+                                uncheckedThumbColor = Color.White,
+                                uncheckedTrackColor = Color(0xFFCBD5E1)
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        // Google Drive Cloud Backup & Restore Card
+        item {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = if (palette.isDark) palette.surface else Color.White),
+                border = CardDefaults.outlinedCardBorder().copy(
+                    brush = androidx.compose.ui.graphics.SolidColor(palette.cardBorder)
+                ),
+                modifier = Modifier.testTag("google_drive_backup_card")
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(CircleShape)
+                                .background(if (palette.isDark) Color(0xFF1E3A8A) else Color(0xFFE0F2FE)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CloudUpload,
+                                contentDescription = null,
+                                tint = Color(0xFF0284C7),
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+
+                        Text(
+                            text = "Google Drive Backup",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = palette.textPrimary
+                        )
+                    }
+
+                    // Select or create Google Drive folder button
+                    OutlinedButton(
+                        onClick = {
+                            try {
+                                folderPickerLauncher.launch(Uri.parse("content://com.google.android.apps.docs.storage/document/root"))
+                            } catch (_: Exception) {
+                                folderPickerLauncher.launch(null)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.CreateNewFolder, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (customBackupTreeUri != null && customBackupTreeUri.contains("com.google.android.apps.docs.storage", ignoreCase = true)) 
+                                "Drive folder linked (Tap to change)" 
+                            else 
+                                "Select or create Drive folder",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                if (customBackupTreeUri != null) {
+                                    onBackupToDriveDirect()
+                                } else {
+                                    try {
+                                        folderPickerLauncher.launch(Uri.parse("content://com.google.android.apps.docs.storage/document/root"))
+                                    } catch (_: Exception) {
+                                        folderPickerLauncher.launch(null)
+                                    }
+                                }
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Backup to Drive", fontFamily = PoppinsFontFamily, fontSize = 12.sp)
+                        }
+
+                        Button(
+                            onClick = {
+                                if (customBackupTreeUri != null) {
+                                    onRestoreFromDriveDirect()
+                                } else {
+                                    driveRestoreLauncher.launch(arrayOf("application/json", "text/*"))
+                                }
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.SettingsBackupRestore, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Restore", fontFamily = PoppinsFontFamily, fontSize = 12.sp)
+                        }
                     }
                 }
             }
@@ -173,21 +573,13 @@ fun ProfileScreen(
                             )
                         }
 
-                        Column {
-                            Text(
-                                text = "Local Device Backup",
-                                fontFamily = FontFamily.SansSerif,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = SlateText
-                            )
-                            Text(
-                                text = "JSON & CSV progress saved directly on device",
-                                fontFamily = FontFamily.SansSerif,
-                                fontSize = 11.sp,
-                                color = SlateMuted
-                            )
-                        }
+                        Text(
+                            text = "Local Device Backup",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = SlateText
+                        )
                     }
 
                     // Directory Path Container
@@ -205,8 +597,8 @@ fun ProfileScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = if (customBackupTreeUri != null) "Custom External Directory (SAF):" else "Internal App Directory:",
-                                    fontFamily = FontFamily.SansSerif,
+                                    text = if (customBackupTreeUri != null) "Custom External Directory (SAF):" else "Standard Device Folder:",
+                                    fontFamily = PoppinsFontFamily,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = if (customBackupTreeUri != null) EmeraldSuccess else SlateLight
@@ -225,18 +617,10 @@ fun ProfileScreen(
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = if (customBackupTreeUri != null) Uri.decode(customBackupTreeUri) else backupDirectoryPath,
-                                fontFamily = FontFamily.Monospace,
+                                fontFamily = PoppinsFontFamily,
                                 fontSize = 11.sp,
                                 color = SlateText,
                                 lineHeight = 15.sp
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                text = "Files: memorizer_progress.json  |  memorizer_vocabulary.csv",
-                                fontFamily = FontFamily.SansSerif,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = IndigoPrimary
                             )
                         }
                     }
@@ -250,7 +634,8 @@ fun ProfileScreen(
                         Icon(Icons.Default.CreateNewFolder, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = if (customBackupTreeUri != null) "Change Backup Folder (Documents/Downloads)" else "Choose Custom Device Folder (e.g. Documents)",
+                            text = if (customBackupTreeUri != null) "Change Backup Folder" else "Choose Custom Device Folder",
+                            fontFamily = PoppinsFontFamily,
                             fontSize = 11.sp
                         )
                     }
@@ -260,43 +645,379 @@ fun ProfileScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "Last Saved: $lastBackupStr",
-                            fontSize = 11.sp,
-                            color = SlateMuted
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Button(
-                            onClick = onManualBackup,
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
-                        ) {
-                            Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Save Backup", fontSize = 12.sp)
+                        Column {
+                            Text(
+                                text = "Last Local Backup",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = SlateMuted
+                            )
+                            Text(
+                                text = lastBackupStr,
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = SlateText
+                            )
                         }
 
-                        OutlinedButton(
-                            onClick = { showRestoreDialog = true },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp)
+                        Button(
+                            onClick = onManualBackup,
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                            modifier = Modifier.testTag("manual_backup_button")
                         ) {
-                            Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Restore", fontSize = 12.sp)
+                            Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Backup Now", fontFamily = PoppinsFontFamily, fontSize = 12.sp)
                         }
                     }
                 }
             }
         }
 
-        // Supabase Cloud Sync Card
+        // Homescreen Widget Control Card
+        item {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = if (palette.isDark) palette.surface else Color.White),
+                border = CardDefaults.outlinedCardBorder().copy(
+                    brush = androidx.compose.ui.graphics.SolidColor(palette.cardBorder)
+                ),
+                modifier = Modifier.testTag("homescreen_widget_control_card")
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // Header
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(CircleShape)
+                                .background(if (palette.isDark) Color(0xFF312E81) else IndigoLight),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Widgets,
+                                contentDescription = null,
+                                tint = IndigoPrimary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+
+                        Text(
+                            text = "Homescreen Widget",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = palette.textPrimary
+                        )
+                    }
+
+                    // Dropdown Controls Grid
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val courseOptions = remember(courses) {
+                                listOf("all" to "All Courses") + courses.map { it.id to it.title }
+                            }
+                            WidgetDropdownSelector(
+                                label = "Course",
+                                selectedValue = selectedWidgetCourseId,
+                                options = courseOptions,
+                                palette = palette,
+                                onSelect = {
+                                    selectedWidgetCourseId = it
+                                    widgetPrefs.edit().putString(DailyVocabWidgetProvider.KEY_WIDGET_COURSE_ID, it).apply()
+                                    DailyVocabWidgetProvider.updateAllWidgets(context)
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            val tagOptions = remember {
+                                listOf(
+                                    "all" to "All Statuses",
+                                    "unrated" to "Unrated",
+                                    "confusion" to "Confusion",
+                                    "dont_know" to "Don't Know",
+                                    "know" to "Know"
+                                )
+                            }
+                            WidgetDropdownSelector(
+                                label = "Status",
+                                selectedValue = selectedWidgetTagFilter,
+                                options = tagOptions,
+                                palette = palette,
+                                onSelect = {
+                                    selectedWidgetTagFilter = it
+                                    widgetPrefs.edit().putString(DailyVocabWidgetProvider.KEY_WIDGET_TAG_FILTER, it).apply()
+                                    DailyVocabWidgetProvider.updateAllWidgets(context)
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val sizeOptions = remember {
+                                listOf(
+                                    "compact" to "Compact",
+                                    "standard" to "Standard",
+                                    "large" to "Large"
+                                )
+                            }
+                            WidgetDropdownSelector(
+                                label = "Widget Size",
+                                selectedValue = selectedWidgetSize,
+                                options = sizeOptions,
+                                palette = palette,
+                                onSelect = {
+                                    selectedWidgetSize = it
+                                    widgetPrefs.edit().putString(DailyVocabWidgetProvider.KEY_WIDGET_SIZE, it).apply()
+                                    DailyVocabWidgetProvider.updateAllWidgets(context)
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            val fontSizeOptions = remember {
+                                listOf(
+                                    "small" to "Small",
+                                    "medium" to "Medium",
+                                    "large" to "Large"
+                                )
+                            }
+                            WidgetDropdownSelector(
+                                label = "Font Size",
+                                selectedValue = selectedWidgetFontSize,
+                                options = fontSizeOptions,
+                                palette = palette,
+                                onSelect = {
+                                    selectedWidgetFontSize = it
+                                    widgetPrefs.edit().putString(DailyVocabWidgetProvider.KEY_WIDGET_FONT_SIZE, it).apply()
+                                    DailyVocabWidgetProvider.updateAllWidgets(context)
+                                },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    // Frequent Word Change Switches (Minimal, no subheadings or descriptions)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF8FAFC))
+                            .border(1.dp, palette.border, RoundedCornerShape(12.dp))
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // 10-Second Auto Rotation
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Rotate Every 10 Seconds",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = palette.textPrimary
+                            )
+                            Switch(
+                                checked = rotateEvery10Seconds,
+                                onCheckedChange = { isChecked ->
+                                    rotateEvery10Seconds = isChecked
+                                    widgetPrefs.edit().putBoolean(DailyVocabWidgetProvider.KEY_ROTATE_10S, isChecked).apply()
+                                    if (isChecked) {
+                                        DailyVocabWidgetProvider.startFrequentTicker(context)
+                                    } else {
+                                        DailyVocabWidgetProvider.stopFrequentTicker()
+                                    }
+                                }
+                            )
+                        }
+
+                        HorizontalDivider(color = palette.border)
+
+                        // Every Home Return
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Rotate on Home Return",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = palette.textPrimary
+                            )
+                            Switch(
+                                checked = rotateOnHomeReturn,
+                                onCheckedChange = { isChecked ->
+                                    rotateOnHomeReturn = isChecked
+                                    widgetPrefs.edit().putBoolean(DailyVocabWidgetProvider.KEY_ROTATE_ON_HOME_RETURN, isChecked).apply()
+                                }
+                            )
+                        }
+                    }
+
+                    // Simulated Widget Layout matching selected options
+                    val previewCourseName = if (selectedWidgetCourseId == "all") {
+                        (courses.firstOrNull()?.title ?: "GRE VOCABULARY").uppercase()
+                    } else {
+                        (courses.find { it.id == selectedWidgetCourseId }?.title ?: "VOCABULARY").uppercase()
+                    }
+
+                    val (previewTagText, previewTagColor, previewTagBg) = when (selectedWidgetTagFilter) {
+                        "know" -> Triple("KNOW", EmeraldSuccess, EmeraldLight)
+                        "confusion" -> Triple("CONFUSION", AmberWarning, AmberLight)
+                        "dont_know" -> Triple("DON'T KNOW", RoseError, RoseLight)
+                        else -> Triple("UNRATED", IndigoPrimary, IndigoLight)
+                    }
+
+                    val (wordSizeSp, meaningSizeSp) = when (selectedWidgetFontSize) {
+                        "small" -> 16.sp to 11.sp
+                        "large" -> 22.sp to 14.sp
+                        else -> 19.sp to 12.sp
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(if (palette.isDark) Color(0xFF0F172A) else Color.White)
+                            .border(1.dp, palette.border, RoundedCornerShape(16.dp))
+                            .padding(14.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            // Top Bar: Small course name & tag badge & next
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = previewCourseName,
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF64748B),
+                                    maxLines = 1
+                                )
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(previewTagBg)
+                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = previewTagText,
+                                            fontFamily = PoppinsFontFamily,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = previewTagColor
+                                        )
+                                    }
+
+                                    Text(
+                                        text = "Next ➔",
+                                        fontFamily = PoppinsFontFamily,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = IndigoPrimary
+                                    )
+                                }
+                            }
+
+                            Text(
+                                text = "Ephemeral",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = wordSizeSp,
+                                fontWeight = FontWeight.Bold,
+                                color = previewTagColor
+                            )
+
+                            Text(
+                                text = "Lasting for a very short time; fleeting or transient.",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = meaningSizeSp,
+                                lineHeight = 16.sp,
+                                color = palette.textMuted
+                            )
+
+                            if (selectedWidgetSize != "compact") {
+                                Text(
+                                    text = "\"Fashions are ephemeral: new styles come and go quickly.\"",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = (meaningSizeSp.value - 1).sp,
+                                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                                    color = palette.textMuted
+                                )
+                            }
+                        }
+                    }
+
+                    // Action buttons
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                onRefreshWidget()
+                                DailyVocabWidgetProvider.updateAllWidgets(context)
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Refresh Widget", fontFamily = PoppinsFontFamily, fontSize = 12.sp)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                                    val appWidgetManager = context.getSystemService(AppWidgetManager::class.java)
+                                    val myProvider = ComponentName(context, DailyVocabWidgetProvider::class.java)
+                                    if (appWidgetManager != null && appWidgetManager.isRequestPinAppWidgetSupported) {
+                                        appWidgetManager.requestPinAppWidget(myProvider, null, null)
+                                    }
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.AddHome, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Pin to Home", fontFamily = PoppinsFontFamily, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Restore & Import Backup Card
         item {
             Card(
                 shape = RoundedCornerShape(20.dp),
@@ -307,7 +1028,7 @@ fun ProfileScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -321,63 +1042,31 @@ fun ProfileScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Default.CloudSync,
+                                imageVector = Icons.Default.SettingsBackupRestore,
                                 contentDescription = null,
                                 tint = EmeraldSuccess,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
 
-                        Column {
-                            Text(
-                                text = "Supabase Cloud Sync",
-                                fontFamily = FontFamily.SansSerif,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = SlateText
-                            )
-                            Text(
-                                text = "Automatic cloud progress synchronization",
-                                fontFamily = FontFamily.SansSerif,
-                                fontSize = 11.sp,
-                                color = SlateMuted
-                            )
-                        }
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Color(0xFFF1F5F9))
-                            .padding(12.dp)
-                    ) {
-                        Column {
-                            Text(
-                                text = "Cloud Status: Active (Online / Offline Mirror)",
-                                fontFamily = FontFamily.SansSerif,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = EmeraldSuccess
-                            )
-                            Text(
-                                text = "Syncs: Word mastery, quiz scores, daily streak",
-                                fontFamily = FontFamily.SansSerif,
-                                fontSize = 11.sp,
-                                color = SlateMuted
-                            )
-                        }
+                        Text(
+                            text = "Restore Backup Data",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = SlateText
+                        )
                     }
 
                     Button(
-                        onClick = onCloudSync,
-                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { showRestoreDialog = true },
                         shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess)
+                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.FileOpen, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Sync to Supabase Now", fontSize = 13.sp)
+                        Text("Restore from Backup File Content", fontFamily = PoppinsFontFamily, fontSize = 12.sp)
                     }
                 }
             }
@@ -387,55 +1076,308 @@ fun ProfileScreen(
         item {
             OutlinedButton(
                 onClick = onLogout,
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = RoseError),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = RoseError)
+                    .padding(vertical = 8.dp)
             ) {
-                Icon(Icons.Default.Logout, contentDescription = null, modifier = Modifier.size(18.dp))
+                Icon(Icons.Default.Logout, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Sign Out / Switch Account", fontWeight = FontWeight.Bold)
+                Text("Sign Out of Session", fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
 
-    if (showRestoreDialog) {
+    // Edit Profile Dialog
+    if (showEditProfileDialog) {
+        var nameInput by remember { mutableStateOf(user?.displayName ?: "") }
+        var targetExamInput by remember { mutableStateOf(user?.targetExam ?: "GRE / IELTS") }
+        var dailyGoalInput by remember { mutableStateOf((user?.dailyWordGoal ?: 20).toString()) }
+        var bioInput by remember { mutableStateOf(user?.bio ?: "") }
+        var avatarUriState by remember { mutableStateOf(user?.avatarUri) }
+
+        val photoPickerLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.PickVisualMedia()
+        ) { uri: Uri? ->
+            if (uri != null) {
+                avatarUriState = uri.toString()
+            }
+        }
+
         AlertDialog(
-            onDismissRequest = { showRestoreDialog = false },
-            title = { Text("Restore Data from Backup", fontWeight = FontWeight.Bold) },
+            onDismissRequest = { showEditProfileDialog = false },
+            title = {
+                Text(
+                    text = "Edit Profile Details",
+                    fontFamily = PoppinsFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = SlateText
+                )
+            },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // Avatar selector
+                    Box(
+                        modifier = Modifier
+                            .size(70.dp)
+                            .clip(CircleShape)
+                            .background(IndigoLight)
+                            .clickable {
+                                photoPickerLauncher.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (!avatarUriState.isNullOrBlank()) {
+                            AsyncImage(
+                                model = avatarUriState,
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(CircleShape),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.AddAPhoto,
+                                contentDescription = "Pick Photo",
+                                tint = IndigoPrimary,
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                    }
+
                     Text(
-                        text = "Paste your saved JSON or CSV backup text here to restore words and ratings.",
-                        fontSize = 12.sp,
+                        text = "Tap to choose photo (Photo Picker)",
+                        fontSize = 10.sp,
                         color = SlateMuted
                     )
+
                     OutlinedTextField(
-                        value = restoreText,
-                        onValueChange = { restoreText = it },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(180.dp),
-                        placeholder = { Text("Paste JSON or CSV...") }
+                        value = nameInput,
+                        onValueChange = { nameInput = it },
+                        label = { Text("Display Name") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+
+                    OutlinedTextField(
+                        value = targetExamInput,
+                        onValueChange = { targetExamInput = it },
+                        label = { Text("Target Exam (e.g. GRE, IELTS, BCS)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+
+                    OutlinedTextField(
+                        value = dailyGoalInput,
+                        onValueChange = { dailyGoalInput = it.filter { c -> c.isDigit() } },
+                        label = { Text("Daily Word Goal") },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true
+                    )
+
+                    OutlinedTextField(
+                        value = bioInput,
+                        onValueChange = { bioInput = it },
+                        label = { Text("Bio / Study Note") },
+                        modifier = Modifier.fillMaxWidth(),
+                        maxLines = 3
                     )
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        val isJson = restoreText.trim().startsWith("{") || restoreText.trim().startsWith("[")
-                        onRestoreBackup(restoreText, isJson)
-                        showRestoreDialog = false
+                        val goal = dailyGoalInput.toIntOrNull() ?: 20
+                        onUpdateProfile(nameInput.trim(), avatarUriState, targetExamInput.trim(), goal, bioInput.trim())
+                        showEditProfileDialog = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
                 ) {
-                    Text("Restore")
+                    Text("Save Changes")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showRestoreDialog = false }) { Text("Cancel") }
+                TextButton(onClick = { showEditProfileDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Restore Dialog
+    if (showRestoreDialog) {
+        val filePickerLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.OpenDocument()
+        ) { uri: Uri? ->
+            if (uri != null) {
+                try {
+                    context.contentResolver.openInputStream(uri)?.use { stream ->
+                        restoreText = stream.bufferedReader().readText()
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+
+        AlertDialog(
+            onDismissRequest = { showRestoreDialog = false },
+            title = {
+                Text(
+                    text = "Restore Progress",
+                    fontFamily = PoppinsFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = SlateText
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Select backup file to restore",
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 12.sp,
+                        color = SlateMuted
+                    )
+
+                    Button(
+                        onClick = { filePickerLauncher.launch(arrayOf("text/plain", "application/json", "text/csv", "*/*")) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = IndigoLight, contentColor = IndigoPrimary)
+                    ) {
+                        Icon(Icons.Default.FileOpen, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Pick Backup File (.json / .csv)", fontFamily = PoppinsFontFamily, fontSize = 12.sp)
+                    }
+
+                    OutlinedTextField(
+                        value = restoreText,
+                        onValueChange = { restoreText = it },
+                        label = { Text("Backup JSON or CSV") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(140.dp),
+                        maxLines = 8
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val isJson = restoreText.trim().startsWith("[") || restoreText.trim().startsWith("{")
+                        onRestoreBackup(restoreText, isJson)
+                        showRestoreDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess)
+                ) {
+                    Text("Restore Now")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRestoreDialog = false }) {
+                    Text("Cancel")
+                }
             }
         )
     }
 }
+
+@Composable
+private fun WidgetDropdownSelector(
+    label: String,
+    selectedValue: String,
+    options: List<Pair<String, String>>,
+    palette: AppPalette,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val displayLabel = options.find { it.first == selectedValue }?.second ?: selectedValue
+
+    Box(modifier = modifier) {
+        Surface(
+            onClick = { expanded = true },
+            shape = RoundedCornerShape(10.dp),
+            color = if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9),
+            border = BorderStroke(1.dp, palette.border),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = label,
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = palette.textMuted
+                    )
+                    Text(
+                        text = displayLabel,
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = palette.textPrimary,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                }
+                Icon(
+                    imageVector = Icons.Default.ArrowDropDown,
+                    contentDescription = null,
+                    tint = palette.textMuted,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.background(if (palette.isDark) Color(0xFF1E293B) else Color.White)
+        ) {
+            options.forEach { (key, name) ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = name,
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 13.sp,
+                            fontWeight = if (key == selectedValue) FontWeight.Bold else FontWeight.Normal,
+                            color = if (key == selectedValue) IndigoPrimary else palette.textPrimary
+                        )
+                    },
+                    onClick = {
+                        onSelect(key)
+                        expanded = false
+                    },
+                    trailingIcon = if (key == selectedValue) {
+                        {
+                            Icon(
+                                Icons.Default.Check,
+                                contentDescription = null,
+                                tint = IndigoPrimary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    } else null
+                )
+            }
+        }
+    }
+}
+

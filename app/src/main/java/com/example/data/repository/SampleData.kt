@@ -10,7 +10,7 @@ object SampleData {
         VocabularyWordEntity(
             id = "word_1",
             word = "Abate",
-            meaning = "প্রশমিত করা / তীব্রতা কমানো",
+            meaning = "To lessen in intensity or degree; subside",
             group = 1,
             synonyms = "Subside, diminish, lessen, decline, curtail",
             extraWord = "Abatement (noun): The abatement of the storm brought relief.",
@@ -21,7 +21,7 @@ object SampleData {
         VocabularyWordEntity(
             id = "word_2",
             word = "Aberrant",
-            meaning = "স্বাভাবিকের বিপরীত / বিপথগামী",
+            meaning = "Deviating from the normal, usual, or expected",
             group = 1,
             synonyms = "Abnormal, anomalous, deviant, divergent, erratic",
             extraWord = "Aberration (noun): The violent surge was an aberration in the quiet town.",
@@ -32,7 +32,7 @@ object SampleData {
         VocabularyWordEntity(
             id = "word_3",
             word = "Cacophony",
-            meaning = "শ্রুতিকটু শব্দ / বিকট কর্কশ আওয়াজ",
+            meaning = "A harsh, discordant mixture of sounds",
             group = 1,
             synonyms = "Dissonance, clamor, racket, discord, din",
             extraWord = "Cacophonous (adj): A cacophonous sound of construction drills outside.",
@@ -43,7 +43,7 @@ object SampleData {
         VocabularyWordEntity(
             id = "word_4",
             word = "Ephemeral",
-            meaning = "ক্ষণস্থায়ী / স্বল্পকালীন",
+            meaning = "Lasting for a very short time; fleeting",
             group = 1,
             synonyms = "Fleeting, transient, evanescent, short-lived, momentary",
             extraWord = "Ephemera (noun): Collecting historical ephemera like concert tickets.",
@@ -54,7 +54,7 @@ object SampleData {
         VocabularyWordEntity(
             id = "word_5",
             word = "Garrulous",
-            meaning = "বাচাল / অতিমাত্রায় কথা বলা স্বভাব",
+            meaning = "Excessively talkative, especially on trivial matters",
             group = 1,
             synonyms = "Loquacious, talkative, voluble, chatty, verbose",
             extraWord = "Garrulity (noun): His endless garrulity tested everyone's patience.",
@@ -65,7 +65,7 @@ object SampleData {
         VocabularyWordEntity(
             id = "word_6",
             word = "Meticulous",
-            meaning = "অতি সতর্ক / খুঁটিনাটি বিষয়ে নিখুঁত",
+            meaning = "Showing great attention to detail; very careful and precise",
             group = 1,
             synonyms = "Scrupulous, punctilious, painstaking, fastidious, thorough",
             extraWord = "Meticulousness (noun): Meticulousness is required when analyzing data.",
@@ -76,7 +76,7 @@ object SampleData {
         VocabularyWordEntity(
             id = "word_7",
             word = "Ostentatious",
-            meaning = "লোকদেখানো / প্রদর্শনকামী",
+            meaning = "Characterized by pretentious or showy display to impress",
             group = 2,
             synonyms = "Pretentious, flamboyant, showy, gaudy, conspicuous",
             extraWord = "Ostentation (noun): Displaying gold watches purely for ostentation.",
@@ -87,7 +87,7 @@ object SampleData {
         VocabularyWordEntity(
             id = "word_8",
             word = "Pragmatic",
-            meaning = "বাস্তবধর্মী / বাস্তববাদী",
+            meaning = "Dealing with things sensibly and realistically",
             group = 2,
             synonyms = "Practical, realistic, sensible, rational, utilitarian",
             extraWord = "Pragmatism (noun): He approached corporate governance with pragmatism.",
@@ -98,7 +98,7 @@ object SampleData {
         VocabularyWordEntity(
             id = "word_9",
             word = "Reticent",
-            meaning = "স্বল্পভাষী / সংযতভাষী",
+            meaning = "Not revealing one's thoughts or feelings readily; reserved",
             group = 2,
             synonyms = "Reserved, taciturn, quiet, introverted, guarded",
             extraWord = "Reticence (noun): Her reticence was often mistaken for haughtiness.",
@@ -109,7 +109,7 @@ object SampleData {
         VocabularyWordEntity(
             id = "word_10",
             word = "Ubiquitous",
-            meaning = "সর্বব্যাপী / সর্বত্র বিদ্যমান",
+            meaning = "Present, appearing, or found everywhere; omnipresent",
             group = 2,
             synonyms = "Omnipresent, pervasive, everywhere, universal, rampant",
             extraWord = "Ubiquity (noun): The ubiquity of smartphones changed modern social dynamics.",
@@ -120,7 +120,7 @@ object SampleData {
         VocabularyWordEntity(
             id = "word_11",
             word = "Venerate",
-            meaning = "গভীর শ্রদ্ধা করা / পূজা করা",
+            meaning = "To regard with great respect; revere or honor",
             group = 3,
             synonyms = "Revere, worship, respect, idolize, honor",
             extraWord = "Venerable (adj): The venerable professor received a standing ovation.",
@@ -131,7 +131,7 @@ object SampleData {
         VocabularyWordEntity(
             id = "word_12",
             word = "Zealous",
-            meaning = "উৎসাহী / প্রবল উদ্যমী",
+            meaning = "Having or showing great energy, enthusiasm, or fervor",
             group = 3,
             synonyms = "Fervent, passionate, ardent, avid, dedicated",
             extraWord = "Zealot (noun): He was an uncompromising zealot for constitutional reform.",
