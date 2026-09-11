@@ -152,10 +152,15 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
     }
 
     // System Back Button Handling
-    val canNavigateBack = currentRoute != "home" || activeArticle != null
+    val canNavigateBack = currentRoute != "home" || activeArticle != null || viewModel.hasBackStack()
     BackHandler(enabled = canNavigateBack) {
         if (activeArticle != null) {
             viewModel.selectArticle(null)
+        } else if (currentRoute == "flashcard") {
+            if (isFocusMode) {
+                viewModel.setFocusMode(false)
+            }
+            viewModel.setRoute("home")
         } else {
             viewModel.navigateBack()
         }
@@ -207,7 +212,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                                     )
                                 }
                                 Text(
-                                    text = if (currentRoute == "flashcard") "Flashcards" else "Memorizer",
+                                    text = if (currentRoute == "flashcard") "Flashcards" else if (currentRoute == "admin") "Control" else "Memorizer",
                                     fontFamily = PoppinsFontFamily,
                                     fontSize = 20.sp,
                                     fontWeight = FontWeight.ExtraBold,
@@ -250,7 +255,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             NavigationItem("home", "Home", Icons.Default.Home),
                             NavigationItem("flashcard", "Flashcard", Icons.Default.Style),
                             NavigationItem("games", "Games", Icons.Default.SportsEsports),
-                            NavigationItem("admin", "Admin", Icons.Default.AdminPanelSettings),
+                            NavigationItem("admin", "Control", Icons.Default.AdminPanelSettings),
                             NavigationItem("profile", "Profile", Icons.Default.Person)
                         )
 
@@ -306,7 +311,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             onSelectCourse = { cId -> viewModel.setActiveCourse(cId) },
                             onCreateCourseClick = { viewModel.setRoute("admin") },
                             onNavigate = { target -> viewModel.setRoute(target) },
-                            onSelectGroup = { grp -> viewModel.selectedGroup.value = grp },
+                            onSelectGroup = { grp -> viewModel.selectGroup(grp) },
                             widgetWord = currentWidgetWord,
                             widgetCategory = widgetCategory,
                             onSetWidgetCategory = { cat -> viewModel.setWidgetCategory(cat) },
@@ -317,6 +322,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                         "flashcard" -> FlashcardScreen(
                             words = filteredWords,
                             currentIndex = currentWordIdx,
+                            courseName = allCourses.find { it.id == activeCourseId }?.title ?: "Vocabulary",
                             selectedGroups = selectedGroups,
                             selectedStatuses = selectedStatuses,
                             sortOrder = cardSortOrder,
@@ -332,8 +338,15 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             onReshuffle = { viewModel.reshuffleCards() },
                             onResetAllFilters = { viewModel.resetAllCardFilters() },
                             onRate = { id, st -> viewModel.rateWord(id, st) },
+                            onReportWord = { id, isReported, reason -> viewModel.reportWord(id, isReported, reason) },
                             onNext = { viewModel.nextWord() },
-                            onPrevious = { viewModel.previousWord() }
+                            onPrevious = { viewModel.previousWord() },
+                            onBack = {
+                                if (isFocusMode) {
+                                    viewModel.setFocusMode(false)
+                                }
+                                viewModel.setRoute("home")
+                            }
                         )
                         "games" -> GamePracticeScreen(
                             games = allGames,
@@ -349,7 +362,8 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                                 viewModel.saveArticle(title, content, author, id)
                             },
                             onDeleteArticle = { id -> viewModel.deleteArticle(id) },
-                            onRateWord = { id, st -> viewModel.rateWord(id, st) }
+                            onRateWord = { id, st -> viewModel.rateWord(id, st) },
+                            onBack = { viewModel.navigateBack() }
                         )
                         "article_reader" -> ArticleReaderScreen(
                             articles = allArticles,
@@ -361,7 +375,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             },
                             onDeleteArticle = { id -> viewModel.deleteArticle(id) },
                             onRateWord = { id, st -> viewModel.rateWord(id, st) },
-                            onBack = { viewModel.setRoute("home") }
+                            onBack = { viewModel.navigateBack() }
                         )
                         "admin" -> AdminPanelScreen(
                             words = allWords,
@@ -373,6 +387,8 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             onSelectCourse = { cId -> viewModel.setActiveCourse(cId) },
                             onDeleteCourse = { cId -> viewModel.deleteCourse(cId) },
                             onAddWord = { word -> viewModel.addCustomWord(word) },
+                            onUpdateWord = { word -> viewModel.updateWord(word) },
+                            onUpdateCourse = { cId, title, desc -> viewModel.updateCourse(cId, title, desc) },
                             onDeleteWord = { id -> viewModel.deleteWord(id) },
                             onDeleteGame = { id -> viewModel.deleteGameItem(id) },
                             onDeleteQuestion = { id -> viewModel.deleteQuestionBankItem(id) },
@@ -388,6 +404,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             backupDirectoryPath = viewModel.repository.backupManager.getBackupPathString(),
                             customBackupTreeUri = customBackupTreeUri,
                             courses = allCourses,
+                            words = allWords,
                             activeCourseId = activeCourseId,
                             isDarkTheme = isDarkTheme,
                             isFlipAnimationEnabled = isFlipAnimationEnabled,

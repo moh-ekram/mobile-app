@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -45,14 +46,15 @@ import com.example.ui.util.TtsManager
 fun FlashcardScreen(
     words: List<VocabularyWordEntity>,
     currentIndex: Int,
-    selectedGroups: Set<Int> = emptySet(),
+    courseName: String = "",
+    selectedGroups: Set<String> = emptySet(),
     selectedStatuses: Set<String> = emptySet(),
     sortOrder: String = "default",
-    availableGroups: List<Int> = emptyList(),
+    availableGroups: List<String> = emptyList(),
     isFocusMode: Boolean = false,
     isFlipAnimationEnabled: Boolean = true,
     onToggleFocusMode: (Boolean) -> Unit = {},
-    onToggleGroup: (Int) -> Unit = {},
+    onToggleGroup: (String) -> Unit = {},
     onClearGroups: () -> Unit = {},
     onToggleStatus: (String) -> Unit = {},
     onClearStatuses: () -> Unit = {},
@@ -60,10 +62,16 @@ fun FlashcardScreen(
     onReshuffle: () -> Unit = {},
     onResetAllFilters: () -> Unit = {},
     onRate: (String, String) -> Unit, // (wordId, status)
+    onReportWord: (String, Boolean, String?) -> Unit = { _, _, _ -> },
     onNext: () -> Unit,
     onPrevious: () -> Unit,
+    onBack: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    BackHandler {
+        onBack()
+    }
+
     val context = LocalContext.current
     val palette = LocalAppPalette.current
     val ttsManager = remember { TtsManager(context) }
@@ -75,6 +83,7 @@ fun FlashcardScreen(
     }
 
     var showFilterDialog by remember { mutableStateOf(false) }
+    var wordToReport by remember { mutableStateOf<VocabularyWordEntity?>(null) }
 
     val hasActiveFilters = selectedGroups.isNotEmpty() || selectedStatuses.isNotEmpty() || sortOrder != "default"
 
@@ -92,6 +101,17 @@ fun FlashcardScreen(
             onReshuffle = onReshuffle,
             onResetAllFilters = onResetAllFilters,
             onDismiss = { showFilterDialog = false }
+        )
+    }
+
+    wordToReport?.let { targetWord ->
+        ReportWordDialog(
+            word = targetWord,
+            onDismiss = { wordToReport = null },
+            onReport = { isReported, reason ->
+                onReportWord(targetWord.id, isReported, reason)
+                wordToReport = null
+            }
         )
     }
 
@@ -143,13 +163,12 @@ fun FlashcardScreen(
                     }
                 }
             } else {
-                // Normal Mode: Filter Row with Filter Categories Button + Active Chips + Focus + Reset
+                // Normal Mode: Clean header with Filter button, Reset (if active), and Fullscreen button
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Filter Categories Button (Triggers Row & Grid Box Filter Dialog)
                     val activeCount = selectedGroups.size + selectedStatuses.size + (if (sortOrder != "default") 1 else 0)
                     Surface(
                         onClick = { showFilterDialog = true },
@@ -162,7 +181,7 @@ fun FlashcardScreen(
                         modifier = Modifier.height(38.dp)
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 10.dp),
+                            modifier = Modifier.padding(horizontal = 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
@@ -173,7 +192,7 @@ fun FlashcardScreen(
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
-                                text = if (hasActiveFilters) "Filters ($activeCount)" else "Filter Categories",
+                                text = if (hasActiveFilters) "Filters ($activeCount active)" else "Filter Categories",
                                 fontSize = 12.sp,
                                 fontWeight = if (hasActiveFilters) FontWeight.Bold else FontWeight.Medium,
                                 color = if (hasActiveFilters) (if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary) else palette.textPrimary
@@ -181,118 +200,43 @@ fun FlashcardScreen(
                         }
                     }
 
-                    // Active Selected Category Chips (Row of selected boxes - Always remembered and visible)
                     Row(
-                        modifier = Modifier
-                            .weight(1f)
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        selectedStatuses.forEach { st ->
-                            val (label, color) = when (st) {
-                                "know" -> "Know" to EmeraldSuccess
-                                "confusion" -> "Confusion" to AmberWarning
-                                "dont_know" -> "Don't Know" to RoseError
-                                else -> "Unrated" to SlateText
-                            }
-                            Surface(
-                                onClick = { onToggleStatus(st) },
-                                shape = CircleShape,
-                                color = palette.surface,
-                                border = BorderStroke(1.dp, color),
-                                modifier = Modifier.height(28.dp)
+                        // Reset button if filters applied
+                        if (hasActiveFilters) {
+                            IconButton(
+                                onClick = onResetAllFilters,
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(palette.surface)
+                                    .border(1.dp, palette.cardBorder, CircleShape)
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(color))
-                                    Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = color)
-                                    Icon(Icons.Default.Close, contentDescription = "Remove", tint = color, modifier = Modifier.size(12.dp))
-                                }
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Reset Filters",
+                                    tint = RoseError,
+                                    modifier = Modifier.size(16.dp)
+                                )
                             }
                         }
 
-                        selectedGroups.sorted().forEach { grp ->
-                            Surface(
-                                onClick = { onToggleGroup(grp) },
-                                shape = CircleShape,
-                                color = if (palette.isDark) Color(0xFF312E81) else IndigoLight,
-                                border = BorderStroke(1.dp, IndigoPrimary),
-                                modifier = Modifier.height(28.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Text("G$grp", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndigoPrimary)
-                                    Icon(Icons.Default.Close, contentDescription = "Remove", tint = IndigoPrimary, modifier = Modifier.size(12.dp))
-                                }
-                            }
-                        }
-
-                        if (sortOrder != "default") {
-                            val sortName = when (sortOrder) {
-                                "a_z" -> "A-Z"
-                                "z_a" -> "Z-A"
-                                "random" -> "Random"
-                                else -> sortOrder
-                            }
-                            Surface(
-                                onClick = { onSetSortOrder("default") },
-                                shape = CircleShape,
-                                color = palette.surface,
-                                border = BorderStroke(1.dp, palette.cardBorder),
-                                modifier = Modifier.height(28.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Icon(Icons.Default.SortByAlpha, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(12.dp))
-                                    Text(sortName, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = IndigoPrimary)
-                                    Icon(Icons.Default.Close, contentDescription = "Remove", tint = palette.textMuted, modifier = Modifier.size(12.dp))
-                                }
-                            }
-                        }
-                    }
-
-                    // Full Screen / Focus Mode Toggle Button
-                    IconButton(
-                        onClick = { onToggleFocusMode(true) },
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(palette.surface)
-                            .border(1.dp, palette.cardBorder, CircleShape)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Fullscreen,
-                            contentDescription = "Full Screen Focus Mode",
-                            tint = if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-
-                    // Reset button if filters applied
-                    if (hasActiveFilters) {
+                        // Full Screen / Focus Mode Toggle Button
                         IconButton(
-                            onClick = onResetAllFilters,
+                            onClick = { onToggleFocusMode(true) },
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(CircleShape)
-                                .background(Color.White)
-                                .border(1.dp, Color(0xFFE2E8F0), CircleShape)
+                                .background(palette.surface)
+                                .border(1.dp, palette.cardBorder, CircleShape)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Reset Filters",
-                                tint = RoseError,
-                                modifier = Modifier.size(16.dp)
+                                imageVector = Icons.Default.Fullscreen,
+                                contentDescription = "Full Screen Focus Mode",
+                                tint = if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary,
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
@@ -356,11 +300,13 @@ fun FlashcardScreen(
                 Flashcard(
                     word = targetWord,
                     status = targetWord.status,
+                    courseName = courseName,
                     isFlipAnimationEnabled = isFlipAnimationEnabled,
                     isFocusMode = isFocusMode,
                     onRate = { newStatus -> onRate(targetWord.id, newStatus) },
                     onNext = onNext,
                     onSpeak = { text -> ttsManager.speak(text) },
+                    onReportClick = { wordToReport = targetWord },
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -476,11 +422,11 @@ fun FlashcardScreen(
 
 @Composable
 private fun FlashcardFilterDialog(
-    selectedGroups: Set<Int>,
+    selectedGroups: Set<String>,
     selectedStatuses: Set<String>,
     sortOrder: String,
-    availableGroups: List<Int>,
-    onToggleGroup: (Int) -> Unit,
+    availableGroups: List<String>,
+    onToggleGroup: (String) -> Unit,
     onClearGroups: () -> Unit,
     onToggleStatus: (String) -> Unit,
     onClearStatuses: () -> Unit,
@@ -712,9 +658,12 @@ private fun FlashcardFilterDialog(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.Center
                                         ) {
+                                            val grpLabel = if (grp.all { it.isDigit() }) "G$grp" else grp
                                             Text(
-                                                text = "G$grp",
-                                                fontSize = 12.sp,
+                                                text = grpLabel,
+                                                fontSize = if (grpLabel.length > 6) 10.sp else 12.sp,
+                                                maxLines = 1,
+                                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                                                 fontWeight = FontWeight.Bold,
                                                 color = if (isChecked) Color.White else palette.textPrimary
                                             )
@@ -832,5 +781,157 @@ private fun FlashcardFilterDialog(
         },
         containerColor = palette.surface,
         shape = RoundedCornerShape(24.dp)
+    )
+}
+
+@Composable
+fun ReportWordDialog(
+    word: VocabularyWordEntity,
+    onDismiss: () -> Unit,
+    onReport: (isReported: Boolean, reason: String?) -> Unit
+) {
+    val palette = LocalAppPalette.current
+    var selectedReason by remember { mutableStateOf(word.reportReason ?: "Typo / Spelling issue") }
+    var customReason by remember { mutableStateOf("") }
+    val quickReasons = listOf(
+        "Typo / Spelling issue",
+        "Incorrect meaning / translation",
+        "Inappropriate example",
+        "Mnemonic error",
+        "Other"
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Flag,
+                    contentDescription = null,
+                    tint = RoseError,
+                    modifier = Modifier.size(24.dp)
+                )
+                Text(
+                    text = if (word.isReported) "Reported Word" else "Report Word",
+                    fontFamily = PoppinsFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "Word: \"${word.word}\"",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    color = IndigoPrimary
+                )
+
+                if (word.isReported) {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (palette.isDark) Color(0xFF381219) else RoseLight
+                        ),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text(
+                            text = "This word is currently flagged as reported.\nReason: ${word.reportReason ?: "No reason given"}",
+                            fontSize = 12.sp,
+                            color = RoseError,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                }
+
+                Text(
+                    text = "Select a reason for reporting:",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = palette.textMuted
+                )
+
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    quickReasons.forEach { reason ->
+                        val isSelected = selectedReason == reason
+                        Surface(
+                            onClick = { selectedReason = reason },
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isSelected) (if (palette.isDark) Color(0xFF312E81) else IndigoLight) else palette.surface,
+                            border = BorderStroke(
+                                1.dp,
+                                if (isSelected) IndigoPrimary else palette.cardBorder
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = reason,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSelected) IndigoPrimary else palette.textPrimary
+                                )
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null,
+                                        tint = IndigoPrimary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (selectedReason == "Other") {
+                    OutlinedTextField(
+                        value = customReason,
+                        onValueChange = { customReason = it },
+                        label = { Text("Specify Reason") },
+                        placeholder = { Text("Describe the issue...") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        singleLine = false,
+                        maxLines = 3
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val finalReason = if (selectedReason == "Other") customReason.ifBlank { "Other" } else selectedReason
+                    onReport(true, finalReason)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = RoseError),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Text("Submit Report", color = Color.White)
+            }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (word.isReported) {
+                    OutlinedButton(
+                        onClick = { onReport(false, null) },
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("Clear Report")
+                    }
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel")
+                }
+            }
+        },
+        containerColor = palette.surface
     )
 }

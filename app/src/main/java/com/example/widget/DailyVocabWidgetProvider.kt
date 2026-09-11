@@ -106,30 +106,42 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
 
                     val allCourses = db.courseDao().getAllCoursesList()
                     val courseMap = allCourses.associateBy { it.id }
+                    val allWords = db.vocabularyDao().getAllWordsList()
 
-                    var candidateWords = if (prefCourseId != "all" && prefCourseId.isNotBlank()) {
-                        val courseWords = db.vocabularyDao().getWordsListByCourse(prefCourseId)
-                        if (courseWords.isNotEmpty()) courseWords else db.vocabularyDao().getAllWordsList()
+                    // Robust Filtering: ensure only populated categories and courses are used, preventing empty data views
+                    val courseWords = if (prefCourseId != "all" && prefCourseId.isNotBlank()) {
+                        val filtered = allWords.filter { it.courseId == prefCourseId }
+                        if (filtered.isNotEmpty()) filtered else allWords
                     } else {
-                        db.vocabularyDao().getAllWordsList()
+                        allWords
                     }
 
-                    if (prefTagFilter != "all" && prefTagFilter.isNotBlank()) {
-                        val filtered = candidateWords.filter { it.status.equals(prefTagFilter, ignoreCase = true) }
-                        if (filtered.isNotEmpty()) {
-                            candidateWords = filtered
+                    // Filter by tag/category only if that category is actually populated in the course
+                    val filteredByTag = if (prefTagFilter != "all" && prefTagFilter.isNotBlank()) {
+                        courseWords.filter { it.status.equals(prefTagFilter, ignoreCase = true) }
+                    } else {
+                        courseWords
+                    }
+
+                    // Strict fallback hierarchy guarantees candidate list is NEVER empty
+                    val finalCandidates = when {
+                        filteredByTag.isNotEmpty() -> filteredByTag
+                        courseWords.isNotEmpty() -> courseWords
+                        allWords.isNotEmpty() -> allWords
+                        else -> com.example.data.repository.SampleData.sampleWords
+                    }
+
+                    // Sequential cycle or non-repeating selection
+                    val currentIndex = finalCandidates.indexOfFirst { it.id == lastShownWordId }
+                    val word = if (finalCandidates.size > 1) {
+                        if (currentIndex >= 0) {
+                            finalCandidates[(currentIndex + 1) % finalCandidates.size]
+                        } else {
+                            finalCandidates.random()
                         }
-                    }
-
-                    // Avoid repeating the exact same word as previous cycle if possible
-                    val freshCandidates = if (candidateWords.size > 1 && !lastShownWordId.isNullOrBlank()) {
-                        val nonRepeating = candidateWords.filter { it.id != lastShownWordId }
-                        if (nonRepeating.isNotEmpty()) nonRepeating else candidateWords
                     } else {
-                        candidateWords
+                        finalCandidates.firstOrNull()
                     }
-
-                    val word = if (freshCandidates.isNotEmpty()) freshCandidates.random() else null
 
                     if (word != null) {
                         prefs.edit().putString(KEY_LAST_SHOWN_WORD_ID, word.id).apply()
@@ -137,14 +149,13 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
                     val views = RemoteViews(context.packageName, R.layout.widget_daily_vocab)
 
                     val displayCourse = if (word != null) {
-                        (courseMap[word.courseId]?.title ?: "GENERAL VOCABULARY").uppercase()
+                        (courseMap[word.courseId]?.title ?: "VOCABULARY").uppercase()
                     } else {
                         "MEMORIZER"
                     }
 
                     val displayWord = word?.word ?: "Ephemeral"
                     val displayMeaning = word?.meaning ?: "Lasting for a very short time; fleeting or transient."
-                    val displayExample = if (!word?.example.isNullOrBlank()) "\"${word?.example}\"" else "Tap to open Memorizer"
 
                     // Tag details & matching color for Place 1
                     val (tagLabel, tagColorInt) = when (word?.status) {
@@ -152,7 +163,10 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
                         "confusion" -> Pair("CONFUSION", Color.parseColor("#D97706")) // Amber
                         "dont_know" -> Pair("DON'T KNOW", Color.parseColor("#E11D48")) // Rose
                         else -> {
-                            val groupLabel = if ((word?.group ?: 0) > 0) "GROUP ${word?.group}" else "UNRATED"
+                            val grp = word?.group?.trim() ?: ""
+                            val groupLabel = if (grp.isNotBlank()) {
+                                if (grp.all { it.isDigit() }) "GROUP $grp" else grp.uppercase()
+                            } else "UNRATED"
                             Pair(groupLabel, Color.parseColor("#4F46E5")) // Indigo
                         }
                     }
@@ -168,24 +182,25 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
 
                     // Place 2 (Meaning)
                     views.setTextViewText(R.id.widget_word_meaning, displayMeaning)
-                    views.setTextViewText(R.id.widget_word_example, displayExample)
 
-                    // Apply Font Size setting
+                    // Apply Font Size setting with refined values to prevent vertical overflow/whitespace
                     val prefFontSize = prefs.getString(KEY_WIDGET_FONT_SIZE, "medium") ?: "medium"
                     val (titleSize, meaningSize) = when (prefFontSize) {
                         "small" -> Pair(15f, 10.5f)
-                        "large" -> Pair(22f, 14f)
-                        else -> Pair(18f, 12f)
+                        "large" -> Pair(20f, 13f)
+                        else -> Pair(17f, 11.5f)
                     }
                     views.setTextViewTextSize(R.id.widget_word_title, android.util.TypedValue.COMPLEX_UNIT_SP, titleSize)
                     views.setTextViewTextSize(R.id.widget_word_meaning, android.util.TypedValue.COMPLEX_UNIT_SP, meaningSize)
 
-                    // Apply Widget Size setting
+                    // Apply Widget Size setting & hide example completely if absent to remove empty void
                     val prefWidgetSize = prefs.getString(KEY_WIDGET_SIZE, "standard") ?: "standard"
-                    if (prefWidgetSize == "compact") {
-                        views.setViewVisibility(R.id.widget_word_example, android.view.View.GONE)
-                    } else {
+                    val hasExample = word != null && !word.example.isNullOrBlank() && prefWidgetSize != "compact"
+                    if (hasExample) {
                         views.setViewVisibility(R.id.widget_word_example, android.view.View.VISIBLE)
+                        views.setTextViewText(R.id.widget_word_example, "\"${word?.example?.trim()}\"")
+                    } else {
+                        views.setViewVisibility(R.id.widget_word_example, android.view.View.GONE)
                     }
 
                     // Click intent for the whole widget -> open MainActivity

@@ -9,6 +9,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -49,6 +51,8 @@ fun AdminPanelScreen(
     onSelectCourse: (String) -> Unit = {},
     onDeleteCourse: (String) -> Unit = {},
     onAddWord: (VocabularyWordEntity) -> Unit,
+    onUpdateWord: (VocabularyWordEntity) -> Unit = {},
+    onUpdateCourse: (String, String, String?) -> Unit = { _, _, _ -> },
     onDeleteWord: (String) -> Unit,
     onDeleteGame: (String) -> Unit,
     onDeleteQuestion: (String) -> Unit,
@@ -67,6 +71,8 @@ fun AdminPanelScreen(
     var showUploadGameDialog by remember { mutableStateOf(false) }
     var showUploadQBDialog by remember { mutableStateOf(false) }
     var targetCourseIdForUpload by remember(activeCourseId) { mutableStateOf(activeCourseId) }
+    var wordBeingEdited by remember { mutableStateOf<VocabularyWordEntity?>(null) }
+    var courseBeingEdited by remember { mutableStateOf<CourseEntity?>(null) }
 
     Column(
         modifier = modifier
@@ -74,6 +80,31 @@ fun AdminPanelScreen(
             .background(SlateBg)
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
+        // Control Header
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = "Control",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = SlateText
+                )
+                Text(
+                    text = "Manage courses, manual edits, vocabulary & practice data",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 11.sp,
+                    color = SlateMuted
+                )
+            }
+        }
+
         // Section Pills
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -201,6 +232,8 @@ fun AdminPanelScreen(
                     onCreateCourseClick = { showCreateCourseDialog = true },
                     onSelectCourse = onSelectCourse,
                     onDeleteCourse = onDeleteCourse,
+                    onEditCourse = { course -> courseBeingEdited = course },
+                    onManageWords = { selectedSection = "words" },
                     onUploadToCourse = { cId ->
                         targetCourseIdForUpload = cId
                         showUploadCourseDialog = true
@@ -210,13 +243,22 @@ fun AdminPanelScreen(
             "words" -> {
                 WordsAdminView(
                     words = words,
-                    activeCourseTitle = courses.firstOrNull { it.id == activeCourseId }?.title ?: if (activeCourseId.isNotBlank()) "Active Course" else "No Course Selected",
+                    courses = courses,
+                    activeCourseId = activeCourseId,
+                    onSelectCourse = onSelectCourse,
                     onAddWordClick = { showAddWordDialog = true },
                     onUploadClick = {
                         targetCourseIdForUpload = activeCourseId
                         showUploadCourseDialog = true
                     },
-                    onDeleteWord = onDeleteWord
+                    onEditWord = { word -> wordBeingEdited = word },
+                    onDeleteWord = onDeleteWord,
+                    onClearReport = { wordId ->
+                        val word = words.find { it.id == wordId }
+                        if (word != null) {
+                            onUpdateWord(word.copy(isReported = false, reportReason = null))
+                        }
+                    }
                 )
             }
             "games" -> {
@@ -302,6 +344,30 @@ fun AdminPanelScreen(
             }
         )
     }
+
+    // Edit Word Dialog (Manual Data Edit)
+    if (wordBeingEdited != null) {
+        EditWordDialog(
+            word = wordBeingEdited!!,
+            onDismiss = { wordBeingEdited = null },
+            onConfirm = { updatedWord ->
+                onUpdateWord(updatedWord)
+                wordBeingEdited = null
+            }
+        )
+    }
+
+    // Edit Course Dialog (Manual Course Edit)
+    if (courseBeingEdited != null) {
+        EditCourseDialog(
+            course = courseBeingEdited!!,
+            onDismiss = { courseBeingEdited = null },
+            onConfirm = { newTitle, newDescription ->
+                onUpdateCourse(courseBeingEdited!!.id, newTitle, newDescription)
+                courseBeingEdited = null
+            }
+        )
+    }
 }
 
 @Composable
@@ -312,6 +378,8 @@ private fun CoursesAdminView(
     onCreateCourseClick: () -> Unit,
     onSelectCourse: (String) -> Unit,
     onDeleteCourse: (String) -> Unit,
+    onEditCourse: (CourseEntity) -> Unit = {},
+    onManageWords: () -> Unit = {},
     onUploadToCourse: (String) -> Unit
 ) {
     var coursePendingDelete by remember { mutableStateOf<CourseEntity?>(null) }
@@ -395,7 +463,8 @@ private fun CoursesAdminView(
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.weight(1f)
                                 ) {
                                     Text(
                                         text = course.title,
@@ -416,11 +485,19 @@ private fun CoursesAdminView(
                                     }
                                 }
 
-                                IconButton(
-                                    onClick = { coursePendingDelete = course },
-                                    modifier = Modifier.size(28.dp)
-                                ) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Delete Course", tint = RoseError, modifier = Modifier.size(16.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(
+                                        onClick = { onEditCourse(course) },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(Icons.Default.Edit, contentDescription = "Edit Course", tint = IndigoPrimary, modifier = Modifier.size(16.dp))
+                                    }
+                                    IconButton(
+                                        onClick = { coursePendingDelete = course },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete Course", tint = RoseError, modifier = Modifier.size(16.dp))
+                                    }
                                 }
                             }
 
@@ -449,6 +526,20 @@ private fun CoursesAdminView(
 
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     OutlinedButton(
+                                        onClick = {
+                                            onSelectCourse(course.id)
+                                            onManageWords()
+                                        },
+                                        shape = CircleShape,
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                        modifier = Modifier.height(30.dp)
+                                    ) {
+                                        Icon(Icons.Default.List, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Words", fontSize = 10.sp)
+                                    }
+
+                                    OutlinedButton(
                                         onClick = { onUploadToCourse(course.id) },
                                         shape = CircleShape,
                                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
@@ -456,7 +547,7 @@ private fun CoursesAdminView(
                                     ) {
                                         Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(14.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Upload Excel/CSV", fontSize = 10.sp)
+                                        Text("Upload", fontSize = 10.sp)
                                     }
 
                                     if (!isActive) {
@@ -659,62 +750,223 @@ private fun CreateCourseDialog(
 @Composable
 private fun WordsAdminView(
     words: List<VocabularyWordEntity>,
-    activeCourseTitle: String = "",
+    courses: List<CourseEntity> = emptyList(),
+    activeCourseId: String = "",
+    onSelectCourse: (String) -> Unit = {},
     onAddWordClick: () -> Unit,
     onUploadClick: () -> Unit,
-    onDeleteWord: (String) -> Unit
+    onEditWord: (VocabularyWordEntity) -> Unit = {},
+    onDeleteWord: (String) -> Unit,
+    onClearReport: (String) -> Unit = {}
 ) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        if (activeCourseTitle.isNotBlank()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Current Course: ",
-                    fontSize = 11.sp,
-                    color = SlateLight
-                )
-                Text(
-                    text = activeCourseTitle,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = IndigoPrimary
-                )
+    var selectedCourseFilterId by remember(activeCourseId, courses) {
+        mutableStateOf(if (activeCourseId.isNotBlank()) activeCourseId else courses.firstOrNull()?.id ?: "")
+    }
+    var showOnlyReported by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+
+    val activeCourseObj = courses.firstOrNull { it.id == selectedCourseFilterId }
+
+    // Words filtered by chosen course (or all if none selected)
+    val wordsInCourse = remember(words, selectedCourseFilterId) {
+        if (selectedCourseFilterId.isBlank()) words
+        else words.filter { it.courseId == selectedCourseFilterId }
+    }
+
+    val reportedCountInCourse = remember(wordsInCourse) {
+        wordsInCourse.count { it.isReported }
+    }
+
+    val displayedWords = remember(wordsInCourse, showOnlyReported, searchQuery) {
+        var list = if (showOnlyReported) wordsInCourse.filter { it.isReported } else wordsInCourse
+        if (searchQuery.isNotBlank()) {
+            val q = searchQuery.trim().lowercase()
+            list = list.filter {
+                it.word.lowercase().contains(q) ||
+                it.meaning.lowercase().contains(q) ||
+                it.group.lowercase().contains(q) ||
+                (it.reportReason?.lowercase()?.contains(q) == true)
             }
         }
+        list
+    }
 
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Course Selector Header / Horizontal Chips
+        if (courses.isNotEmpty()) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "Filter by Course:",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = SlateMuted,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    courses.forEach { course ->
+                        val isSelected = selectedCourseFilterId == course.id
+                        val count = words.count { it.courseId == course.id }
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = {
+                                selectedCourseFilterId = course.id
+                                onSelectCourse(course.id)
+                            },
+                            label = {
+                                Text(
+                                    text = "${course.title} ($count)",
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
+                            shape = CircleShape,
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = IndigoPrimary,
+                                selectedLabelColor = Color.White
+                            )
+                        )
+                    }
+
+                    FilterChip(
+                        selected = selectedCourseFilterId.isBlank(),
+                        onClick = { selectedCourseFilterId = "" },
+                        label = {
+                            Text(
+                                text = "All Courses (${words.size})",
+                                fontSize = 11.sp,
+                                fontWeight = if (selectedCourseFilterId.isBlank()) FontWeight.Bold else FontWeight.Normal
+                            )
+                        },
+                        shape = CircleShape,
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = IndigoPrimary,
+                            selectedLabelColor = Color.White
+                        )
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        // Action Row & Reported Filter
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Button(
                 onClick = onAddWordClick,
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
+                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
             ) {
-                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Add Word", fontSize = 13.sp)
+                Text("Add Word", fontSize = 12.sp)
             }
 
             OutlinedButton(
                 onClick = onUploadClick,
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(12.dp)
+                modifier = Modifier.weight(1.1f),
+                shape = RoundedCornerShape(12.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
             ) {
-                Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(18.dp))
+                Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Upload Excel/CSV", fontSize = 12.sp)
+                Text("Upload File", fontSize = 12.sp)
+            }
+
+            // Reported filter chip
+            FilterChip(
+                selected = showOnlyReported,
+                onClick = { showOnlyReported = !showOnlyReported },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Flag,
+                        contentDescription = null,
+                        tint = if (showOnlyReported) Color.White else (if (reportedCountInCourse > 0) RoseError else SlateLight),
+                        modifier = Modifier.size(15.dp)
+                    )
+                },
+                label = {
+                    Text(
+                        text = "Reported ($reportedCountInCourse)",
+                        fontSize = 11.sp,
+                        fontWeight = if (showOnlyReported) FontWeight.Bold else FontWeight.Normal
+                    )
+                },
+                shape = CircleShape,
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = RoseError,
+                    selectedLabelColor = Color.White
+                )
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Search bar
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            placeholder = { Text("Search words, meanings, or report notes...", fontSize = 12.sp, color = SlateLight) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = SlateLight, modifier = Modifier.size(18.dp)) },
+            trailingIcon = {
+                if (searchQuery.isNotEmpty()) {
+                    IconButton(onClick = { searchQuery = "" }) {
+                        Icon(Icons.Default.Close, contentDescription = "Clear", tint = SlateLight, modifier = Modifier.size(16.dp))
+                    }
+                }
+            },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = Color.White,
+                unfocusedContainerColor = Color.White,
+                focusedBorderColor = IndigoPrimary,
+                unfocusedBorderColor = SlateBorder
+            )
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // List Status Header
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 2.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "${displayedWords.size} words shown" + (if (activeCourseObj != null && selectedCourseFilterId.isNotBlank()) " in ${activeCourseObj.title}" else ""),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = SlateMuted
+            )
+            if (showOnlyReported) {
+                Text(
+                    text = "Showing reported items only",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = RoseError
+                )
             }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(4.dp))
 
-        if (words.isEmpty()) {
+        if (displayedWords.isEmpty()) {
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -725,9 +977,23 @@ private fun WordsAdminView(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Default.LayersClear, contentDescription = null, tint = SlateLight, modifier = Modifier.size(36.dp))
-                    Text("No words found in this course", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = SlateText)
-                    Text("Upload an Excel (.xlsx) or CSV file with vocab items.", fontSize = 12.sp, color = SlateMuted)
+                    Icon(
+                        imageVector = if (showOnlyReported) Icons.Default.CheckCircle else Icons.Default.LayersClear,
+                        contentDescription = null,
+                        tint = if (showOnlyReported) EmeraldSuccess else SlateLight,
+                        modifier = Modifier.size(36.dp)
+                    )
+                    Text(
+                        text = if (showOnlyReported) "No reported words in this course!" else "No words found",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = SlateText
+                    )
+                    Text(
+                        text = if (showOnlyReported) "All words in this course are clean." else "Upload an Excel (.xlsx) or CSV file with vocab items.",
+                        fontSize = 12.sp,
+                        color = SlateMuted
+                    )
                 }
             }
         } else {
@@ -735,66 +1001,147 @@ private fun WordsAdminView(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(words, key = { it.id }) { word ->
+                items(displayedWords, key = { it.id }) { word ->
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(14.dp),
                         colors = CardDefaults.cardColors(containerColor = Color.White),
-                        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(SlateBorder))
+                        border = CardDefaults.outlinedCardBorder().copy(
+                            brush = androidx.compose.ui.graphics.SolidColor(if (word.isReported) RoseError.copy(alpha = 0.6f) else SlateBorder)
+                        )
                     ) {
-                        Row(
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(14.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                                .padding(12.dp)
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Text(
-                                        text = word.word,
-                                        fontFamily = PoppinsFontFamily,
-                                        fontSize = 16.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = SlateText
-                                    )
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(CircleShape)
-                                            .background(IndigoLight)
-                                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
                                         Text(
-                                            text = "Group ${word.group}",
+                                            text = word.word,
                                             fontFamily = PoppinsFontFamily,
-                                            fontSize = 10.sp,
+                                            fontSize = 16.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = IndigoPrimary
+                                            color = SlateText
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(CircleShape)
+                                                .background(IndigoLight)
+                                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                text = "Group ${word.group}",
+                                                fontFamily = PoppinsFontFamily,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = IndigoPrimary
+                                            )
+                                        }
+
+                                        val statusColor = when (word.status) {
+                                            "know" -> EmeraldSuccess
+                                            "dont_know" -> RoseError
+                                            "confusion" -> AmberWarning
+                                            else -> SlateLight
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(CircleShape)
+                                                .background(statusColor.copy(alpha = 0.15f))
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                text = word.status.replace("_", " ").uppercase(),
+                                                fontFamily = PoppinsFontFamily,
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = statusColor
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(2.dp))
+
+                                    Text(
+                                        text = word.meaning,
+                                        fontFamily = PoppinsFontFamily,
+                                        fontSize = 13.sp,
+                                        color = EmeraldSuccess,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+
+                                    if (!word.example.isNullOrBlank()) {
+                                        Text(
+                                            text = word.example,
+                                            fontFamily = PoppinsFontFamily,
+                                            fontSize = 12.sp,
+                                            color = SlateMuted
                                         )
                                     }
                                 }
-                                Text(
-                                    text = word.meaning,
-                                    fontFamily = PoppinsFontFamily,
-                                    fontSize = 13.sp,
-                                    color = EmeraldSuccess,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                if (!word.example.isNullOrBlank()) {
-                                    Text(
-                                        text = word.example,
-                                        fontFamily = PoppinsFontFamily,
-                                        fontSize = 12.sp,
-                                        color = SlateMuted
-                                    )
+
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(onClick = { onEditWord(word) }) {
+                                        Icon(Icons.Default.Edit, contentDescription = "Edit Word", tint = IndigoPrimary, modifier = Modifier.size(20.dp))
+                                    }
+                                    IconButton(onClick = { onDeleteWord(word.id) }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete Word", tint = RoseError, modifier = Modifier.size(20.dp))
+                                    }
                                 }
                             }
 
-                            IconButton(onClick = { onDeleteWord(word.id) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete Word", tint = RoseError)
+                            // Prominent Reported Banner with Clear button
+                            if (word.isReported) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0xFFFFF1F2))
+                                        .border(1.dp, Color(0xFFFECDD3), RoundedCornerShape(8.dp))
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(Icons.Default.Flag, contentDescription = null, tint = RoseError, modifier = Modifier.size(16.dp))
+                                        Text(
+                                            text = "Reported: ${word.reportReason ?: "Issue reported"}",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = RoseError
+                                        )
+                                    }
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        TextButton(
+                                            onClick = { onEditWord(word) },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            modifier = Modifier.height(26.dp)
+                                        ) {
+                                            Text("Edit", fontSize = 11.sp, color = IndigoPrimary, fontWeight = FontWeight.Bold)
+                                        }
+                                        TextButton(
+                                            onClick = { onClearReport(word.id) },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            modifier = Modifier.height(26.dp)
+                                        ) {
+                                            Text("Clear", fontSize = 11.sp, color = RoseError, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -1337,13 +1684,13 @@ private fun AddWordDialog(
             Button(
                 onClick = {
                     if (word.isNotBlank()) {
-                        val grpNum = group.toIntOrNull() ?: 1
+                        val grpVal = group.trim().ifEmpty { "1" }
                         onConfirm(
                             VocabularyWordEntity(
                                 id = "word_${System.currentTimeMillis()}",
                                 word = word.trim(),
                                 meaning = meaning.trim(),
-                                group = grpNum,
+                                group = grpVal,
                                 example = example.trim().ifEmpty { null },
                                 synonyms = synonyms.trim().ifEmpty { null },
                                 extraWord = extraWord.trim().ifEmpty { null },
@@ -1582,6 +1929,258 @@ private fun UploadFileDialog(
                 colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
             ) {
                 Text("Import Content")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+private fun EditWordDialog(
+    word: VocabularyWordEntity,
+    onDismiss: () -> Unit,
+    onConfirm: (VocabularyWordEntity) -> Unit
+) {
+    var wordText by remember { mutableStateOf(word.word) }
+    var meaning by remember { mutableStateOf(word.meaning) }
+    var group by remember { mutableStateOf(word.group) }
+    var example by remember { mutableStateOf(word.example ?: "") }
+    var synonyms by remember { mutableStateOf(word.synonyms ?: "") }
+    var extraWord by remember { mutableStateOf(word.extraWord ?: "") }
+    var mnemonic by remember { mutableStateOf(word.mnemonic ?: "") }
+    var selectedStatus by remember { mutableStateOf(word.status) }
+    var isReported by remember { mutableStateOf(word.isReported) }
+    var reportReason by remember { mutableStateOf(word.reportReason ?: "") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(Icons.Default.Edit, contentDescription = null, tint = IndigoPrimary)
+                Text("Edit Word", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = SlateText)
+            }
+        },
+        text = {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                item {
+                    OutlinedTextField(
+                        value = wordText,
+                        onValueChange = { wordText = it },
+                        label = { Text("Word (Place 1) *") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                item {
+                    OutlinedTextField(
+                        value = meaning,
+                        onValueChange = { meaning = it },
+                        label = { Text("Meaning (Place 2) *") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                item {
+                    OutlinedTextField(
+                        value = group,
+                        onValueChange = { group = it },
+                        label = { Text("Group") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                item {
+                    Text("Status", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = SlateText)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        val statuses = listOf(
+                            "unrated" to "Unrated",
+                            "dont_know" to "Don't Know",
+                            "confusion" to "Confusion",
+                            "know" to "Know"
+                        )
+                        statuses.forEach { (stKey, stLabel) ->
+                            FilterChip(
+                                selected = selectedStatus.equals(stKey, ignoreCase = true),
+                                onClick = { selectedStatus = stKey },
+                                label = { Text(stLabel, fontSize = 10.sp) },
+                                shape = CircleShape
+                            )
+                        }
+                    }
+                }
+                item {
+                    OutlinedTextField(
+                        value = example,
+                        onValueChange = { example = it },
+                        label = { Text("Example (Place 3)") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                item {
+                    OutlinedTextField(
+                        value = synonyms,
+                        onValueChange = { synonyms = it },
+                        label = { Text("Synonyms (Place 4)") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                item {
+                    OutlinedTextField(
+                        value = extraWord,
+                        onValueChange = { extraWord = it },
+                        label = { Text("Derivative / Forms (Place 5)") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                item {
+                    OutlinedTextField(
+                        value = mnemonic,
+                        onValueChange = { mnemonic = it },
+                        label = { Text("Mnemonic (Place 6)") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isReported) Color(0xFFFFF1F2) else SlateBg
+                        ),
+                        border = CardDefaults.outlinedCardBorder().copy(
+                            brush = androidx.compose.ui.graphics.SolidColor(if (isReported) Color(0xFFFECDD3) else SlateBorder)
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Icon(
+                                        imageVector = Icons.Default.Flag,
+                                        contentDescription = null,
+                                        tint = if (isReported) RoseError else SlateLight,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = if (isReported) "Word is Reported" else "Report Status",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        color = if (isReported) RoseError else SlateText
+                                    )
+                                }
+                                Switch(
+                                    checked = isReported,
+                                    onCheckedChange = { isReported = it }
+                                )
+                            }
+                            if (isReported) {
+                                OutlinedTextField(
+                                    value = reportReason,
+                                    onValueChange = { reportReason = it },
+                                    label = { Text("Report Reason / Note") },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (wordText.isNotBlank()) {
+                        onConfirm(
+                            word.copy(
+                                word = wordText.trim(),
+                                meaning = meaning.trim(),
+                                group = group.trim().ifEmpty { "1" },
+                                status = selectedStatus,
+                                example = example.trim().ifEmpty { null },
+                                synonyms = synonyms.trim().ifEmpty { null },
+                                extraWord = extraWord.trim().ifEmpty { null },
+                                mnemonic = mnemonic.trim().ifEmpty { null },
+                                isReported = isReported,
+                                reportReason = if (isReported) reportReason.trim().ifEmpty { null } else null
+                            )
+                        )
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
+            ) {
+                Text("Save Changes")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+private fun EditCourseDialog(
+    course: CourseEntity,
+    onDismiss: () -> Unit,
+    onConfirm: (newTitle: String, newDescription: String?) -> Unit
+) {
+    var title by remember { mutableStateOf(course.title) }
+    var description by remember { mutableStateOf(course.description ?: "") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(Icons.Default.Edit, contentDescription = null, tint = IndigoPrimary)
+                Text("Edit Course", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = SlateText)
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Course Title *") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Course Description") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (title.isNotBlank()) {
+                        onConfirm(title.trim(), description.trim().ifEmpty { null })
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
+            ) {
+                Text("Save")
             }
         },
         dismissButton = {

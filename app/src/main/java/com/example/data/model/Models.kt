@@ -30,7 +30,7 @@ data class VocabularyWordEntity(
     @PrimaryKey val id: String,
     val word: String,
     val meaning: String,
-    val group: Int = 1,
+    val group: String = "1",
     val synonyms: String? = null,
     val extraWord: String? = null,
     val extraMeaning: String? = null,
@@ -40,7 +40,9 @@ data class VocabularyWordEntity(
     val customPlacesJson: String? = null,
     val courseId: String = "course_default",
     val timesReviewed: Int = 0,
-    val lastReviewedAt: Long = System.currentTimeMillis()
+    val lastReviewedAt: Long = System.currentTimeMillis(),
+    val isReported: Boolean = false,
+    val reportReason: String? = null
 )
 
 @Entity(tableName = "game_practice_items")

@@ -5,7 +5,10 @@
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:background="@drawable/widget_background"
-    android:padding="14dp">
+    android:paddingLeft="10dp"
+    android:paddingRight="10dp"
+    android:paddingTop="7dp"
+    android:paddingBottom="7dp">
 
     <!-- Top Bar: Course Name (small), Tag Badge & Next Button -->
     <LinearLayout
@@ -21,11 +24,12 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="GRE VOCABULARY"
-            android:textSize="10sp"
+            android:textSize="9.5sp"
             android:textStyle="bold"
             android:textColor="#64748B"
             android:maxLines="1"
-            android:ellipsize="end" />
+            android:ellipsize="end"
+            android:includeFontPadding="false" />
 
         <!-- Tag Badge -->
         <TextView
@@ -33,15 +37,16 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="KNOW"
-            android:textSize="9sp"
+            android:textSize="8.5sp"
             android:textStyle="bold"
             android:textColor="#059669"
             android:background="@drawable/widget_badge_bg"
-            android:paddingLeft="6dp"
-            android:paddingRight="6dp"
-            android:paddingTop="2dp"
-            android:paddingBottom="2dp"
-            android:layout_marginEnd="8dp" />
+            android:paddingLeft="5dp"
+            android:paddingRight="5dp"
+            android:paddingTop="1.5dp"
+            android:paddingBottom="1.5dp"
+            android:layout_marginEnd="6dp"
+            android:includeFontPadding="false" />
 
         <!-- Next Button -->
         <TextView
@@ -49,48 +54,67 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Next ➔"
-            android:textSize="11sp"
+            android:textSize="10.5sp"
             android:textStyle="bold"
             android:textColor="#4F46E5"
-            android:padding="4dp" />
+            android:paddingLeft="5dp"
+            android:paddingRight="2dp"
+            android:paddingTop="1dp"
+            android:paddingBottom="1dp"
+            android:includeFontPadding="false" />
     </LinearLayout>
 
-    <!-- Place 1: Word (Text color corresponds to Tag color) -->
-    <TextView
-        android:id="@+id/widget_word_title"
+    <!-- Center Content Area: Weight=1 with vertical center gravity eliminates empty whitespace -->
+    <LinearLayout
+        android:id="@+id/widget_content_container"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:text="Ephemeral"
-        android:textSize="19sp"
-        android:textStyle="bold"
-        android:textColor="#059669"
-        android:maxLines="1"
-        android:ellipsize="end" />
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:gravity="center_vertical"
+        android:layout_marginTop="2dp"
+        android:layout_marginBottom="1dp">
 
-    <!-- Place 2: Meaning -->
-    <TextView
-        android:id="@+id/widget_word_meaning"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="3dp"
-        android:text="Lasting for a very short time; fleeting or transient."
-        android:textSize="12sp"
-        android:textColor="#334155"
-        android:maxLines="2"
-        android:ellipsize="end" />
+        <!-- Place 1: Word -->
+        <TextView
+            android:id="@+id/widget_word_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Ephemeral"
+            android:textSize="17sp"
+            android:textStyle="bold"
+            android:textColor="#059669"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:includeFontPadding="false" />
 
-    <!-- Extra: Example or note -->
-    <TextView
-        android:id="@+id/widget_word_example"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="3dp"
-        android:text="Tap to open in Memorizer"
-        android:textSize="10sp"
-        android:textStyle="italic"
-        android:textColor="#94A3B8"
-        android:maxLines="1"
-        android:ellipsize="end" />
+        <!-- Place 2: Meaning -->
+        <TextView
+            android:id="@+id/widget_word_meaning"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="Lasting for a very short time; fleeting or transient."
+            android:textSize="11.5sp"
+            android:textColor="#334155"
+            android:maxLines="3"
+            android:ellipsize="end"
+            android:includeFontPadding="false" />
+
+        <!-- Extra: Example or note -->
+        <TextView
+            android:id="@+id/widget_word_example"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text=""
+            android:textSize="10sp"
+            android:textStyle="italic"
+            android:textColor="#64748B"
+            android:maxLines="2"
+            android:ellipsize="end"
+            android:includeFontPadding="false"
+            android:visibility="gone" />
+    </LinearLayout>
 
 </LinearLayout>

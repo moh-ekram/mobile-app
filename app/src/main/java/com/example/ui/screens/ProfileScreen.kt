@@ -37,6 +37,7 @@ import coil.compose.AsyncImage
 import com.example.data.model.CourseEntity
 import com.example.data.model.UserProgressEntity
 import com.example.data.model.UserSession
+import com.example.data.model.VocabularyWordEntity
 import com.example.ui.theme.*
 import com.example.widget.DailyVocabWidgetProvider
 import java.text.SimpleDateFormat
@@ -50,6 +51,7 @@ fun ProfileScreen(
     backupDirectoryPath: String,
     customBackupTreeUri: String? = null,
     courses: List<CourseEntity> = emptyList(),
+    words: List<VocabularyWordEntity> = emptyList(),
     activeCourseId: String = "",
     isDarkTheme: Boolean = false,
     isFlipAnimationEnabled: Boolean = true,
@@ -722,15 +724,80 @@ fun ProfileScreen(
                         )
                     }
 
+                    // Dynamic Populated Options: Only show courses and categories that have words
+                    val courseOptions = remember(courses, words) {
+                        val list = mutableListOf<Pair<String, String>>()
+                        if (words.isNotEmpty()) {
+                            list.add("all" to "All Courses (${words.size})")
+                        }
+                        courses.forEach { c ->
+                            val count = words.count { it.courseId == c.id }
+                            if (count > 0) {
+                                list.add(c.id to "${c.title} ($count)")
+                            }
+                        }
+                        if (list.isEmpty()) {
+                            listOf("all" to "All Courses")
+                        } else {
+                            list
+                        }
+                    }
+
+                    // Words in the currently selected course
+                    val wordsInSelectedCourse = remember(words, selectedWidgetCourseId) {
+                        if (selectedWidgetCourseId == "all") words else words.filter { it.courseId == selectedWidgetCourseId }
+                    }
+
+                    // Robust Tag/Category Options: Only categories with count > 0 are displayed
+                    val tagOptions = remember(wordsInSelectedCourse) {
+                        val list = mutableListOf<Pair<String, String>>()
+                        if (wordsInSelectedCourse.isNotEmpty()) {
+                            list.add("all" to "All Statuses (${wordsInSelectedCourse.size})")
+                        }
+                        val knowCount = wordsInSelectedCourse.count { it.status.equals("know", ignoreCase = true) }
+                        if (knowCount > 0) list.add("know" to "Know ($knowCount)")
+
+                        val confusionCount = wordsInSelectedCourse.count { it.status.equals("confusion", ignoreCase = true) }
+                        if (confusionCount > 0) list.add("confusion" to "Confusion ($confusionCount)")
+
+                        val dontKnowCount = wordsInSelectedCourse.count { it.status.equals("dont_know", ignoreCase = true) }
+                        if (dontKnowCount > 0) list.add("dont_know" to "Don't Know ($dontKnowCount)")
+
+                        val unratedCount = wordsInSelectedCourse.count { it.status.equals("unrated", ignoreCase = true) }
+                        if (unratedCount > 0) list.add("unrated" to "Unrated ($unratedCount)")
+
+                        if (list.isEmpty()) {
+                            listOf("all" to "All Statuses")
+                        } else {
+                            list
+                        }
+                    }
+
+                    // Robust Auto-healing: Ensure user cannot remain on an empty/unpopulated filter
+                    LaunchedEffect(courseOptions) {
+                        if (courseOptions.none { it.first == selectedWidgetCourseId }) {
+                            val fallback = courseOptions.firstOrNull()?.first ?: "all"
+                            selectedWidgetCourseId = fallback
+                            widgetPrefs.edit().putString(DailyVocabWidgetProvider.KEY_WIDGET_COURSE_ID, fallback).apply()
+                            DailyVocabWidgetProvider.updateAllWidgets(context)
+                        }
+                    }
+
+                    LaunchedEffect(tagOptions) {
+                        if (tagOptions.none { it.first == selectedWidgetTagFilter }) {
+                            val fallback = tagOptions.firstOrNull()?.first ?: "all"
+                            selectedWidgetTagFilter = fallback
+                            widgetPrefs.edit().putString(DailyVocabWidgetProvider.KEY_WIDGET_TAG_FILTER, fallback).apply()
+                            DailyVocabWidgetProvider.updateAllWidgets(context)
+                        }
+                    }
+
                     // Dropdown Controls Grid
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            val courseOptions = remember(courses) {
-                                listOf("all" to "All Courses") + courses.map { it.id to it.title }
-                            }
                             WidgetDropdownSelector(
                                 label = "Course",
                                 selectedValue = selectedWidgetCourseId,
@@ -744,15 +811,6 @@ fun ProfileScreen(
                                 modifier = Modifier.weight(1f)
                             )
 
-                            val tagOptions = remember {
-                                listOf(
-                                    "all" to "All Statuses",
-                                    "unrated" to "Unrated",
-                                    "confusion" to "Confusion",
-                                    "dont_know" to "Don't Know",
-                                    "know" to "Know"
-                                )
-                            }
                             WidgetDropdownSelector(
                                 label = "Status",
                                 selectedValue = selectedWidgetTagFilter,
@@ -882,17 +940,34 @@ fun ProfileScreen(
                         (courses.find { it.id == selectedWidgetCourseId }?.title ?: "VOCABULARY").uppercase()
                     }
 
-                    val (previewTagText, previewTagColor, previewTagBg) = when (selectedWidgetTagFilter) {
+                    // Candidate words from populated pool
+                    val previewCandidateWords = remember(wordsInSelectedCourse, selectedWidgetTagFilter) {
+                        val filtered = if (selectedWidgetTagFilter == "all") {
+                            wordsInSelectedCourse
+                        } else {
+                            wordsInSelectedCourse.filter { it.status.equals(selectedWidgetTagFilter, ignoreCase = true) }
+                        }
+                        if (filtered.isNotEmpty()) filtered else wordsInSelectedCourse.ifEmpty { words }
+                    }
+                    val previewWord = previewCandidateWords.firstOrNull()
+
+                    val (previewTagText, previewTagColor, previewTagBg) = when (previewWord?.status ?: selectedWidgetTagFilter) {
                         "know" -> Triple("KNOW", EmeraldSuccess, EmeraldLight)
                         "confusion" -> Triple("CONFUSION", AmberWarning, AmberLight)
                         "dont_know" -> Triple("DON'T KNOW", RoseError, RoseLight)
-                        else -> Triple("UNRATED", IndigoPrimary, IndigoLight)
+                        else -> {
+                            val grp = previewWord?.group?.trim() ?: ""
+                            val label = if (grp.isNotBlank()) {
+                                if (grp.all { it.isDigit() }) "GROUP $grp" else grp.uppercase()
+                            } else "UNRATED"
+                            Triple(label, IndigoPrimary, IndigoLight)
+                        }
                     }
 
                     val (wordSizeSp, meaningSizeSp) = when (selectedWidgetFontSize) {
-                        "small" -> 16.sp to 11.sp
-                        "large" -> 22.sp to 14.sp
-                        else -> 19.sp to 12.sp
+                        "small" -> 15.sp to 10.5.sp
+                        "large" -> 20.sp to 13.sp
+                        else -> 17.sp to 11.5.sp
                     }
 
                     Box(
@@ -901,9 +976,9 @@ fun ProfileScreen(
                             .clip(RoundedCornerShape(16.dp))
                             .background(if (palette.isDark) Color(0xFF0F172A) else Color.White)
                             .border(1.dp, palette.border, RoundedCornerShape(16.dp))
-                            .padding(14.dp)
+                            .padding(horizontal = 14.dp, vertical = 10.dp)
                     ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             // Top Bar: Small course name & tag badge & next
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -913,7 +988,7 @@ fun ProfileScreen(
                                 Text(
                                     text = previewCourseName,
                                     fontFamily = PoppinsFontFamily,
-                                    fontSize = 10.sp,
+                                    fontSize = 9.5.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF64748B),
                                     maxLines = 1
@@ -927,12 +1002,12 @@ fun ProfileScreen(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(6.dp))
                                             .background(previewTagBg)
-                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                            .padding(horizontal = 5.dp, vertical = 1.5.dp)
                                     ) {
                                         Text(
                                             text = previewTagText,
                                             fontFamily = PoppinsFontFamily,
-                                            fontSize = 9.sp,
+                                            fontSize = 8.5.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = previewTagColor
                                         )
@@ -949,7 +1024,7 @@ fun ProfileScreen(
                             }
 
                             Text(
-                                text = "Ephemeral",
+                                text = previewWord?.word ?: "Ephemeral",
                                 fontFamily = PoppinsFontFamily,
                                 fontSize = wordSizeSp,
                                 fontWeight = FontWeight.Bold,
@@ -957,20 +1032,22 @@ fun ProfileScreen(
                             )
 
                             Text(
-                                text = "Lasting for a very short time; fleeting or transient.",
+                                text = previewWord?.meaning ?: "Lasting for a very short time; fleeting or transient.",
                                 fontFamily = PoppinsFontFamily,
                                 fontSize = meaningSizeSp,
-                                lineHeight = 16.sp,
-                                color = palette.textMuted
+                                lineHeight = 15.sp,
+                                color = palette.textMuted,
+                                maxLines = 3
                             )
 
-                            if (selectedWidgetSize != "compact") {
+                            if (selectedWidgetSize != "compact" && !previewWord?.example.isNullOrBlank()) {
                                 Text(
-                                    text = "\"Fashions are ephemeral: new styles come and go quickly.\"",
+                                    text = "\"${previewWord?.example?.trim()}\"",
                                     fontFamily = PoppinsFontFamily,
                                     fontSize = (meaningSizeSp.value - 1).sp,
                                     fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
-                                    color = palette.textMuted
+                                    color = palette.textMuted,
+                                    maxLines = 2
                                 )
                             }
                         }

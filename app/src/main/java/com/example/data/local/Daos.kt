@@ -73,13 +73,13 @@ interface VocabularyDao {
     suspend fun getWordsListByCourse(courseId: String): List<VocabularyWordEntity>
 
     @Query("SELECT DISTINCT `group` FROM vocabulary_words WHERE courseId = :courseId ORDER BY `group` ASC")
-    fun getDistinctGroupsByCourse(courseId: String): Flow<List<Int>>
+    fun getDistinctGroupsByCourse(courseId: String): Flow<List<String>>
 
     @Query("SELECT * FROM vocabulary_words WHERE `group` = :group ORDER BY id ASC")
-    fun getWordsByGroup(group: Int): Flow<List<VocabularyWordEntity>>
+    fun getWordsByGroup(group: String): Flow<List<VocabularyWordEntity>>
 
     @Query("SELECT DISTINCT `group` FROM vocabulary_words ORDER BY `group` ASC")
-    fun getDistinctGroups(): Flow<List<Int>>
+    fun getDistinctGroups(): Flow<List<String>>
 
     @Query("SELECT * FROM vocabulary_words WHERE id = :id LIMIT 1")
     suspend fun getWordById(id: String): VocabularyWordEntity?
@@ -95,6 +95,9 @@ interface VocabularyDao {
 
     @Query("UPDATE vocabulary_words SET status = :status, timesReviewed = timesReviewed + 1, lastReviewedAt = :timestamp WHERE id = :id")
     suspend fun updateWordStatus(id: String, status: String, timestamp: Long = System.currentTimeMillis())
+
+    @Query("UPDATE vocabulary_words SET isReported = :isReported, reportReason = :reason WHERE id = :id")
+    suspend fun reportWord(id: String, isReported: Boolean = true, reason: String? = null)
 
     @Delete
     suspend fun deleteWord(word: VocabularyWordEntity)

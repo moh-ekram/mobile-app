@@ -97,6 +97,32 @@ class BackupManager(private val context: Context, private val database: AppDatab
         statsObj.put("unratedCount", words.count { it.status == "unrated" })
         jsonRoot.put("statistics", statsObj)
 
+        // User Profile & Photo serialization
+        val profilePrefs = context.getSharedPreferences("memorizer_user_profile", Context.MODE_PRIVATE)
+        val profileObj = JSONObject()
+        val displayName = profilePrefs.getString("display_name", "User #1235") ?: "User #1235"
+        val avatarUri = profilePrefs.getString("avatar_uri", null)
+        val targetExam = profilePrefs.getString("target_exam", "GRE / IELTS") ?: "GRE / IELTS"
+        val dailyGoal = profilePrefs.getInt("daily_goal", 20)
+        val bio = profilePrefs.getString("bio", "Aiming for GRE 330+ and IELTS 8.0") ?: "Aiming for GRE 330+ and IELTS 8.0"
+        profileObj.put("displayName", displayName)
+        profileObj.put("avatarUri", avatarUri ?: "")
+        profileObj.put("targetExam", targetExam)
+        profileObj.put("dailyGoal", dailyGoal)
+        profileObj.put("bio", bio)
+
+        val avatarFile = File(context.filesDir, "profile_avatar.jpg")
+        if (avatarFile.exists() && avatarFile.length() > 0) {
+            try {
+                val bytes = avatarFile.readBytes()
+                val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                profileObj.put("avatarBase64", base64)
+            } catch (e: Exception) {
+                android.util.Log.e("BackupManager", "Failed to encode avatarBase64: ${e.message}")
+            }
+        }
+        jsonRoot.put("profile", profileObj)
+
         val wordsArray = JSONArray()
         words.forEach { w ->
             val wObj = JSONObject()
@@ -243,6 +269,32 @@ class BackupManager(private val context: Context, private val database: AppDatab
             statsObj.put("unratedCount", words.count { it.status == "unrated" })
             jsonRoot.put("statistics", statsObj)
 
+            // User Profile & Photo serialization
+            val profilePrefs = context.getSharedPreferences("memorizer_user_profile", Context.MODE_PRIVATE)
+            val profileObj = JSONObject()
+            val displayName = profilePrefs.getString("display_name", "User #1235") ?: "User #1235"
+            val avatarUri = profilePrefs.getString("avatar_uri", null)
+            val targetExam = profilePrefs.getString("target_exam", "GRE / IELTS") ?: "GRE / IELTS"
+            val dailyGoal = profilePrefs.getInt("daily_goal", 20)
+            val bio = profilePrefs.getString("bio", "Aiming for GRE 330+ and IELTS 8.0") ?: "Aiming for GRE 330+ and IELTS 8.0"
+            profileObj.put("displayName", displayName)
+            profileObj.put("avatarUri", avatarUri ?: "")
+            profileObj.put("targetExam", targetExam)
+            profileObj.put("dailyGoal", dailyGoal)
+            profileObj.put("bio", bio)
+
+            val avatarFile = File(context.filesDir, "profile_avatar.jpg")
+            if (avatarFile.exists() && avatarFile.length() > 0) {
+                try {
+                    val bytes = avatarFile.readBytes()
+                    val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                    profileObj.put("avatarBase64", base64)
+                } catch (e: Exception) {
+                    android.util.Log.e("BackupManager", "Failed to encode avatarBase64: ${e.message}")
+                }
+            }
+            jsonRoot.put("profile", profileObj)
+
             // Words Array with course association
             val wordsArray = JSONArray()
             words.forEach { w ->
@@ -344,7 +396,7 @@ class BackupManager(private val context: Context, private val database: AppDatab
                 csvSb.append("\"${w.id}\",")
                 csvSb.append("\"${w.courseId}\",")
                 csvSb.append("\"${escapeCsv(cTitle)}\",")
-                csvSb.append("${w.group},")
+                csvSb.append("\"${escapeCsv(w.group)}\",")
                 csvSb.append("\"${escapeCsv(w.word)}\",")
                 csvSb.append("\"${escapeCsv(w.meaning)}\",")
                 csvSb.append("\"${escapeCsv(w.example ?: "")}\",")
@@ -410,7 +462,7 @@ class BackupManager(private val context: Context, private val database: AppDatab
             csvSb.append("id,courseId,courseTitle,group,Place1: Word,Place2: Meaning,Place3: Example,Place4: Synonyms,Place5: Extra,Place6: Mnemonic,status\n")
             words.forEach { w ->
                 val cTitle = courseMap[w.courseId]?.title ?: "General Course"
-                csvSb.append("\"${w.id}\",\"${w.courseId}\",\"${escapeCsv(cTitle)}\",${w.group},\"${escapeCsv(w.word)}\",\"${escapeCsv(w.meaning)}\",\"${escapeCsv(w.example ?: "")}\",\"${escapeCsv(w.synonyms ?: "")}\",\"${escapeCsv(w.extraWord ?: "")}\",\"${escapeCsv(w.mnemonic ?: "")}\",\"${w.status}\"\n")
+                csvSb.append("\"${w.id}\",\"${w.courseId}\",\"${escapeCsv(cTitle)}\",\"${escapeCsv(w.group)}\",\"${escapeCsv(w.word)}\",\"${escapeCsv(w.meaning)}\",\"${escapeCsv(w.example ?: "")}\",\"${escapeCsv(w.synonyms ?: "")}\",\"${escapeCsv(w.extraWord ?: "")}\",\"${escapeCsv(w.mnemonic ?: "")}\",\"${w.status}\"\n")
             }
             writeToSafTree(treeUri, "memorizer_vocabulary.csv", "text/csv", csvSb.toString().toByteArray())
 
@@ -663,6 +715,44 @@ class BackupManager(private val context: Context, private val database: AppDatab
                 if (trimmed.startsWith("{")) {
                     val root = JSONObject(trimmed)
 
+                    // 0. User Profile & Photo Restore
+                    if (root.has("profile")) {
+                        val pObj = root.getJSONObject("profile")
+                        val pName = pObj.optString("displayName", "User #1235")
+                        val pExam = pObj.optString("targetExam", "GRE / IELTS")
+                        val pGoal = pObj.optInt("dailyGoal", 20)
+                        val pBio = pObj.optString("bio", "")
+                        var restoredAvatarUri: String? = null
+
+                        if (pObj.has("avatarBase64")) {
+                            try {
+                                val b64 = pObj.getString("avatarBase64")
+                                if (b64.isNotBlank()) {
+                                    val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                                    val avatarFile = File(context.filesDir, "profile_avatar.jpg")
+                                    avatarFile.writeBytes(bytes)
+                                    restoredAvatarUri = Uri.fromFile(avatarFile).toString()
+                                }
+                            } catch (e: Exception) {
+                                android.util.Log.e("BackupManager", "Failed to decode avatarBase64: ${e.message}")
+                            }
+                        } else {
+                            val rawUri = pObj.optString("avatarUri", "")
+                            if (rawUri.isNotBlank()) {
+                                restoredAvatarUri = rawUri
+                            }
+                        }
+
+                        val profilePrefs = context.getSharedPreferences("memorizer_user_profile", Context.MODE_PRIVATE)
+                        profilePrefs.edit()
+                            .putString("display_name", pName)
+                            .putString("avatar_uri", restoredAvatarUri)
+                            .putString("target_exam", pExam)
+                            .putInt("daily_goal", pGoal)
+                            .putString("bio", pBio)
+                            .apply()
+                    }
+
                     // 1. Courses
                     if (root.has("courses")) {
                         val cArr = root.getJSONArray("courses")
@@ -695,12 +785,14 @@ class BackupManager(private val context: Context, private val database: AppDatab
                                 if (coursesToInsert.none { it.id == cId }) {
                                     coursesToInsert.add(CourseEntity(id = cId, title = cTitle))
                                 }
+                                val rawGrp = wObj.optString("group", "").trim()
+                                val wordGroup = if (rawGrp.isNotBlank()) rawGrp else "1"
                                 wordsToInsert.add(
                                     VocabularyWordEntity(
                                         id = wId,
                                         word = word,
                                         meaning = meaning,
-                                        group = wObj.optInt("group", 1),
+                                        group = wordGroup,
                                         synonyms = wObj.optString("synonyms", "").ifEmpty { null },
                                         extraWord = wObj.optString("extraWord", "").ifEmpty { null },
                                         extraMeaning = wObj.optString("extraMeaning", "").ifEmpty { null },

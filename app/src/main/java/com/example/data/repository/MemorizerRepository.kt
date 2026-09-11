@@ -27,7 +27,7 @@ class MemorizerRepository(
     val supabaseService = SupabaseSyncService(context)
 
     val allWords: Flow<List<VocabularyWordEntity>> = database.vocabularyDao().getAllWords()
-    val distinctGroups: Flow<List<Int>> = database.vocabularyDao().getDistinctGroups()
+    val distinctGroups: Flow<List<String>> = database.vocabularyDao().getDistinctGroups()
     val allCourses: Flow<List<CourseEntity>> = database.courseDao().getAllCourses()
     val allArticles: Flow<List<ArticleEntity>> = database.articleDao().getAllArticles()
     val allGames: Flow<List<GamePracticeEntity>> = database.gamePracticeDao().getAllItems()
@@ -37,7 +37,7 @@ class MemorizerRepository(
         if (courseId == "all") database.vocabularyDao().getAllWords()
         else database.vocabularyDao().getWordsByCourse(courseId)
 
-    fun getDistinctGroupsForCourse(courseId: String): Flow<List<Int>> =
+    fun getDistinctGroupsForCourse(courseId: String): Flow<List<String>> =
         if (courseId == "all") database.vocabularyDao().getDistinctGroups()
         else database.vocabularyDao().getDistinctGroupsByCourse(courseId)
 
@@ -148,6 +148,11 @@ class MemorizerRepository(
 
     suspend fun updateWord(word: VocabularyWordEntity, userId: String = "1235") = withContext(Dispatchers.IO) {
         database.vocabularyDao().updateWord(word)
+        refreshProgressAndSync(userId)
+    }
+
+    suspend fun reportWord(id: String, isReported: Boolean = true, reason: String? = null, userId: String = "1235") = withContext(Dispatchers.IO) {
+        database.vocabularyDao().reportWord(id, isReported, reason)
         refreshProgressAndSync(userId)
     }
 

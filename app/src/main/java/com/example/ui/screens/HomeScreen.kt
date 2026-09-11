@@ -47,7 +47,7 @@ fun HomeScreen(
     onSelectCourse: (String) -> Unit = {},
     onCreateCourseClick: () -> Unit = {},
     onNavigate: (String) -> Unit,
-    onSelectGroup: (Int?) -> Unit,
+    onSelectGroup: (String?) -> Unit,
     widgetWord: VocabularyWordEntity? = null,
     widgetCategory: String = "all",
     onSetWidgetCategory: (String) -> Unit = {},
@@ -590,38 +590,104 @@ fun HomeScreen(
                                 onNavigate("flashcard")
                             },
                         shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color.White),
-                        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(SlateBorder))
+                        colors = CardDefaults.cardColors(containerColor = if (palette.isDark) palette.surface else Color.White),
+                        border = CardDefaults.outlinedCardBorder().copy(
+                            brush = androidx.compose.ui.graphics.SolidColor(
+                                if (grpPercent == 100) EmeraldSuccess.copy(alpha = 0.5f) else SlateBorder
+                            )
+                        )
                     ) {
-                        Row(
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(16.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Group $grp",
-                                    fontFamily = PoppinsFontFamily,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = SlateText
-                                )
-                                Text(
-                                    text = "${grpWords.size} words • $grpPercent% mastered",
-                                    fontFamily = PoppinsFontFamily,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = SlateMuted
-                                )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    val displayGrpName = if (grp.all { it.isDigit() }) "Group $grp" else grp
+                                    Text(
+                                        text = displayGrpName,
+                                        fontFamily = PoppinsFontFamily,
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = palette.textPrimary
+                                    )
+                                    Text(
+                                        text = "(${grpWords.size} words)",
+                                        fontFamily = PoppinsFontFamily,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = palette.textMuted
+                                    )
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .background(if (grpPercent == 100) EmeraldSuccess else EmeraldLight)
+                                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = "$grpPercent% Mastered",
+                                        fontFamily = PoppinsFontFamily,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (grpPercent == 100) Color.White else EmeraldSuccess
+                                    )
+                                }
                             }
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = null,
-                                tint = IndigoPrimary,
-                                modifier = Modifier.size(18.dp)
-                            )
+
+                            // Color fill progress bar
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                LinearProgressIndicator(
+                                    progress = { if (grpWords.isNotEmpty()) grpKnow.toFloat() / grpWords.size else 0f },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(8.dp)
+                                        .clip(CircleShape),
+                                    color = EmeraldSuccess,
+                                    trackColor = if (palette.isDark) Color(0xFF334155) else Color(0xFFE2E8F0)
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "$grpKnow of ${grpWords.size} mastered",
+                                        fontFamily = PoppinsFontFamily,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = palette.textMuted
+                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                    ) {
+                                        Text(
+                                            text = "Practice",
+                                            fontFamily = PoppinsFontFamily,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = IndigoPrimary
+                                        )
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                            contentDescription = null,
+                                            tint = IndigoPrimary,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }

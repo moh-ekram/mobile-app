@@ -131,7 +131,8 @@ object FileParsers {
                 courseId
             }
             val id = if (idIndex in values.indices && values[idIndex].isNotBlank()) values[idIndex].trim() else "word_${rowCourseId}_$i"
-            val group = if (groupIndex in values.indices) values[groupIndex].trim().toIntOrNull() ?: 1 else 1
+            val rawGroup = if (groupIndex in values.indices) values[groupIndex].trim() else ""
+            val group = if (rawGroup.isNotBlank()) rawGroup else "1"
             val word = if (wordIndex in values.indices) values[wordIndex].trim() else "Word $i"
             val meaning = if (meaningIndex in values.indices) values[meaningIndex].trim() else ""
             val example = if (exampleIndex in values.indices && values[exampleIndex].isNotBlank()) values[exampleIndex].trim() else null
@@ -254,23 +255,12 @@ object FileParsers {
                 val explanation = if (expIdx in row.indices && row[expIdx].isNotBlank()) row[expIdx].trim() else null
                 val sheetType = if (typeIdx in row.indices && row[typeIdx].isNotBlank()) row[typeIdx].trim() else sheet.sheetName
 
-                // Handle '#' indicator in options if answer column is empty
-                if (answer.isBlank()) {
-                    when {
-                        opt1.contains("#") -> { opt1 = opt1.replace("#", "").trim(); answer = opt1 }
-                        opt2.contains("#") -> { opt2 = opt2.replace("#", "").trim(); answer = opt2 }
-                        opt3.contains("#") -> { opt3 = opt3.replace("#", "").trim(); answer = opt3 }
-                        opt4.contains("#") -> { opt4 = opt4.replace("#", "").trim(); answer = opt4 }
-                    }
-                } else {
-                    // Match option index / letter to actual option text
-                    when (answer.trim().lowercase()) {
-                        "opt1", "1", "a" -> answer = opt1
-                        "opt2", "2", "b" -> answer = opt2
-                        "opt3", "3", "c" -> answer = opt3
-                        "opt4", "4", "d" -> answer = opt4
-                    }
-                }
+                val resolved = QuestionAnswerResolver.resolve(opt1, opt2, opt3, opt4, answer)
+                opt1 = resolved.cleanOpt1
+                opt2 = resolved.cleanOpt2
+                opt3 = resolved.cleanOpt3
+                opt4 = resolved.cleanOpt4
+                answer = resolved.correctAnswer
 
                 // Anomaly Detection
                 val rowAnomalies = mutableListOf<String>()
@@ -380,16 +370,13 @@ object FileParsers {
             var answer = if (ansIdx in values.indices) values[ansIdx].trim() else ""
             val explanation = if (expIdx in values.indices) values[expIdx].trim() else null
 
-            // Check for # in options
-            if (answer.isBlank()) {
-                when {
-                    opt1.contains("#") -> { opt1 = opt1.replace("#", "").trim(); answer = opt1 }
-                    opt2.contains("#") -> { opt2 = opt2.replace("#", "").trim(); answer = opt2 }
-                    opt3.contains("#") -> { opt3 = opt3.replace("#", "").trim(); answer = opt3 }
-                    opt4.contains("#") -> { opt4 = opt4.replace("#", "").trim(); answer = opt4 }
-                    else -> answer = opt1
-                }
-            }
+            // Resolve answer according to the 3 rules (exact match, '#', A/B/C/D)
+            val resolved = QuestionAnswerResolver.resolve(opt1, opt2, opt3, opt4, answer)
+            opt1 = resolved.cleanOpt1
+            opt2 = resolved.cleanOpt2
+            opt3 = resolved.cleanOpt3
+            opt4 = resolved.cleanOpt4
+            answer = resolved.correctAnswer
 
             val filter1 = if (f1Idx in values.indices) values[f1Idx].trim() else null
             val filter2 = if (f2Idx in values.indices) values[f2Idx].trim() else null
@@ -443,7 +430,8 @@ object FileParsers {
             val id = item.optString("id", "word_${rowCourseId}_$i")
             val word = item.optString("word", item.optString("Word", ""))
             val meaning = item.optString("meaning", item.optString("Meaning", ""))
-            val group = item.optInt("group", item.optInt("Group", 1))
+            val rawGroup = item.optString("group", item.optString("Group", "")).trim()
+            val group = if (rawGroup.isNotBlank()) rawGroup else "1"
             val synonyms = item.optString("synonyms", item.optString("Synonyms", null))
             val extraWord = item.optString("extraWord", item.optString("ExtraWord", null))
             val example = item.optString("example", item.optString("Example", null))

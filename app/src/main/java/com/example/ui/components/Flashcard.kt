@@ -26,6 +26,7 @@ import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.TouchApp
@@ -57,17 +58,23 @@ import com.example.ui.theme.*
 fun Flashcard(
     word: VocabularyWordEntity,
     status: String = "unrated",
+    courseName: String = "",
     isFlipAnimationEnabled: Boolean = true,
     isFocusMode: Boolean = false,
     onRate: (String) -> Unit,
     onNext: () -> Unit,
     onSpeak: (String) -> Unit,
+    onReportClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val palette = LocalAppPalette.current
     var isFlipped by remember(word.id) { mutableStateOf(false) }
     var hasFlippedCurrentCard by remember(word.id) { mutableStateOf(false) }
+
+    // Persistent counter for "Click to Flip" limit (only show first 3 times)
+    val prefs = remember { context.getSharedPreferences("flashcard_settings", android.content.Context.MODE_PRIVATE) }
+    var flipCount by remember { mutableIntStateOf(prefs.getInt("flip_tutorial_shown_count", 0)) }
 
     // 3D rotation animation (if flip animation is enabled)
     val rotation by animateFloatAsState(
@@ -91,7 +98,7 @@ fun Flashcard(
     fun openGoogleSearch(text: String) {
         if (text.isBlank()) return
         try {
-            val url = "https://www.google.com/search?q=" + Uri.encode("$text meaning in bengali")
+            val url = "https://www.google.com/search?q=" + Uri.encode("$text meaning")
             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
             context.startActivity(intent)
         } catch (_: Exception) {}
@@ -129,6 +136,10 @@ fun Flashcard(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
                 ) {
+                    if (flipCount < 3) {
+                        flipCount += 1
+                        prefs.edit().putInt("flip_tutorial_shown_count", flipCount).apply()
+                    }
                     hasFlippedCurrentCard = true
                     isFlipped = !isFlipped
                 }
@@ -140,12 +151,15 @@ fun Flashcard(
                 FrontFaceContent(
                     word = word,
                     status = status,
+                    courseName = courseName,
                     isFlipped = isFlipped,
                     hasFlipped = hasFlippedCurrentCard,
+                    flipCount = flipCount,
                     bounceY = bounceY,
                     isFocusMode = isFocusMode,
                     onSearch = { openGoogleSearch(word.word) },
                     onSpeak = { onSpeak(word.word) },
+                    onReportClick = onReportClick,
                     onRate = onRate,
                     onNext = onNext
                 )
@@ -161,9 +175,11 @@ fun Flashcard(
                     BackFaceContent(
                         word = word,
                         status = status,
+                        courseName = courseName,
                         isFocusMode = isFocusMode,
                         onSearch = { openGoogleSearch(word.word) },
                         onSpeak = { onSpeak(word.word) },
+                        onReportClick = onReportClick,
                         onRate = onRate,
                         onNext = onNext
                     )
@@ -177,24 +193,31 @@ fun Flashcard(
 private fun FrontFaceContent(
     word: VocabularyWordEntity,
     status: String,
+    courseName: String = "",
     isFlipped: Boolean,
     hasFlipped: Boolean,
+    flipCount: Int = 0,
     bounceY: Float,
     isFocusMode: Boolean = false,
     onSearch: () -> Unit,
     onSpeak: () -> Unit,
+    onReportClick: () -> Unit = {},
     onRate: (String) -> Unit,
     onNext: () -> Unit
 ) {
+    val context = LocalContext.current
     val palette = LocalAppPalette.current
     Column(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.SpaceBetween,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Top Bar
+        // Top Bar: Report button on top-left, course name on top-right
         TopBarSection(
-            group = word.group,
+            isReported = word.isReported,
+            courseName = courseName,
+            showSpeakButton = false,
+            onReportClick = onReportClick,
             onSearch = onSearch,
             onSpeak = onSpeak
         )
@@ -218,11 +241,12 @@ private fun FrontFaceContent(
 
             Spacer(modifier = Modifier.height(10.dp))
 
+            // The color of place1 word matches its selected status category color
             val wordColor = when (status) {
                 "know" -> EmeraldSuccess
                 "dont_know" -> RoseError
                 "confusion" -> AmberWarning
-                else -> palette.textPrimary
+                else -> if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary
             }
 
             val wordLen = word.word.length
@@ -236,6 +260,7 @@ private fun FrontFaceContent(
             }
             val dynamicLineHeight = (dynamicFontSize.value * 1.22f).sp
 
+            // Place 1 Word (Only place1 is shown on front side)
             Text(
                 text = word.word,
                 fontFamily = selectFontForText(word.word),
@@ -253,37 +278,89 @@ private fun FrontFaceContent(
                     .padding(horizontal = 4.dp)
             )
 
-            AnimatedVisibility(
-                visible = !isFlipped && !hasFlipped,
-                enter = fadeIn() + scaleIn(),
-                exit = fadeOut() + scaleOut()
+            Spacer(modifier = Modifier.height(18.dp))
+
+            // Action Buttons: Google Search (icon only, searches "{word} meaning") and Pronounce Button side by side
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.testTag("front_action_buttons_row")
             ) {
+                // Google Search Button: Icon only, no text on the button, searches "{word} meaning" on click
                 Box(
                     modifier = Modifier
-                        .padding(top = 22.dp)
-                        .offset(y = bounceY.dp)
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9))
+                        .border(1.dp, if (palette.isDark) Color(0xFF334155) else Color(0xFFCBD5E1), CircleShape)
+                    .clickable {
+                        val query = "${word.word} meaning"
+                        try {
+                            val url = "https://www.google.com/search?q=" + Uri.encode(query)
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                            context.startActivity(intent)
+                        } catch (_: Exception) {}
+                    }
+                    .testTag("google_search_button"),
+                contentAlignment = Alignment.Center
+            ) {
+                GoogleGVectorIcon(modifier = Modifier.size(20.dp))
+            }
+
+                // Pronounce Button (moved from top-right corner to be next to Google button)
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
                         .clip(CircleShape)
                         .background(if (palette.isDark) Color(0xFF312E81) else IndigoLight)
                         .border(1.dp, if (palette.isDark) Color(0xFF4338CA) else Color(0xFFC7D2FE), CircleShape)
-                        .padding(horizontal = 14.dp, vertical = 7.dp)
+                        .clickable { onSpeak() }
+                        .testTag("front_pronounce_button"),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                        contentDescription = "Speak word",
+                        tint = if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            // Click to Flip hint shown only for first 3 app launches/flips
+            if (flipCount < 3) {
+                AnimatedVisibility(
+                    visible = !isFlipped && !hasFlipped,
+                    enter = fadeIn() + scaleIn(),
+                    exit = fadeOut() + scaleOut()
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .padding(top = 14.dp)
+                            .offset(y = bounceY.dp)
+                            .clip(CircleShape)
+                            .background(if (palette.isDark) Color(0xFF312E81) else IndigoLight)
+                            .border(1.dp, if (palette.isDark) Color(0xFF4338CA) else Color(0xFFC7D2FE), CircleShape)
+                            .padding(horizontal = 14.dp, vertical = 6.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.TouchApp,
-                            contentDescription = null,
-                            tint = if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary,
-                            modifier = Modifier.size(15.dp)
-                        )
-                        Text(
-                            text = "Click to Flip",
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.TouchApp,
+                                contentDescription = null,
+                                tint = if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "Click to Flip",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary
+                            )
+                        }
                     }
                 }
             }
@@ -303,12 +380,15 @@ private fun FrontFaceContent(
 private fun BackFaceContent(
     word: VocabularyWordEntity,
     status: String,
+    courseName: String = "",
     isFocusMode: Boolean = false,
     onSearch: () -> Unit,
     onSpeak: () -> Unit,
+    onReportClick: () -> Unit = {},
     onRate: (String) -> Unit,
     onNext: () -> Unit
 ) {
+    val palette = LocalAppPalette.current
     val customPlacesList: List<Pair<String, String>> = remember(word.customPlacesJson) {
         if (!word.customPlacesJson.isNullOrBlank()) {
             try {
@@ -331,14 +411,23 @@ private fun BackFaceContent(
         }
     }
 
+    val wordColor = when (status) {
+        "know" -> EmeraldSuccess
+        "dont_know" -> RoseError
+        "confusion" -> AmberWarning
+        else -> if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary
+    }
+
     Column(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.SpaceBetween,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Top Bar
+        // Top Bar: Report button on top-left, course name and speak button on top-right
         TopBarSection(
-            group = word.group,
+            isReported = word.isReported,
+            courseName = courseName,
+            onReportClick = onReportClick,
             onSearch = onSearch,
             onSpeak = onSpeak
         )
@@ -358,6 +447,7 @@ private fun BackFaceContent(
                     val isBengali = isBengaliText(value)
                     val font = selectFontForText(value)
                     val labelLower = label.lowercase().trim()
+                    val isPlace1 = labelLower.startsWith("place1") || labelLower.contains("place 1") || labelLower == "word"
                     // Place 2 detection (Meaning / Bengali Definition / Place 2)
                     val isPlace2 = labelLower.startsWith("place2") || labelLower.contains("place 2") ||
                             labelLower.contains("meaning") || labelLower.contains("definition") ||
@@ -410,8 +500,8 @@ private fun BackFaceContent(
                             },
                             fontFamily = font,
                             fontSize = if (isPlace2) 21.sp else if (isBengali) 16.sp else 14.sp,
-                            fontWeight = if (isPlace2) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isPlace2) EmeraldSuccess else SlateText,
+                            fontWeight = if (isPlace2 || isPlace1) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isPlace1) wordColor else if (isPlace2) EmeraldSuccess else SlateText,
                             textAlign = TextAlign.Center,
                             lineHeight = if (isPlace2) 26.sp else 20.sp
                         )
@@ -570,72 +660,144 @@ private fun BackFaceContent(
 
 @Composable
 private fun TopBarSection(
-    group: Int?,
+    isReported: Boolean = false,
+    courseName: String = "",
+    showSpeakButton: Boolean = true,
+    onReportClick: () -> Unit = {},
     onSearch: () -> Unit,
     onSpeak: () -> Unit
 ) {
+    val palette = LocalAppPalette.current
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Group Badge
+        // Report Button (Replaces group name in top-left corner)
         Box(
             modifier = Modifier
+                .size(38.dp)
                 .clip(CircleShape)
-                .background(IndigoLight)
-                .padding(horizontal = 12.dp, vertical = 5.dp)
+                .background(if (isReported) (if (palette.isDark) Color(0xFF4C1D24) else RoseLight) else (if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9)))
+                .border(
+                    1.dp,
+                    if (isReported) RoseError else (if (palette.isDark) Color(0xFF334155) else Color(0xFFCBD5E1)),
+                    CircleShape
+                )
+                .clickable { onReportClick() }
+                .testTag("topbar_report_button"),
+            contentAlignment = Alignment.Center
         ) {
-            Text(
-                text = if (group != null && group > 0) "GROUP $group" else "VOCABULARY",
-                fontFamily = PoppinsFontFamily,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = IndigoPrimary,
-                letterSpacing = 1.2.sp
+            Icon(
+                imageVector = Icons.Default.Flag,
+                contentDescription = if (isReported) "Reported word" else "Report word",
+                tint = if (isReported) RoseError else palette.textMuted,
+                modifier = Modifier.size(19.dp)
             )
         }
 
-        // Actions (Search & Speak)
+        // Actions & Course Name
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Google Search Button
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFFF1F5F9))
-                    .border(1.dp, SlateBorder, CircleShape)
-                    .clickable { onSearch() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Search,
-                    contentDescription = "Search on Google",
-                    tint = Color(0xFF4285F4),
-                    modifier = Modifier.size(18.dp)
+            if (courseName.isNotBlank()) {
+                Text(
+                    text = courseName,
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = palette.textMuted
                 )
             }
 
-            // Speak Word Button
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(CircleShape)
-                    .background(IndigoLight)
-                    .clickable { onSpeak() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-                    contentDescription = "Speak word",
-                    tint = IndigoPrimary,
-                    modifier = Modifier.size(20.dp)
-                )
+            if (showSpeakButton) {
+                // Speak Word Button
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(IndigoLight)
+                        .clickable { onSpeak() }
+                        .testTag("topbar_speak_button"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                        contentDescription = "Speak word",
+                        tint = IndigoPrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
+    }
+}
+
+@Composable
+fun GoogleGVectorIcon(modifier: Modifier = Modifier) {
+    androidx.compose.foundation.Canvas(modifier = modifier) {
+        val sizePx = size.minDimension
+        val stroke = sizePx * 0.22f
+        val radius = (sizePx - stroke) / 2f
+        val centerPt = androidx.compose.ui.geometry.Offset(sizePx / 2f, sizePx / 2f)
+        val arcRect = androidx.compose.ui.geometry.Rect(
+            centerPt.x - radius, centerPt.y - radius,
+            centerPt.x + radius, centerPt.y + radius
+        )
+
+        // Blue horizontal bar
+        drawLine(
+            color = Color(0xFF4285F4),
+            start = centerPt,
+            end = androidx.compose.ui.geometry.Offset(centerPt.x + radius, centerPt.y),
+            strokeWidth = stroke,
+            cap = androidx.compose.ui.graphics.StrokeCap.Square
+        )
+
+        // Blue right arc
+        drawArc(
+            color = Color(0xFF4285F4),
+            startAngle = 0f,
+            sweepAngle = 45f,
+            useCenter = false,
+            topLeft = arcRect.topLeft,
+            size = arcRect.size,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke)
+        )
+
+        // Green bottom arc
+        drawArc(
+            color = Color(0xFF34A853),
+            startAngle = 45f,
+            sweepAngle = 90f,
+            useCenter = false,
+            topLeft = arcRect.topLeft,
+            size = arcRect.size,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke)
+        )
+
+        // Yellow left arc
+        drawArc(
+            color = Color(0xFFFBBC05),
+            startAngle = 135f,
+            sweepAngle = 90f,
+            useCenter = false,
+            topLeft = arcRect.topLeft,
+            size = arcRect.size,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke)
+        )
+
+        // Red top arc
+        drawArc(
+            color = Color(0xFFEA4335),
+            startAngle = 225f,
+            sweepAngle = 90f,
+            useCenter = false,
+            topLeft = arcRect.topLeft,
+            size = arcRect.size,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke)
+        )
     }
 }
 

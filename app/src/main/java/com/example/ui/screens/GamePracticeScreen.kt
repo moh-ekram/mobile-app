@@ -8,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -54,22 +55,30 @@ fun GamePracticeScreen(
     onSaveArticle: (title: String, content: String, author: String, id: String?) -> Unit = { _, _, _, _ -> },
     onDeleteArticle: (String) -> Unit = {},
     onRateWord: (wordId: String, status: String) -> Unit = { _, _ -> },
+    onBack: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     // Top Section: null means list menu of categories; non-null opens dedicated section
     var selectedSection by remember { mutableStateOf<String?>(null) }
 
-    // Intercept back button when in a game/practice section to return to Games menu
-    BackHandler(enabled = selectedSection != null) {
-        selectedSection = null
+    // Intercept back button: 
+    // 1. Reading article -> back to article list
+    // 2. In game section -> back to games menu
+    // 3. In games menu -> back to home screen
+    BackHandler {
+        if (activeArticle != null) {
+            onSelectArticle(null)
+        } else if (selectedSection != null) {
+            selectedSection = null
+        } else {
+            onBack()
+        }
     }
 
-    // Active Quiz State
+    // Active Quiz State (Vertical Single-Page Quiz List)
     var activeQuestions by remember { mutableStateOf<List<QuizQuestionItem>>(emptyList()) }
-    var currentQuestionIdx by remember { mutableStateOf(0) }
-    var selectedOption by remember { mutableStateOf<String?>(null) }
-    var isSubmitted by remember { mutableStateOf(false) }
-    var currentScore by remember { mutableStateOf(0) }
+    var userAnswers by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
+    var currentScore by remember { mutableIntStateOf(0) }
     var isQuizCompleted by remember { mutableStateOf(false) }
 
     // Question Bank Config
@@ -94,9 +103,7 @@ fun GamePracticeScreen(
             else -> emptyList()
         }
         activeQuestions = list
-        currentQuestionIdx = 0
-        selectedOption = null
-        isSubmitted = false
+        userAnswers = emptyMap()
         currentScore = 0
         isQuizCompleted = false
     }
@@ -278,210 +285,274 @@ fun GamePracticeScreen(
                     onRetake = { startQuizForCategory(selectedSection ?: "odd_one_out") }
                 )
             } else if (activeQuestions.isNotEmpty()) {
-            val currentQ = activeQuestions[currentQuestionIdx]
-
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .testTag("game_card"),
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(SlateBorder))
-            ) {
+                // Vertical scrolling list of all quiz questions on a single page
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(20.dp),
-                    verticalArrangement = Arrangement.SpaceBetween
+                        .testTag("quiz_vertical_list"),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    contentPadding = PaddingValues(top = 8.dp, bottom = 28.dp)
                 ) {
+                    // Header progress and score
                     item {
-                        // Header progress
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                        Card(
+                            shape = RoundedCornerShape(18.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(SlateBorder)),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(
-                                text = "Question ${currentQuestionIdx + 1} of ${activeQuestions.size}",
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = IndigoPrimary
-                            )
-                            Text(
-                                text = "Score: $currentScore",
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = EmeraldSuccess
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        LinearProgressIndicator(
-                            progress = { (currentQuestionIdx + 1).toFloat() / activeQuestions.size },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(6.dp)
-                                .clip(CircleShape),
-                            color = IndigoPrimary,
-                            trackColor = Color(0xFFE2E8F0)
-                        )
-
-                        Spacer(modifier = Modifier.height(18.dp))
-
-                        // Question Title
-                        Text(
-                            text = currentQ.question,
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = SlateText,
-                            lineHeight = 24.sp
-                        )
-
-                        Spacer(modifier = Modifier.height(20.dp))
-
-                        // Options
-                        val options = listOf(currentQ.opt1, currentQ.opt2, currentQ.opt3, currentQ.opt4)
-                            .filter { it.isNotBlank() }
-
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            options.forEachIndexed { idx, opt ->
-                                val isSelected = selectedOption == opt
-                                val isCorrect = opt.equals(currentQ.answer, ignoreCase = true)
-
-                                val (btnBg, btnBorder, btnText) = when {
-                                    !isSubmitted && isSelected -> Triple(IndigoLight, IndigoPrimary, IndigoPrimary)
-                                    isSubmitted && isCorrect -> Triple(EmeraldLight, EmeraldSuccess, EmeraldSuccess)
-                                    isSubmitted && isSelected && !isCorrect -> Triple(RoseLight, RoseError, RoseError)
-                                    else -> Triple(Color(0xFFF8FAFC), SlateBorder, SlateText)
-                                }
-
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .background(btnBg)
-                                        .border(1.5.dp, btnBorder, RoundedCornerShape(14.dp))
-                                        .clickable(enabled = !isSubmitted) {
-                                            selectedOption = opt
-                                            isSubmitted = true
-                                            if (isCorrect) {
-                                                currentScore += 1
-                                            }
-                                        }
-                                        .padding(16.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "${('A' + idx)}.  $opt",
-                                            fontFamily = PoppinsFontFamily,
-                                            fontSize = 14.sp,
-                                            fontWeight = if (isSelected || (isSubmitted && isCorrect)) FontWeight.Bold else FontWeight.Medium,
-                                            color = btnText,
-                                            modifier = Modifier.weight(1f)
-                                        )
-
-                                        if (isSubmitted && isCorrect) {
-                                            Icon(
-                                                imageVector = Icons.Default.CheckCircle,
-                                                contentDescription = "Correct",
-                                                tint = EmeraldSuccess,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        } else if (isSubmitted && isSelected && !isCorrect) {
-                                            Icon(
-                                                imageVector = Icons.Default.Close,
-                                                contentDescription = "Incorrect",
-                                                tint = RoseError,
-                                                modifier = Modifier.size(20.dp)
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Explanation
-                        AnimatedVisibility(visible = isSubmitted && !currentQ.explanation.isNullOrBlank()) {
-                            Card(
+                            Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(top = 16.dp),
-                                shape = RoundedCornerShape(14.dp),
-                                colors = CardDefaults.cardColors(containerColor = IndigoLight),
-                                border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Color(0xFFC7D2FE)))
+                                    .padding(16.dp)
                             ) {
-                                Column(modifier = Modifier.padding(14.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     Text(
-                                        text = "EXPLANATION",
+                                        text = "${userAnswers.size} of ${activeQuestions.size} Answered",
                                         fontFamily = PoppinsFontFamily,
-                                        fontSize = 11.sp,
+                                        fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = IndigoPrimary
                                     )
-                                    Spacer(modifier = Modifier.height(4.dp))
                                     Text(
-                                        text = currentQ.explanation ?: "",
+                                        text = "Score: $currentScore",
                                         fontFamily = PoppinsFontFamily,
                                         fontSize = 13.sp,
-                                        fontWeight = FontWeight.Normal,
-                                        color = SlateText,
-                                        lineHeight = 18.sp
+                                        fontWeight = FontWeight.Bold,
+                                        color = EmeraldSuccess
                                     )
                                 }
-                            }
-                        }
-                    }
 
-                    // Bottom Action Button
-                    item {
-                        if (isSubmitted) {
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Button(
-                                onClick = {
-                                    if (currentQuestionIdx < activeQuestions.size - 1) {
-                                        currentQuestionIdx += 1
-                                        selectedOption = null
-                                        isSubmitted = false
-                                    } else {
-                                        isQuizCompleted = true
-                                        onCompleteQuiz(currentScore, activeQuestions.size)
-                                    }
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(50.dp),
-                                shape = RoundedCornerShape(14.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
-                            ) {
-                                Text(
-                                    text = if (currentQuestionIdx < activeQuestions.size - 1) "Next Question" else "Finish & View Results",
-                                    fontFamily = PoppinsFontFamily,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                LinearProgressIndicator(
+                                    progress = {
+                                        if (activeQuestions.isNotEmpty()) {
+                                            userAnswers.size.toFloat() / activeQuestions.size
+                                        } else 0f
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(7.dp)
+                                        .clip(CircleShape),
+                                    color = IndigoPrimary,
+                                    trackColor = Color(0xFFE2E8F0)
                                 )
                             }
                         }
                     }
+
+                    // Questions
+                    itemsIndexed(activeQuestions) { qIdx, currentQ ->
+                        val selectedOpt = userAnswers[qIdx]
+                        val isAnswered = selectedOpt != null
+                        val options = remember(currentQ) {
+                            listOf(currentQ.opt1, currentQ.opt2, currentQ.opt3, currentQ.opt4)
+                                .filter { it.isNotBlank() }
+                        }
+
+                        Card(
+                            shape = RoundedCornerShape(20.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(SlateBorder)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("quiz_question_card_$qIdx")
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(18.dp)
+                            ) {
+                                // Question Badge and Status
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(CircleShape)
+                                            .background(IndigoLight)
+                                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Text(
+                                            text = "QUESTION ${qIdx + 1}",
+                                            fontFamily = PoppinsFontFamily,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = IndigoPrimary
+                                        )
+                                    }
+
+                                    if (isAnswered) {
+                                        val hasCorrect = options.indices.any { idx ->
+                                            options[idx] == selectedOpt && isOptionTheAnswer(options[idx], idx, currentQ.answer)
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(CircleShape)
+                                                .background(if (hasCorrect) EmeraldLight else RoseLight)
+                                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                                        ) {
+                                            Text(
+                                                text = if (hasCorrect) "CORRECT" else "INCORRECT",
+                                                fontFamily = PoppinsFontFamily,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (hasCorrect) EmeraldSuccess else RoseError
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                // Question Title
+                                Text(
+                                    text = currentQ.question,
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = SlateText,
+                                    lineHeight = 22.sp
+                                )
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                // Options
+                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    options.forEachIndexed { optIdx, opt ->
+                                        val isThisOptionSelected = selectedOpt == opt
+                                        val isThisOptionAnswer = isOptionTheAnswer(opt, optIdx, currentQ.answer)
+
+                                        val (btnBg, btnBorder, btnText) = when {
+                                            !isAnswered -> Triple(Color(0xFFF8FAFC), SlateBorder, SlateText)
+                                            isThisOptionAnswer -> Triple(EmeraldLight, EmeraldSuccess, EmeraldSuccess)
+                                            isThisOptionSelected && !isThisOptionAnswer -> Triple(RoseLight, RoseError, RoseError)
+                                            else -> Triple(Color(0xFFF8FAFC), SlateBorder, SlateMuted)
+                                        }
+
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(14.dp))
+                                                .background(btnBg)
+                                                .border(1.5.dp, btnBorder, RoundedCornerShape(14.dp))
+                                                .clickable(enabled = !isAnswered) {
+                                                    val isCorrect = isOptionTheAnswer(opt, optIdx, currentQ.answer)
+                                                    userAnswers = userAnswers + (qIdx to opt)
+                                                    if (isCorrect) {
+                                                        currentScore += 1
+                                                    }
+                                                }
+                                                .padding(horizontal = 14.dp, vertical = 13.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = "${('A' + optIdx)}.  $opt",
+                                                    fontFamily = PoppinsFontFamily,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = if (isThisOptionSelected || (isAnswered && isThisOptionAnswer)) FontWeight.Bold else FontWeight.Medium,
+                                                    color = btnText,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+
+                                                if (isAnswered && isThisOptionAnswer) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.CheckCircle,
+                                                        contentDescription = "Correct",
+                                                        tint = EmeraldSuccess,
+                                                        modifier = Modifier.size(20.dp)
+                                                    )
+                                                } else if (isAnswered && isThisOptionSelected && !isThisOptionAnswer) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Close,
+                                                        contentDescription = "Incorrect",
+                                                        tint = RoseError,
+                                                        modifier = Modifier.size(20.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Explanation Card
+                                if (isAnswered && !currentQ.explanation.isNullOrBlank()) {
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 14.dp),
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = CardDefaults.cardColors(containerColor = IndigoLight),
+                                        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Color(0xFFC7D2FE)))
+                                    ) {
+                                        Column(modifier = Modifier.padding(12.dp)) {
+                                            Text(
+                                                text = "EXPLANATION",
+                                                fontFamily = PoppinsFontFamily,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = IndigoPrimary,
+                                                letterSpacing = 0.8.sp
+                                            )
+                                            Spacer(modifier = Modifier.height(3.dp))
+                                            Text(
+                                                text = currentQ.explanation ?: "",
+                                                fontFamily = PoppinsFontFamily,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Normal,
+                                                color = SlateText,
+                                                lineHeight = 17.sp
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Bottom Action (Finish or Results)
+                    item {
+                        Button(
+                            onClick = {
+                                isQuizCompleted = true
+                                onCompleteQuiz(currentScore, activeQuestions.size)
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp)
+                                .testTag("finish_quiz_button"),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
+                        ) {
+                            Text(
+                                text = if (userAnswers.size == activeQuestions.size) "Finish & View Results" else "Submit (${userAnswers.size}/${activeQuestions.size}) & View Results",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
                 }
-            }
-        } else {
-            // Empty State
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center
-            ) {
+            } else {
+                // Empty State
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
                 Text(
                     text = "No questions available for this category.\nAdd items in the Admin panel or load sample data.",
                     textAlign = TextAlign.Center,
@@ -851,22 +922,58 @@ private data class QuizQuestionItem(
     val explanation: String?
 )
 
-private fun GamePracticeEntity.toQuizItem() = QuizQuestionItem(
-    question = question,
-    opt1 = opt1,
-    opt2 = opt2,
-    opt3 = opt3,
-    opt4 = opt4,
-    answer = answer,
-    explanation = explanation
-)
+private fun isOptionTheAnswer(opt: String, optIdx: Int, answer: String): Boolean {
+    val cleanOpt = opt.replace(Regex("""^\s*#\s*"""), "").replace(Regex("""\s*#\s*$"""), "").trim()
+    val cleanAns = answer.replace(Regex("""^\s*#\s*"""), "").replace(Regex("""\s*#\s*$"""), "").trim()
+    if (cleanOpt.equals(cleanAns, ignoreCase = true)) return true
 
-private fun QuestionBankEntity.toQuizItem() = QuizQuestionItem(
-    question = question,
-    opt1 = opt1,
-    opt2 = opt2,
-    opt3 = opt3,
-    opt4 = opt4,
-    answer = answer,
-    explanation = explanation
-)
+    val letter = ('A' + optIdx).toString()
+    if (cleanAns.equals(letter, ignoreCase = true)) return true
+    if (cleanAns.equals("Opt${optIdx + 1}", ignoreCase = true)) return true
+    if (cleanAns.equals("Option ${optIdx + 1}", ignoreCase = true)) return true
+    if (cleanAns.equals("Option${optIdx + 1}", ignoreCase = true)) return true
+
+    if (cleanAns.startsWith("$letter.", ignoreCase = true) || cleanAns.startsWith("$letter)", ignoreCase = true)) {
+        val sub = cleanAns.substring(2).trim()
+        if (sub.equals(cleanOpt, ignoreCase = true)) return true
+    }
+    return false
+}
+
+private fun GamePracticeEntity.toQuizItem(): QuizQuestionItem {
+    val resolved = com.example.data.parser.QuestionAnswerResolver.resolve(
+        rawOpt1 = opt1,
+        rawOpt2 = opt2,
+        rawOpt3 = opt3,
+        rawOpt4 = opt4,
+        rawAnswer = answer
+    )
+    return QuizQuestionItem(
+        question = question,
+        opt1 = resolved.cleanOpt1,
+        opt2 = resolved.cleanOpt2,
+        opt3 = resolved.cleanOpt3,
+        opt4 = resolved.cleanOpt4,
+        answer = resolved.correctAnswer,
+        explanation = explanation
+    )
+}
+
+private fun QuestionBankEntity.toQuizItem(): QuizQuestionItem {
+    val resolved = com.example.data.parser.QuestionAnswerResolver.resolve(
+        rawOpt1 = opt1,
+        rawOpt2 = opt2,
+        rawOpt3 = opt3,
+        rawOpt4 = opt4,
+        rawAnswer = answer
+    )
+    return QuizQuestionItem(
+        question = question,
+        opt1 = resolved.cleanOpt1,
+        opt2 = resolved.cleanOpt2,
+        opt3 = resolved.cleanOpt3,
+        opt4 = resolved.cleanOpt4,
+        answer = resolved.correctAnswer,
+        explanation = explanation
+    )
+}

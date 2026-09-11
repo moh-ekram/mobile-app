@@ -53,6 +53,14 @@ fun ArticleReaderScreen(
 ) {
     var showAddDialog by remember { mutableStateOf(false) }
 
+    BackHandler {
+        if (activeArticle != null) {
+            onSelectArticle(null)
+        } else {
+            onBack()
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -414,54 +422,6 @@ fun ArticleReaderView(
                 }
             }
 
-            // Color Legend Bar
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFFF1F5F9))
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF4338CA))
-                    )
-                    Text(
-                        text = "Word (Indigo)",
-                        fontFamily = PoppinsFontFamily,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF4338CA)
-                    )
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF047857))
-                    )
-                    Text(
-                        text = "Meaning (Emerald)",
-                        fontFamily = PoppinsFontFamily,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF047857)
-                    )
-                }
-            }
-
             // Article Content Area in Full Screen
             LazyColumn(
                 modifier = Modifier
@@ -485,26 +445,6 @@ fun ArticleReaderView(
                                 .fillMaxWidth()
                                 .padding(22.dp)
                         ) {
-                            Text(
-                                text = currentArticle.title,
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = SlateText
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "By ${currentArticle.author} • ${currentArticle.wordCount} words",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = IndigoPrimary
-                            )
-
-                            HorizontalDivider(
-                                modifier = Modifier.padding(vertical = 14.dp),
-                                color = SlateBorder
-                            )
-
                             // Highlighted Interactive Text
                             val annotatedText = buildPlaceHighlightedAnnotatedString(
                                 content = currentArticle.content,
