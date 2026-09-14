@@ -35,8 +35,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.ArticleEntity
 import com.example.data.model.VocabularyWordEntity
+import com.example.data.parser.ArticleParser
+import com.example.data.parser.ParsedArticleItem
 import com.example.ui.theme.*
 import java.util.Locale
+import android.content.ClipboardManager
+import android.content.Context
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -46,6 +53,9 @@ fun ArticleReaderScreen(
     words: List<VocabularyWordEntity>,
     onSelectArticle: (ArticleEntity?) -> Unit,
     onSaveArticle: (title: String, content: String, author: String, id: String?) -> Unit,
+    onSaveArticlesBatch: (List<Triple<String, String, String>>) -> Unit = { list ->
+        list.forEach { (t, c, a) -> onSaveArticle(t, c, a, null) }
+    },
     onDeleteArticle: (String) -> Unit,
     onRateWord: (wordId: String, status: String) -> Unit,
     onBack: () -> Unit,
@@ -95,6 +105,7 @@ fun ArticleReaderScreen(
             words = words,
             onSelectArticle = onSelectArticle,
             onSaveArticle = onSaveArticle,
+            onSaveArticlesBatch = onSaveArticlesBatch,
             onDeleteArticle = onDeleteArticle,
             onRateWord = onRateWord,
             showAddDialogFromParent = showAddDialog,
@@ -111,6 +122,9 @@ fun ArticleReaderView(
     words: List<VocabularyWordEntity>,
     onSelectArticle: (ArticleEntity?) -> Unit,
     onSaveArticle: (title: String, content: String, author: String, id: String?) -> Unit,
+    onSaveArticlesBatch: (List<Triple<String, String, String>>) -> Unit = { list ->
+        list.forEach { (t, c, a) -> onSaveArticle(t, c, a, null) }
+    },
     onDeleteArticle: (String) -> Unit,
     onRateWord: (wordId: String, status: String) -> Unit,
     showAddDialogFromParent: Boolean = false,
@@ -646,7 +660,7 @@ fun ArticleReaderView(
         }
     }
 
-    // Add / Upload Article Dialog (Editable Title and Author name by default)
+    // Add / Upload Article Dialog (Editable Title and Author name by default, supports Option 1 format & Google Docs)
     if (isAdding) {
         ArticleEditorDialog(
             initialTitle = "Daily Reading Passage",
@@ -657,8 +671,18 @@ fun ArticleReaderView(
                 showAddDialog = false
                 onDismissAddDialog()
             },
-            onSave = { title, content, author ->
+            onSaveSingle = { title, content, author ->
                 onSaveArticle(title, content, author, null)
+                showAddDialog = false
+                onDismissAddDialog()
+            },
+            onSaveBatch = { parsedArticles ->
+                if (parsedArticles.size == 1) {
+                    val single = parsedArticles.first()
+                    onSaveArticle(single.title, single.content, single.author, null)
+                } else {
+                    onSaveArticlesBatch(parsedArticles.map { Triple(it.title, it.content, it.author) })
+                }
                 showAddDialog = false
                 onDismissAddDialog()
             }
@@ -673,8 +697,15 @@ fun ArticleReaderView(
             initialContent = currentArticle.content,
             isEditing = true,
             onDismiss = { showEditDialog = false },
-            onSave = { title, content, author ->
+            onSaveSingle = { title, content, author ->
                 onSaveArticle(title, content, author, currentArticle.id)
+                showEditDialog = false
+            },
+            onSaveBatch = { parsedArticles ->
+                if (parsedArticles.isNotEmpty()) {
+                    val single = parsedArticles.first()
+                    onSaveArticle(single.title, single.content, single.author, currentArticle.id)
+                }
                 showEditDialog = false
             }
         )
@@ -743,27 +774,55 @@ private fun ArticleEditorDialog(
     initialContent: String,
     isEditing: Boolean,
     onDismiss: () -> Unit,
-    onSave: (title: String, content: String, author: String) -> Unit
+    onSaveSingle: (title: String, content: String, author: String) -> Unit,
+    onSaveBatch: (List<ParsedArticleItem>) -> Unit
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var selectedTab by remember { mutableIntStateOf(0) } // 0: Text / File, 1: Google Doc
+
     var title by remember { mutableStateOf(initialTitle) }
     var author by remember { mutableStateOf(initialAuthor) }
     var content by remember { mutableStateOf(initialContent) }
+
+    // Google Doc States
+    var googleDocUrl by remember { mutableStateOf("") }
+    var isFetchingDoc by remember { mutableStateOf(false) }
+    var docErrorMessage by remember { mutableStateOf<String?>(null) }
+    var docFetchedArticles by remember { mutableStateOf<List<ParsedArticleItem>>(emptyList()) }
+
+    // Live parse detection for Tab 0
+    val liveParsedArticles = remember(content, title, author) {
+        if (content.isBlank()) emptyList()
+        else ArticleParser.parseArticles(content, title, author)
+    }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri != null) {
             try {
+                var fileName = "Imported Article"
                 context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
                     val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                     if (nameIdx != -1 && cursor.moveToFirst()) {
-                        val fileName = cursor.getString(nameIdx)
-                        title = fileName.substringBeforeLast(".")
+                        fileName = cursor.getString(nameIdx).substringBeforeLast(".")
                     }
                 }
                 context.contentResolver.openInputStream(uri)?.use { stream ->
-                    content = stream.bufferedReader().readText()
+                    val fileText = stream.bufferedReader().readText()
+                    val parsed = ArticleParser.parseArticles(fileText, fileName, "Anonymous Author")
+                    if (parsed.size == 1 && !fileText.contains("#") && !fileText.contains("---")) {
+                        title = parsed.first().title
+                        author = parsed.first().author
+                        content = parsed.first().content
+                    } else {
+                        content = fileText
+                        if (parsed.size == 1) {
+                            title = parsed.first().title
+                            author = parsed.first().author
+                        }
+                    }
                 }
             } catch (_: Exception) {}
         }
@@ -772,78 +831,426 @@ private fun ArticleEditorDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(
-                text = if (isEditing) "Edit Article" else "Add Article",
-                fontFamily = PoppinsFontFamily,
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp,
-                color = SlateText
-            )
+            Column {
+                Text(
+                    text = if (isEditing) "Edit Article" else "Add Articles",
+                    fontFamily = PoppinsFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = SlateText
+                )
+                if (!isEditing) {
+                    Text(
+                        text = "Option 1 Format: # Title, @ Author, --- separator",
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 11.sp,
+                        color = IndigoPrimary,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
         },
         text = {
             Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 460.dp)
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 if (!isEditing) {
+                    // Tab Selector: Upload/Text vs Google Doc
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(SlateLight)
+                            .padding(3.dp)
+                    ) {
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { selectedTab = 0 },
+                            color = if (selectedTab == 0) Color.White else Color.Transparent,
+                            shadowElevation = if (selectedTab == 0) 1.dp else 0.dp
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(vertical = 6.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.Description,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = if (selectedTab == 0) IndigoPrimary else SlateMuted
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Text / File",
+                                    fontSize = 12.sp,
+                                    fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (selectedTab == 0) IndigoPrimary else SlateMuted
+                                )
+                            }
+                        }
+
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { selectedTab = 1 },
+                            color = if (selectedTab == 1) Color.White else Color.Transparent,
+                            shadowElevation = if (selectedTab == 1) 1.dp else 0.dp
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(vertical = 6.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.CloudDownload,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = if (selectedTab == 1) IndigoPrimary else SlateMuted
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Google Doc",
+                                    fontSize = 12.sp,
+                                    fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (selectedTab == 1) IndigoPrimary else SlateMuted
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (selectedTab == 0 || isEditing) {
+                    // TAB 0: Direct input or File Upload
+                    if (!isEditing) {
+                        Button(
+                            onClick = {
+                                filePickerLauncher.launch(arrayOf("text/plain", "text/*", "*/*"))
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
+                        ) {
+                            Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Upload Text File (.txt)", fontSize = 13.sp)
+                        }
+                    }
+
+                    // Format hint card
+                    if (!isEditing && liveParsedArticles.size <= 1) {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
+                            shape = RoundedCornerShape(8.dp),
+                            border = CardDefaults.outlinedCardBorder().copy(
+                                brush = androidx.compose.ui.graphics.SolidColor(SlateBorder)
+                            )
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                Text(
+                                    text = "Easy Format (Option 1):",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = IndigoPrimary
+                                )
+                                Text(
+                                    text = "# Article Title\n@ Author Name\nParagraph content...\n---\n# Next Article Title\n...",
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = SlateMuted
+                                )
+                            }
+                        }
+                    }
+
+                    // If multiple articles detected in content:
+                    if (!isEditing && liveParsedArticles.size > 1) {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = IndigoLight),
+                            shape = RoundedCornerShape(10.dp),
+                            border = CardDefaults.outlinedCardBorder().copy(
+                                brush = androidx.compose.ui.graphics.SolidColor(IndigoPrimary.copy(alpha = 0.4f))
+                            )
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Default.CheckCircle,
+                                        contentDescription = null,
+                                        tint = IndigoPrimary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "${liveParsedArticles.size} Articles Detected!",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = IndigoPrimary
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                liveParsedArticles.take(4).forEachIndexed { idx, item ->
+                                    Text(
+                                        text = "${idx + 1}. ${item.title} (by ${item.author})",
+                                        fontSize = 11.sp,
+                                        color = SlateText,
+                                        maxLines = 1
+                                    )
+                                }
+                                if (liveParsedArticles.size > 4) {
+                                    Text(
+                                        text = "...and ${liveParsedArticles.size - 4} more",
+                                        fontSize = 10.sp,
+                                        color = SlateMuted,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        OutlinedTextField(
+                            value = title,
+                            onValueChange = { title = it },
+                            label = { Text("Article Title (Optional if using # Title)") },
+                            placeholder = { Text("Auto-detected if # Title is used") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        OutlinedTextField(
+                            value = author,
+                            onValueChange = { author = it },
+                            label = { Text("Author Name (Optional if using @ Author)") },
+                            placeholder = { Text("Auto-detected if @ Author is used") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = content,
+                        onValueChange = { content = it },
+                        label = { Text("Article Content *") },
+                        placeholder = {
+                            Text(
+                                if (isEditing) "Article content..."
+                                else "Paste passage or multiple articles formatted with:\n# Title\n@ Author\nContent...\n---"
+                            )
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp),
+                        maxLines = 14
+                    )
+                } else {
+                    // TAB 1: Google Doc URL Import
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFF0FDF4)),
+                        shape = RoundedCornerShape(10.dp),
+                        border = CardDefaults.outlinedCardBorder().copy(
+                            brush = androidx.compose.ui.graphics.SolidColor(EmeraldSuccess.copy(alpha = 0.3f))
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text(
+                                text = "How to write in Google Doc:",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EmeraldSuccess
+                            )
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                text = "# Article Title 1\n@ Author Name\nFirst article paragraph...\n\n---\n\n# Article Title 2\n@ Author Name\nSecond article paragraph...",
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = SlateText
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "• Delimiter: '---' separates multiple articles.\n• Make sure Doc sharing is set to 'Anyone with the link can view'.",
+                                fontSize = 10.sp,
+                                color = SlateMuted
+                            )
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = googleDocUrl,
+                        onValueChange = {
+                            googleDocUrl = it
+                            docErrorMessage = null
+                        },
+                        label = { Text("Google Doc Link or ID") },
+                        placeholder = { Text("https://docs.google.com/document/d/...") },
+                        trailingIcon = {
+                            IconButton(onClick = {
+                                try {
+                                    val clipService = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                    val clipText = clipService?.primaryClip?.getItemAt(0)?.text?.toString()
+                                    if (!clipText.isNullOrBlank()) {
+                                        googleDocUrl = clipText.trim()
+                                        docErrorMessage = null
+                                    }
+                                } catch (_: Exception) {}
+                            }) {
+                                Icon(Icons.Default.ContentPaste, contentDescription = "Paste Link", tint = IndigoPrimary)
+                            }
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
                     Button(
                         onClick = {
-                            filePickerLauncher.launch(arrayOf("text/plain", "text/*", "*/*"))
+                            if (googleDocUrl.isNotBlank()) {
+                                isFetchingDoc = true
+                                docErrorMessage = null
+                                coroutineScope.launch {
+                                    val fetchResult = ArticleParser.fetchGoogleDocText(googleDocUrl)
+                                    isFetchingDoc = false
+                                    fetchResult.fold(
+                                        onSuccess = { docText ->
+                                            val parsed = ArticleParser.parseArticles(docText)
+                                            if (parsed.isEmpty()) {
+                                                docErrorMessage = "No articles could be parsed from the document."
+                                            } else {
+                                                docFetchedArticles = parsed
+                                            }
+                                        },
+                                        onFailure = { err ->
+                                            docErrorMessage = err.message ?: "Failed to fetch document."
+                                        }
+                                    )
+                                }
+                            }
                         },
+                        enabled = googleDocUrl.isNotBlank() && !isFetchingDoc,
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
                     ) {
-                        Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Upload Text File (.txt)")
+                        if (isFetchingDoc) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Fetching from Google Doc...", fontSize = 13.sp)
+                        } else {
+                            Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Fetch from Google Doc", fontSize = 13.sp)
+                        }
+                    }
+
+                    if (docErrorMessage != null) {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = RoseLight),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = RoseError, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = docErrorMessage ?: "",
+                                    color = RoseError,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                    }
+
+                    if (docFetchedArticles.isNotEmpty()) {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = EmeraldLight),
+                            shape = RoundedCornerShape(10.dp),
+                            border = CardDefaults.outlinedCardBorder().copy(
+                                brush = androidx.compose.ui.graphics.SolidColor(EmeraldSuccess.copy(alpha = 0.4f))
+                            )
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Default.CheckCircle,
+                                        contentDescription = null,
+                                        tint = EmeraldSuccess,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "${docFetchedArticles.size} Articles Ready to Import!",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = EmeraldSuccess
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                docFetchedArticles.forEachIndexed { idx, item ->
+                                    val words = item.content.split("\\s+".toRegex()).count { it.isNotBlank() }
+                                    Text(
+                                        text = "${idx + 1}. ${item.title} — ${item.author} (${words} words)",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = SlateText,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
-
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("Article Title (Optional - auto-filled from file)") },
-                    placeholder = { Text("Auto-filled from file name (editable)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = author,
-                    onValueChange = { author = it },
-                    label = { Text("Author Name (Optional)") },
-                    placeholder = { Text("e.g. John Doe / Daily Science") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = content,
-                    onValueChange = { content = it },
-                    label = { Text("Article Content *") },
-                    placeholder = { Text("Paste article or passage here...") },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(180.dp),
-                    maxLines = 12
-                )
             }
         },
         confirmButton = {
-            Button(
-                onClick = {
-                    if (content.isNotBlank()) {
-                        onSave(
-                            title.trim().ifEmpty { "New Article" },
-                            content.trim(),
-                            author.trim().ifEmpty { "Anonymous Author" }
-                        )
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
-            ) {
-                Text(if (isEditing) "Save Changes" else "Save & Read")
+            if (selectedTab == 1 && docFetchedArticles.isNotEmpty()) {
+                Button(
+                    onClick = {
+                        onSaveBatch(docFetchedArticles)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess)
+                ) {
+                    Text("Import All (${docFetchedArticles.size}) & Read")
+                }
+            } else if (selectedTab == 0 && liveParsedArticles.size > 1) {
+                Button(
+                    onClick = {
+                        onSaveBatch(liveParsedArticles)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
+                ) {
+                    Text("Import All (${liveParsedArticles.size}) & Read")
+                }
+            } else {
+                Button(
+                    onClick = {
+                        if (content.isNotBlank()) {
+                            val parsed = ArticleParser.parseArticles(content, title, author)
+                            if (parsed.size > 1) {
+                                onSaveBatch(parsed)
+                            } else if (parsed.size == 1) {
+                                val single = parsed.first()
+                                onSaveSingle(single.title, single.content, single.author)
+                            } else {
+                                onSaveSingle(
+                                    title.trim().ifEmpty { "New Article" },
+                                    content.trim(),
+                                    author.trim().ifEmpty { "Anonymous Author" }
+                                )
+                            }
+                        }
+                    },
+                    enabled = content.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
+                ) {
+                    Text(if (isEditing) "Save Changes" else "Save & Read")
+                }
             }
         },
         dismissButton = {

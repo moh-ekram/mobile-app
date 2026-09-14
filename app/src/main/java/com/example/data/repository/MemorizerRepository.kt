@@ -131,6 +131,10 @@ class MemorizerRepository(
         article
     }
 
+    suspend fun saveArticles(articles: List<ArticleEntity>) = withContext(Dispatchers.IO) {
+        database.articleDao().insertArticles(articles)
+    }
+
     suspend fun deleteArticle(articleId: String) = withContext(Dispatchers.IO) {
         database.articleDao().deleteArticleById(articleId)
     }

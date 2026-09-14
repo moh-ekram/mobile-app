@@ -1,7 +1,6 @@
 {
-  "name": "Memorizer",
-  "description": "Vocabulary flashcard learning, progress tracking, practice games, and question bank memorizer with cloud and local backup.",
+  "name": "Article Reader",
+  "description": "Minimalist modern article reader with Google Doc link sync, custom syntax parser, and course-word color detection.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
-

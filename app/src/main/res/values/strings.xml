@@ -1,5 +1,3 @@
 <resources>
-    <string name="app_name">Memorizer</string>
-    <string name="widget_description">Daily vocabulary word and definition on your home screen</string>
+    <string name="app_name">Article Reader</string>
 </resources>
-

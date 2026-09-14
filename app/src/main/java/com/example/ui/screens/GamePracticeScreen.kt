@@ -192,6 +192,9 @@ fun GamePracticeScreen(
     words: List<VocabularyWordEntity> = emptyList(),
     onSelectArticle: (ArticleEntity?) -> Unit = {},
     onSaveArticle: (title: String, content: String, author: String, id: String?) -> Unit = { _, _, _, _ -> },
+    onSaveArticlesBatch: (List<Triple<String, String, String>>) -> Unit = { list ->
+        list.forEach { (t, c, a) -> onSaveArticle(t, c, a, null) }
+    },
     onDeleteArticle: (String) -> Unit = {},
     onRateWord: (wordId: String, status: String) -> Unit = { _, _ -> },
     onBack: () -> Unit = {},
@@ -624,6 +627,7 @@ fun GamePracticeScreen(
                     words = words,
                     onSelectArticle = onSelectArticle,
                     onSaveArticle = onSaveArticle,
+                    onSaveArticlesBatch = onSaveArticlesBatch,
                     onDeleteArticle = onDeleteArticle,
                     onRateWord = onRateWord,
                     modifier = Modifier.fillMaxSize()

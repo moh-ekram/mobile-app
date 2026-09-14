@@ -376,6 +376,9 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             onSaveArticle = { title, content, author, id ->
                                 viewModel.saveArticle(title, content, author, id)
                             },
+                            onSaveArticlesBatch = { batch ->
+                                viewModel.saveArticlesBatch(batch)
+                            },
                             onDeleteArticle = { id -> viewModel.deleteArticle(id) },
                             onRateWord = { id, st -> viewModel.rateWord(id, st) },
                             onBack = { viewModel.navigateBack() }
@@ -387,6 +390,9 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             onSelectArticle = { art -> viewModel.setActiveArticle(art) },
                             onSaveArticle = { title, content, author, id ->
                                 viewModel.saveArticle(title, content, author, id)
+                            },
+                            onSaveArticlesBatch = { batch ->
+                                viewModel.saveArticlesBatch(batch)
                             },
                             onDeleteArticle = { id -> viewModel.deleteArticle(id) },
                             onRateWord = { id, st -> viewModel.rateWord(id, st) },

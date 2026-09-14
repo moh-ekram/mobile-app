@@ -286,6 +286,29 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun saveArticlesBatch(articles: List<Triple<String, String, String>>) {
+        viewModelScope.launch {
+            val entities = articles.mapIndexed { index, (title, content, author) ->
+                val id = "art_${System.currentTimeMillis()}_$index"
+                val count = content.split("\\s+".toRegex()).count { it.isNotBlank() }
+                com.example.data.model.ArticleEntity(
+                    id = id,
+                    title = title.ifBlank { "Article ${index + 1}" },
+                    content = content,
+                    author = author.ifBlank { "Anonymous Author" },
+                    courseId = activeCourseId.value,
+                    createdAt = System.currentTimeMillis() + (articles.size - index),
+                    wordCount = count
+                )
+            }
+            if (entities.isNotEmpty()) {
+                repository.saveArticles(entities)
+                activeArticle.value = entities.first()
+                _statusMessage.value = "${entities.size} articles imported successfully!"
+            }
+        }
+    }
+
     fun deleteArticle(id: String) {
         viewModelScope.launch {
             repository.deleteArticle(id)
