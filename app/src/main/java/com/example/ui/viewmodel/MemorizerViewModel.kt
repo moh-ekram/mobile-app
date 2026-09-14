@@ -319,6 +319,41 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    val isSyncingArticles = MutableStateFlow(false)
+    val articleSyncUrl = MutableStateFlow(repository.getArticleSyncUrl())
+
+    fun setArticleSyncUrl(url: String) {
+        articleSyncUrl.value = url
+        repository.setArticleSyncUrl(url)
+    }
+
+    fun syncArticles(customUrlOrText: String? = null, onComplete: ((String) -> Unit)? = null) {
+        val source = (customUrlOrText ?: articleSyncUrl.value).trim()
+        if (source.isBlank()) {
+            _statusMessage.value = "Please provide a Google Doc link or text source."
+            onComplete?.invoke("No source provided")
+            return
+        }
+        viewModelScope.launch {
+            isSyncingArticles.value = true
+            val result = repository.syncArticlesFromSource(source)
+            isSyncingArticles.value = false
+            result.onSuccess { summary ->
+                if (source.startsWith("http")) {
+                    setArticleSyncUrl(source)
+                }
+                val msg = "Sync complete: ${summary.updatedCount} updated, ${summary.addedCount} new added" +
+                        if (summary.skippedDeletedCount > 0) " (${summary.skippedDeletedCount} previously deleted skipped)" else ""
+                _statusMessage.value = msg
+                onComplete?.invoke(msg)
+            }.onFailure { err ->
+                val errorMsg = "Sync failed: ${err.message}"
+                _statusMessage.value = errorMsg
+                onComplete?.invoke(errorMsg)
+            }
+        }
+    }
+
     // Custom Backup Tree URI state
     val customBackupTreeUri = MutableStateFlow<String?>(repository.backupManager.getCustomTreeUri())
 

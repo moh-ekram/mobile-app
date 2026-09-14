@@ -4,11 +4,13 @@ import android.content.Context
 import com.example.data.backup.BackupManager
 import com.example.data.local.AppDatabase
 import com.example.data.model.ArticleEntity
+import com.example.data.model.DeletedArticleTitleEntity
 import com.example.data.model.CourseEntity
 import com.example.data.model.GamePracticeEntity
 import com.example.data.model.QuestionBankEntity
 import com.example.data.model.UserProgressEntity
 import com.example.data.model.VocabularyWordEntity
+import com.example.data.parser.ArticleParser
 import com.example.data.parser.FileParsers
 import com.example.data.supabase.SupabaseSyncService
 import kotlinx.coroutines.CoroutineScope
@@ -50,6 +52,7 @@ class MemorizerRepository(
 ) {
     val backupManager = BackupManager(context, database)
     val supabaseService = SupabaseSyncService(context)
+    private val prefs = context.getSharedPreferences("memorizer_prefs", Context.MODE_PRIVATE)
 
     val allWords: Flow<List<VocabularyWordEntity>> = database.vocabularyDao().getAllWords()
     val distinctGroups: Flow<List<String>> = database.vocabularyDao().getDistinctGroups()
@@ -135,8 +138,100 @@ class MemorizerRepository(
         database.articleDao().insertArticles(articles)
     }
 
+    fun getArticleSyncUrl(): String {
+        return prefs.getString("article_sync_url", "") ?: ""
+    }
+
+    fun setArticleSyncUrl(url: String) {
+        prefs.edit().putString("article_sync_url", url).apply()
+    }
+
     suspend fun deleteArticle(articleId: String) = withContext(Dispatchers.IO) {
+        val existing = database.articleDao().getArticleById(articleId)
+        if (existing != null) {
+            val norm = existing.title.trim().lowercase()
+            database.deletedArticleDao().insertDeleted(
+                DeletedArticleTitleEntity(normalizedTitle = norm, originalTitle = existing.title)
+            )
+        }
         database.articleDao().deleteArticleById(articleId)
+    }
+
+    data class ArticleSyncSummary(
+        val updatedCount: Int,
+        val addedCount: Int,
+        val skippedDeletedCount: Int,
+        val totalProcessed: Int
+    )
+
+    suspend fun syncArticlesFromSource(source: String): Result<ArticleSyncSummary> = withContext(Dispatchers.IO) {
+        try {
+            val trimmedSource = source.trim()
+            val contentText = if (trimmedSource.startsWith("http://") || trimmedSource.startsWith("https://") || trimmedSource.contains("docs.google.com")) {
+                setArticleSyncUrl(trimmedSource)
+                val fetchRes = ArticleParser.fetchGoogleDocText(trimmedSource)
+                fetchRes.getOrThrow()
+            } else {
+                trimmedSource
+            }
+
+            val parsedArticles = ArticleParser.parseArticles(contentText)
+            if (parsedArticles.isEmpty()) {
+                return@withContext Result.failure(Exception("No valid articles found in document."))
+            }
+
+            val deletedTitles = database.deletedArticleDao().getAllDeletedNormalizedTitles().toSet()
+            val existingArticles = database.articleDao().getAllArticlesList()
+            val existingMap = existingArticles.associateBy { it.title.trim().lowercase() }
+
+            var updatedCount = 0
+            var addedCount = 0
+            var skippedDeletedCount = 0
+
+            parsedArticles.forEachIndexed { idx, item ->
+                val normTitle = item.title.trim().lowercase()
+                if (deletedTitles.contains(normTitle)) {
+                    // Deleted article - strictly ignore and never re-sync!
+                    skippedDeletedCount++
+                } else if (existingMap.containsKey(normTitle)) {
+                    // Match found! Update content and author
+                    val existing = existingMap[normTitle]!!
+                    val count = item.content.split("\\s+".toRegex()).count { it.isNotBlank() }
+                    val updated = existing.copy(
+                        title = item.title,
+                        content = item.content,
+                        author = item.author,
+                        wordCount = count
+                    )
+                    database.articleDao().insertArticle(updated)
+                    updatedCount++
+                } else {
+                    // New article!
+                    val count = item.content.split("\\s+".toRegex()).count { it.isNotBlank() }
+                    val newEntity = ArticleEntity(
+                        id = "art_${System.currentTimeMillis()}_$idx",
+                        title = item.title,
+                        content = item.content,
+                        author = item.author,
+                        courseId = "course_default",
+                        wordCount = count
+                    )
+                    database.articleDao().insertArticle(newEntity)
+                    addedCount++
+                }
+            }
+
+            Result.success(
+                ArticleSyncSummary(
+                    updatedCount = updatedCount,
+                    addedCount = addedCount,
+                    skippedDeletedCount = skippedDeletedCount,
+                    totalProcessed = parsedArticles.size
+                )
+            )
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     suspend fun updateWordStatus(id: String, status: String, userId: String = "1235") = withContext(Dispatchers.IO) {

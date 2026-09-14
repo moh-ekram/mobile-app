@@ -625,6 +625,7 @@ fun GamePracticeScreen(
                     articles = articles,
                     activeArticle = activeArticle,
                     words = words,
+                    courses = courses,
                     onSelectArticle = onSelectArticle,
                     onSaveArticle = onSaveArticle,
                     onSaveArticlesBatch = onSaveArticlesBatch,

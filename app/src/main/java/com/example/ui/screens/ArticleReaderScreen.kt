@@ -7,12 +7,16 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -34,6 +38,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.ArticleEntity
+import com.example.data.model.CourseEntity
 import com.example.data.model.VocabularyWordEntity
 import com.example.data.parser.ArticleParser
 import com.example.data.parser.ParsedArticleItem
@@ -51,6 +56,11 @@ fun ArticleReaderScreen(
     articles: List<ArticleEntity>,
     activeArticle: ArticleEntity?,
     words: List<VocabularyWordEntity>,
+    courses: List<CourseEntity> = emptyList(),
+    isSyncing: Boolean = false,
+    syncUrl: String = "",
+    onSync: (String) -> Unit = {},
+    onSetSyncUrl: (String) -> Unit = {},
     onSelectArticle: (ArticleEntity?) -> Unit,
     onSaveArticle: (title: String, content: String, author: String, id: String?) -> Unit,
     onSaveArticlesBatch: (List<Triple<String, String, String>>) -> Unit = { list ->
@@ -62,6 +72,7 @@ fun ArticleReaderScreen(
     modifier: Modifier = Modifier
 ) {
     var showAddDialog by remember { mutableStateOf(false) }
+    var showSyncDialog by remember { mutableStateOf(false) }
 
     BackHandler {
         if (activeArticle != null) {
@@ -90,6 +101,20 @@ fun ArticleReaderScreen(
                         }
                     },
                     actions = {
+                        IconButton(
+                            onClick = { showSyncDialog = true },
+                            enabled = !isSyncing
+                        ) {
+                            if (isSyncing) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp,
+                                    color = IndigoPrimary
+                                )
+                            } else {
+                                Icon(Icons.Default.Sync, contentDescription = "Sync Articles", tint = IndigoPrimary)
+                            }
+                        }
                         IconButton(onClick = { showAddDialog = true }) {
                             Icon(Icons.Default.Add, contentDescription = "Add Article", tint = IndigoPrimary)
                         }
@@ -103,6 +128,11 @@ fun ArticleReaderScreen(
             articles = articles,
             activeArticle = activeArticle,
             words = words,
+            courses = courses,
+            isSyncing = isSyncing,
+            syncUrl = syncUrl,
+            onSync = onSync,
+            onSetSyncUrl = onSetSyncUrl,
             onSelectArticle = onSelectArticle,
             onSaveArticle = onSaveArticle,
             onSaveArticlesBatch = onSaveArticlesBatch,
@@ -110,6 +140,8 @@ fun ArticleReaderScreen(
             onRateWord = onRateWord,
             showAddDialogFromParent = showAddDialog,
             onDismissAddDialog = { showAddDialog = false },
+            showSyncDialogFromParent = showSyncDialog,
+            onDismissSyncDialog = { showSyncDialog = false },
             modifier = if (activeArticle == null) Modifier.padding(innerPadding) else Modifier.statusBarsPadding()
         )
     }
@@ -120,6 +152,11 @@ fun ArticleReaderView(
     articles: List<ArticleEntity>,
     activeArticle: ArticleEntity?,
     words: List<VocabularyWordEntity>,
+    courses: List<CourseEntity> = emptyList(),
+    isSyncing: Boolean = false,
+    syncUrl: String = "",
+    onSync: (String) -> Unit = {},
+    onSetSyncUrl: (String) -> Unit = {},
     onSelectArticle: (ArticleEntity?) -> Unit,
     onSaveArticle: (title: String, content: String, author: String, id: String?) -> Unit,
     onSaveArticlesBatch: (List<Triple<String, String, String>>) -> Unit = { list ->
@@ -129,14 +166,20 @@ fun ArticleReaderView(
     onRateWord: (wordId: String, status: String) -> Unit,
     showAddDialogFromParent: Boolean = false,
     onDismissAddDialog: () -> Unit = {},
+    showSyncDialogFromParent: Boolean = false,
+    onDismissSyncDialog: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     var showAddDialog by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
+    var showSyncDialog by remember { mutableStateOf(false) }
+    var showCourseFilterDialog by remember { mutableStateOf(false) }
+    var selectedCourseIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var selectedWordForDetails by remember { mutableStateOf<VocabularyWordEntity?>(null) }
 
     val isAdding = showAddDialog || showAddDialogFromParent
+    val isSyncingDialogVisible = showSyncDialog || showSyncDialogFromParent
 
     // TTS engine for audio pronunciation
     var tts: TextToSpeech? by remember { mutableStateOf(null) }
@@ -161,10 +204,19 @@ fun ArticleReaderView(
         onSelectArticle(null)
     }
 
-    // Place1 (Word) and Place2 (Meaning) lookup maps
-    val place1Map = remember(words) {
+    // Filter vocabulary words based on course selection
+    val activeWords = remember(words, selectedCourseIds) {
+        if (selectedCourseIds.isEmpty()) {
+            words
+        } else {
+            words.filter { selectedCourseIds.contains(it.courseId) }
+        }
+    }
+
+    // Place1 (Word) and Place2 (Meaning) lookup maps based on activeWords
+    val place1Map = remember(activeWords) {
         val map = mutableMapOf<String, VocabularyWordEntity>()
-        words.forEach { w ->
+        activeWords.forEach { w ->
             if (w.word.isNotBlank()) {
                 map[w.word.trim().lowercase(Locale.ROOT)] = w
             }
@@ -172,11 +224,10 @@ fun ArticleReaderView(
         map
     }
 
-    val place2Map = remember(words) {
+    val place2Map = remember(activeWords) {
         val map = mutableMapOf<String, VocabularyWordEntity>()
-        words.forEach { w ->
+        activeWords.forEach { w ->
             if (w.meaning.isNotBlank()) {
-                // Map the full meaning and component phrases
                 val trimmedMeaning = w.meaning.trim().lowercase(Locale.ROOT)
                 map[trimmedMeaning] = w
                 val parts = trimmedMeaning.split("[,;/]+".toRegex()).map { it.trim() }.filter { it.isNotBlank() }
@@ -265,34 +316,68 @@ fun ArticleReaderView(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                        .padding(horizontal = 4.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     item {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 4.dp),
+                                .padding(horizontal = 4.dp, vertical = 2.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Saved Articles (${articles.size})",
+                                text = "${articles.size} Articles",
                                 fontFamily = PoppinsFontFamily,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = SlateText
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = SlateMuted
                             )
-                            Button(
-                                onClick = { showAddDialog = true },
-                                shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                modifier = Modifier.height(34.dp)
-                            ) {
-                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Add Article", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                OutlinedButton(
+                                    onClick = {
+                                        if (syncUrl.isNotBlank()) {
+                                            onSync(syncUrl)
+                                        } else {
+                                            showSyncDialog = true
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(34.dp),
+                                    enabled = !isSyncing
+                                ) {
+                                    if (isSyncing) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(14.dp),
+                                            strokeWidth = 2.dp,
+                                            color = IndigoPrimary
+                                        )
+                                    } else {
+                                        Icon(
+                                            Icons.Default.Sync,
+                                            contentDescription = "Sync",
+                                            modifier = Modifier.size(15.dp),
+                                            tint = IndigoPrimary
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Sync", fontSize = 12.sp, color = IndigoPrimary, fontWeight = FontWeight.SemiBold)
+                                }
+
+                                Button(
+                                    onClick = { showAddDialog = true },
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(34.dp)
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(15.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Add", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                }
                             }
                         }
                     }
@@ -302,13 +387,13 @@ fun ArticleReaderView(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable { onSelectArticle(art) },
-                            shape = RoundedCornerShape(16.dp),
+                            shape = RoundedCornerShape(12.dp),
                             colors = CardDefaults.cardColors(containerColor = Color.White),
                             border = CardDefaults.outlinedCardBorder().copy(
                                 brush = androidx.compose.ui.graphics.SolidColor(SlateBorder)
                             )
                         ) {
-                            Column(modifier = Modifier.padding(16.dp)) {
+                            Column(modifier = Modifier.padding(12.dp)) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -317,7 +402,7 @@ fun ArticleReaderView(
                                     Text(
                                         text = art.title,
                                         fontFamily = PoppinsFontFamily,
-                                        fontSize = 16.sp,
+                                        fontSize = 15.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = SlateText,
                                         modifier = Modifier.weight(1f)
@@ -326,22 +411,22 @@ fun ArticleReaderView(
                                         IconButton(onClick = {
                                             onSelectArticle(art)
                                             showEditDialog = true
-                                        }, modifier = Modifier.size(32.dp)) {
+                                        }, modifier = Modifier.size(30.dp)) {
                                             Icon(
                                                 Icons.Default.Edit,
                                                 contentDescription = "Edit",
                                                 tint = IndigoPrimary,
-                                                modifier = Modifier.size(16.dp)
+                                                modifier = Modifier.size(15.dp)
                                             )
                                         }
                                         IconButton(onClick = {
                                             onDeleteArticle(art.id)
-                                        }, modifier = Modifier.size(32.dp)) {
+                                        }, modifier = Modifier.size(30.dp)) {
                                             Icon(
                                                 Icons.Default.DeleteOutline,
                                                 contentDescription = "Delete",
                                                 tint = RoseError,
-                                                modifier = Modifier.size(16.dp)
+                                                modifier = Modifier.size(15.dp)
                                             )
                                         }
                                     }
@@ -349,30 +434,21 @@ fun ArticleReaderView(
 
                                 if (art.author.isNotBlank() && art.author != "Anonymous Author") {
                                     Text(
-                                        text = "By ${art.author} • ${art.wordCount} words",
+                                        text = "By ${art.author}",
                                         fontFamily = PoppinsFontFamily,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Medium,
-                                        color = IndigoPrimary
+                                        color = SlateMuted
                                     )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                } else {
-                                    Text(
-                                        text = "${art.wordCount} words",
-                                        fontFamily = PoppinsFontFamily,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = IndigoPrimary
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Spacer(modifier = Modifier.height(3.dp))
                                 }
 
                                 Text(
-                                    text = art.content.take(160) + if (art.content.length > 160) "..." else "",
+                                    text = art.content.take(130).replace("\n", " ") + if (art.content.length > 130) "..." else "",
                                     fontFamily = PoppinsFontFamily,
-                                    fontSize = 12.sp,
+                                    fontSize = 12.5.sp,
                                     lineHeight = 18.sp,
-                                    color = SlateMuted,
+                                    color = SlateText.copy(alpha = 0.8f),
                                     maxLines = 2
                                 )
                             }
@@ -381,7 +457,7 @@ fun ArticleReaderView(
                 }
             }
         } else {
-            // FULL SCREEN MODE: Ultra-slim navigation & action bar
+            // FULL SCREEN MODE: Ultra-slim navigation & action bar (No app icon/name, no bottom menu)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -408,13 +484,38 @@ fun ArticleReaderView(
                         maxLines = 1,
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                     )
-                    Text(
-                        text = "By ${currentArticle.author} • ${currentArticle.wordCount} words",
-                        fontSize = 9.5.sp,
-                        color = IndigoPrimary,
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                    )
+                    if (currentArticle.author.isNotBlank() && currentArticle.author != "Anonymous Author") {
+                        Text(
+                            text = "By ${currentArticle.author}",
+                            fontSize = 9.5.sp,
+                            color = SlateMuted,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                // Course Filter Button (Opens Equal Space Course Grid)
+                IconButton(
+                    onClick = { showCourseFilterDialog = true },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    BadgedBox(
+                        badge = {
+                            if (selectedCourseIds.isNotEmpty()) {
+                                Badge(containerColor = IndigoPrimary) {
+                                    Text(selectedCourseIds.size.toString(), color = Color.White, fontSize = 9.sp)
+                                }
+                            }
+                        }
+                    ) {
+                        Icon(
+                            Icons.Default.FilterList,
+                            contentDescription = "Filter Courses",
+                            tint = if (selectedCourseIds.isNotEmpty()) IndigoPrimary else SlateText,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
 
                 IconButton(
@@ -437,15 +538,6 @@ fun ArticleReaderView(
                         contentDescription = "Edit Article",
                         tint = IndigoPrimary,
                         modifier = Modifier.size(15.dp)
-                    )
-                }
-
-                IconButton(onClick = { showAddDialog = true }, modifier = Modifier.size(32.dp)) {
-                    Icon(
-                        Icons.Default.Add,
-                        contentDescription = "Add New Article",
-                        tint = EmeraldSuccess,
-                        modifier = Modifier.size(18.dp)
                     )
                 }
 
@@ -710,10 +802,241 @@ fun ArticleReaderView(
             }
         )
     }
+
+    // Equal Space Course Selection Grid Dialog
+    if (showCourseFilterDialog) {
+        AlertDialog(
+            onDismissRequest = { showCourseFilterDialog = false },
+            title = {
+                Text(
+                    text = "Filter Words by Course",
+                    fontFamily = PoppinsFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp,
+                    color = SlateText
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "Select courses to highlight their vocabulary words in this article.",
+                        fontSize = 12.sp,
+                        color = SlateMuted
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(
+                            onClick = {
+                                selectedCourseIds = courses.map { it.id }.toSet()
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text("Select All", fontSize = 12.sp, color = IndigoPrimary)
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                        TextButton(
+                            onClick = {
+                                selectedCourseIds = emptySet()
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text("Clear", fontSize = 12.sp, color = RoseError)
+                        }
+                    }
+
+                    if (courses.isEmpty()) {
+                        Text(
+                            text = "No courses found. All vocabulary words are highlighted.",
+                            fontSize = 13.sp,
+                            color = SlateMuted,
+                            modifier = Modifier.padding(vertical = 12.dp)
+                        )
+                    } else {
+                        // Equal space 2-column grid
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(2),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 280.dp)
+                        ) {
+                            items(courses, key = { it.id }) { course ->
+                                val isSelected = selectedCourseIds.contains(course.id)
+                                val count = words.count { it.courseId == course.id }
+                                Surface(
+                                    onClick = {
+                                        selectedCourseIds = if (isSelected) {
+                                            selectedCourseIds - course.id
+                                        } else {
+                                            selectedCourseIds + course.id
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (isSelected) IndigoLight else Color(0xFFF8FAFC),
+                                    border = BorderStroke(
+                                        width = if (isSelected) 1.5.dp else 1.dp,
+                                        color = if (isSelected) IndigoPrimary else SlateBorder
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(62.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = course.title,
+                                                fontFamily = PoppinsFontFamily,
+                                                fontSize = 12.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                color = if (isSelected) IndigoPrimary else SlateText,
+                                                maxLines = 2,
+                                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = "$count words",
+                                                fontSize = 10.sp,
+                                                color = SlateMuted
+                                            )
+                                        }
+                                        if (isSelected) {
+                                            Icon(
+                                                Icons.Default.CheckCircle,
+                                                contentDescription = "Selected",
+                                                tint = IndigoPrimary,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showCourseFilterDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Done")
+                }
+            }
+        )
+    }
+
+    // Article Sync Dialog
+    if (isSyncingDialogVisible) {
+        var inputUrl by remember(syncUrl) { mutableStateOf(syncUrl) }
+        val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+
+        AlertDialog(
+            onDismissRequest = {
+                showSyncDialog = false
+                onDismissSyncDialog()
+            },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Sync, contentDescription = null, tint = IndigoPrimary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Synchronize Articles",
+                        fontFamily = PoppinsFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp,
+                        color = SlateText
+                    )
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "Sync articles from your Google Doc or source text. Matching titles will be updated, new articles will be added, and deleted articles will never be re-synced.",
+                        fontSize = 12.sp,
+                        color = SlateMuted
+                    )
+
+                    OutlinedTextField(
+                        value = inputUrl,
+                        onValueChange = { inputUrl = it },
+                        label = { Text("Google Doc Link or Raw Text") },
+                        placeholder = { Text("https://docs.google.com/document/d/...") },
+                        trailingIcon = {
+                            IconButton(onClick = {
+                                try {
+                                    val clip = clipboardManager?.primaryClip
+                                    if (clip != null && clip.itemCount > 0) {
+                                        val pasteText = clip.getItemAt(0).text?.toString() ?: ""
+                                        if (pasteText.isNotBlank()) {
+                                            inputUrl = pasteText
+                                        }
+                                    }
+                                } catch (_: Exception) {}
+                            }) {
+                                Icon(Icons.Default.ContentPaste, contentDescription = "Paste Link", tint = IndigoPrimary)
+                            }
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (inputUrl.isNotBlank()) {
+                            onSetSyncUrl(inputUrl.trim())
+                            onSync(inputUrl.trim())
+                            showSyncDialog = false
+                            onDismissSyncDialog()
+                        }
+                    },
+                    enabled = inputUrl.isNotBlank() && !isSyncing,
+                    colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    if (isSyncing) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Syncing...")
+                    } else {
+                        Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Sync Now")
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showSyncDialog = false
+                    onDismissSyncDialog()
+                }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
 
 /**
  * Builds an AnnotatedString that highlights words matching Place 1 (Word) or Place 2 (Meaning).
+ * Normal text with color - no background highlight, no underline.
  */
 private fun buildPlaceHighlightedAnnotatedString(
     content: String,
@@ -731,30 +1054,26 @@ private fun buildPlaceHighlightedAnnotatedString(
             val isPlace2 = place2Map.containsKey(cleanToken)
 
             if (isPlace1) {
-                // Place 1 (Word) Highlight - Indigo
+                // Place 1 (Word) Highlight - Just normal text with colour. No background, no underline!
                 val start = length
                 pushStringAnnotation(tag = "VOCAB_MATCH", annotation = cleanToken)
                 withStyle(
                     SpanStyle(
                         color = Color(0xFF4338CA),
-                        fontWeight = FontWeight.Bold,
-                        background = Color(0xFFE0E7FF),
-                        textDecoration = TextDecoration.Underline
+                        fontWeight = FontWeight.SemiBold
                     )
                 ) {
                     append(token)
                 }
                 pop()
             } else if (isPlace2) {
-                // Place 2 (Meaning) Highlight - Emerald
+                // Place 2 (Meaning) Highlight - Just normal text with colour. No background, no underline!
                 val start = length
                 pushStringAnnotation(tag = "VOCAB_MATCH", annotation = cleanToken)
                 withStyle(
                     SpanStyle(
                         color = Color(0xFF047857),
-                        fontWeight = FontWeight.Bold,
-                        background = Color(0xFFD1FAE5),
-                        textDecoration = TextDecoration.Underline
+                        fontWeight = FontWeight.SemiBold
                     )
                 ) {
                     append(token)

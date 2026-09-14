@@ -65,6 +65,27 @@ interface ArticleDao {
 }
 
 @Dao
+interface DeletedArticleDao {
+    @Query("SELECT normalizedTitle FROM deleted_article_titles")
+    suspend fun getAllDeletedNormalizedTitles(): List<String>
+
+    @Query("SELECT * FROM deleted_article_titles")
+    suspend fun getAllDeletedEntities(): List<DeletedArticleTitleEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertDeleted(entity: DeletedArticleTitleEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertDeletedList(list: List<DeletedArticleTitleEntity>)
+
+    @Query("DELETE FROM deleted_article_titles WHERE normalizedTitle = :normalizedTitle")
+    suspend fun removeDeleted(normalizedTitle: String)
+
+    @Query("DELETE FROM deleted_article_titles")
+    suspend fun clearAll()
+}
+
+@Dao
 interface VocabularyDao {
     @Query("SELECT * FROM vocabulary_words ORDER BY `group` ASC, id ASC")
     fun getAllWords(): Flow<List<VocabularyWordEntity>>

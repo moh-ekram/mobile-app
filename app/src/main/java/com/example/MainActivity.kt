@@ -129,6 +129,8 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
     val allQuestions by viewModel.allQuestions.collectAsState()
     val allArticles by viewModel.allArticles.collectAsState()
     val activeArticle by viewModel.activeArticle.collectAsState()
+    val isSyncingArticles by viewModel.isSyncingArticles.collectAsState()
+    val articleSyncUrl by viewModel.articleSyncUrl.collectAsState()
     val customBackupTreeUri by viewModel.customBackupTreeUri.collectAsState()
     val userProgress by viewModel.userProgress.collectAsState()
     val statusMessage by viewModel.statusMessage.collectAsState()
@@ -176,12 +178,13 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
             onGoogleLogin = { viewModel.loginWithGoogle() }
         )
     } else {
-        val hideBarsInFocus = currentRoute == "flashcard" && isFocusMode
-        val hideBottomBar = currentRoute == "flashcard"
+        val isArticleReading = activeArticle != null
+        val hideTopBar = (currentRoute == "flashcard" && isFocusMode) || isArticleReading
+        val hideBottomBar = currentRoute == "flashcard" || isArticleReading
 
         Scaffold(
             topBar = {
-                if (!hideBarsInFocus) {
+                if (!hideTopBar) {
                     TopAppBar(
                         navigationIcon = {
                             if (currentRoute == "flashcard") {
@@ -248,7 +251,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                 }
             },
             bottomBar = {
-                if (!hideBottomBar && !hideBarsInFocus) {
+                if (!hideBottomBar) {
                     NavigationBar(
                         containerColor = palette.surface,
                         tonalElevation = 8.dp,
@@ -387,6 +390,11 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             articles = allArticles,
                             activeArticle = activeArticle,
                             words = allWords,
+                            courses = allCourses,
+                            isSyncing = isSyncingArticles,
+                            syncUrl = articleSyncUrl,
+                            onSync = { source -> viewModel.syncArticles(source) },
+                            onSetSyncUrl = { url -> viewModel.setArticleSyncUrl(url) },
                             onSelectArticle = { art -> viewModel.setActiveArticle(art) },
                             onSaveArticle = { title, content, author, id ->
                                 viewModel.saveArticle(title, content, author, id)

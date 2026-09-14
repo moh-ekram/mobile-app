@@ -25,6 +25,13 @@ data class ArticleEntity(
     val wordCount: Int = 0
 )
 
+@Entity(tableName = "deleted_article_titles")
+data class DeletedArticleTitleEntity(
+    @PrimaryKey val normalizedTitle: String,
+    val originalTitle: String = "",
+    val deletedAt: Long = System.currentTimeMillis()
+)
+
 @Entity(tableName = "vocabulary_words")
 data class VocabularyWordEntity(
     @PrimaryKey val id: String,
