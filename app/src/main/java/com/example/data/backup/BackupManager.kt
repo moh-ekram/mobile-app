@@ -139,6 +139,9 @@ class BackupManager(private val context: Context, private val database: AppDatab
             wObj.put("courseId", w.courseId)
             wObj.put("courseTitle", courseMap[w.courseId]?.title ?: "General Course")
             wObj.put("customPlacesJson", w.customPlacesJson ?: "")
+            wObj.put("lastQuizStatus", w.lastQuizStatus ?: "not_studied")
+            wObj.put("quizCorrectCount", w.quizCorrectCount)
+            wObj.put("quizIncorrectCount", w.quizIncorrectCount)
             wordsArray.put(wObj)
         }
         jsonRoot.put("words", wordsArray)
@@ -167,6 +170,9 @@ class BackupManager(private val context: Context, private val database: AppDatab
             gObj.put("opt4", g.opt4)
             gObj.put("answer", g.answer)
             gObj.put("explanation", g.explanation ?: "")
+            gObj.put("lastAttemptStatus", g.lastAttemptStatus ?: "not_studied")
+            gObj.put("correctCount", g.correctCount)
+            gObj.put("incorrectCount", g.incorrectCount)
             gamesArray.put(gObj)
         }
         jsonRoot.put("games", gamesArray)
@@ -189,19 +195,28 @@ class BackupManager(private val context: Context, private val database: AppDatab
         }
         jsonRoot.put("questionBank", qbArray)
 
-        progress?.let { p ->
-            val pObj = JSONObject()
-            pObj.put("userId", p.userId)
-            pObj.put("totalWords", p.totalWords)
-            pObj.put("knowCount", p.knowCount)
-            pObj.put("confusionCount", p.confusionCount)
-            pObj.put("dontKnowCount", p.dontKnowCount)
-            pObj.put("unratedCount", p.unratedCount)
-            pObj.put("streakDays", p.streakDays)
-            pObj.put("quizCompleted", p.quizCompleted)
-            pObj.put("quizTotalScore", p.quizTotalScore)
-            jsonRoot.put("progress", pObj)
-        }
+        val pToSave = progress ?: UserProgressEntity(
+            userId = userId,
+            totalWords = words.size,
+            knowCount = words.count { it.status.equals("know", ignoreCase = true) },
+            confusionCount = words.count { it.status.equals("confusion", ignoreCase = true) },
+            dontKnowCount = words.count { it.status.equals("dont_know", ignoreCase = true) },
+            unratedCount = words.count { it.status.equals("unrated", ignoreCase = true) },
+            streakDays = 1,
+            quizCompleted = words.count { it.quizCorrectCount > 0 || (it.lastQuizStatus != null && it.lastQuizStatus != "not_studied") },
+            quizTotalScore = words.sumOf { it.quizCorrectCount }
+        )
+        val pObj = JSONObject()
+        pObj.put("userId", pToSave.userId)
+        pObj.put("totalWords", pToSave.totalWords)
+        pObj.put("knowCount", pToSave.knowCount)
+        pObj.put("confusionCount", pToSave.confusionCount)
+        pObj.put("dontKnowCount", pToSave.dontKnowCount)
+        pObj.put("unratedCount", pToSave.unratedCount)
+        pObj.put("streakDays", pToSave.streakDays)
+        pObj.put("quizCompleted", pToSave.quizCompleted)
+        pObj.put("quizTotalScore", pToSave.quizTotalScore)
+        jsonRoot.put("progress", pObj)
 
         jsonRoot.toString(2)
     }
@@ -312,6 +327,9 @@ class BackupManager(private val context: Context, private val database: AppDatab
                 wObj.put("courseId", w.courseId)
                 wObj.put("courseTitle", courseMap[w.courseId]?.title ?: "General Course")
                 wObj.put("customPlacesJson", w.customPlacesJson ?: "")
+                wObj.put("lastQuizStatus", w.lastQuizStatus ?: "not_studied")
+                wObj.put("quizCorrectCount", w.quizCorrectCount)
+                wObj.put("quizIncorrectCount", w.quizIncorrectCount)
                 wObj.put("timesReviewed", w.timesReviewed)
                 wObj.put("lastReviewedAt", w.lastReviewedAt)
                 wordsArray.put(wObj)
@@ -346,6 +364,9 @@ class BackupManager(private val context: Context, private val database: AppDatab
                 gObj.put("opt4", g.opt4)
                 gObj.put("answer", g.answer)
                 gObj.put("explanation", g.explanation ?: "")
+                gObj.put("lastAttemptStatus", g.lastAttemptStatus ?: "not_studied")
+                gObj.put("correctCount", g.correctCount)
+                gObj.put("incorrectCount", g.incorrectCount)
                 gamesArray.put(gObj)
             }
             jsonRoot.put("games", gamesArray)
@@ -369,20 +390,29 @@ class BackupManager(private val context: Context, private val database: AppDatab
             }
             jsonRoot.put("questionBank", qbArray)
 
-            // User Progress
-            progress?.let { p ->
-                val pObj = JSONObject()
-                pObj.put("userId", p.userId)
-                pObj.put("totalWords", p.totalWords)
-                pObj.put("knowCount", p.knowCount)
-                pObj.put("confusionCount", p.confusionCount)
-                pObj.put("dontKnowCount", p.dontKnowCount)
-                pObj.put("unratedCount", p.unratedCount)
-                pObj.put("streakDays", p.streakDays)
-                pObj.put("quizCompleted", p.quizCompleted)
-                pObj.put("quizTotalScore", p.quizTotalScore)
-                jsonRoot.put("progress", pObj)
-            }
+            // User Progress - always serialized, fallback calculated from words
+            val pToSave = progress ?: UserProgressEntity(
+                userId = userId,
+                totalWords = words.size,
+                knowCount = words.count { it.status.equals("know", ignoreCase = true) },
+                confusionCount = words.count { it.status.equals("confusion", ignoreCase = true) },
+                dontKnowCount = words.count { it.status.equals("dont_know", ignoreCase = true) },
+                unratedCount = words.count { it.status.equals("unrated", ignoreCase = true) },
+                streakDays = 1,
+                quizCompleted = words.count { it.quizCorrectCount > 0 || (it.lastQuizStatus != null && it.lastQuizStatus != "not_studied") },
+                quizTotalScore = words.sumOf { it.quizCorrectCount }
+            )
+            val pObj = JSONObject()
+            pObj.put("userId", pToSave.userId)
+            pObj.put("totalWords", pToSave.totalWords)
+            pObj.put("knowCount", pToSave.knowCount)
+            pObj.put("confusionCount", pToSave.confusionCount)
+            pObj.put("dontKnowCount", pToSave.dontKnowCount)
+            pObj.put("unratedCount", pToSave.unratedCount)
+            pObj.put("streakDays", pToSave.streakDays)
+            pObj.put("quizCompleted", pToSave.quizCompleted)
+            pObj.put("quizTotalScore", pToSave.quizTotalScore)
+            jsonRoot.put("progress", pObj)
 
             val jsonString = jsonRoot.toString(2)
             val jsonFile = getJsonBackupFile()
@@ -503,8 +533,11 @@ class BackupManager(private val context: Context, private val database: AppDatab
                 DocumentsContract.getTreeDocumentId(treeUri)
             }
             val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId)
-            var targetDocUri: Uri? = null
-            var isJson = true
+            var backupJsonUri: Uri? = null
+            var progressJsonUri: Uri? = null
+            var anyJsonUri: Uri? = null
+            var backupCsvUri: Uri? = null
+            var anyCsvUri: Uri? = null
 
             context.contentResolver.query(
                 childrenUri,
@@ -519,20 +552,24 @@ class BackupManager(private val context: Context, private val database: AppDatab
                     while (cursor.moveToNext()) {
                         val name = cursor.getString(nameIdx) ?: ""
                         val childId = cursor.getString(idIdx)
-                        if (isTargetFileMatch(name, "memorizer_backup.json") || isTargetFileMatch(name, "memorizer_progress.json")) {
-                            targetDocUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childId)
-                            isJson = true
-                            break
-                        } else if (isTargetFileMatch(name, "memorizer_vocabulary.csv") && targetDocUri == null) {
-                            targetDocUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childId)
-                            isJson = false
+                        val docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childId)
+                        val lower = name.lowercase()
+                        when {
+                            isTargetFileMatch(name, "memorizer_backup.json") -> backupJsonUri = docUri
+                            isTargetFileMatch(name, "memorizer_progress.json") -> progressJsonUri = docUri
+                            lower.endsWith(".json") && anyJsonUri == null -> anyJsonUri = docUri
+                            isTargetFileMatch(name, "memorizer_vocabulary.csv") -> backupCsvUri = docUri
+                            lower.endsWith(".csv") && anyCsvUri == null -> anyCsvUri = docUri
                         }
                     }
                 }
             }
 
+            val targetDocUri = backupJsonUri ?: progressJsonUri ?: anyJsonUri ?: backupCsvUri ?: anyCsvUri
+            val isJson = targetDocUri == backupJsonUri || targetDocUri == progressJsonUri || targetDocUri == anyJsonUri
+
             if (targetDocUri == null) {
-                return@withContext Result.failure(Exception("No memorizer_backup.json found in your linked Drive folder. Please tap 'Backup to Drive' first."))
+                return@withContext Result.failure(Exception("No backup file (.json or .csv) found in your linked Drive folder. Please tap 'Backup to Drive' first."))
             }
 
             val content = context.contentResolver.openInputStream(targetDocUri)?.bufferedReader()?.use { it.readText() }
@@ -697,10 +734,27 @@ class BackupManager(private val context: Context, private val database: AppDatab
         }
     }
 
+    private fun findStr(obj: JSONObject, vararg keys: String): String {
+        for (k in keys) {
+            val v = obj.optString(k, "").trim()
+            if (v.isNotEmpty()) return v
+        }
+        return ""
+    }
+
+    private fun findIntVal(obj: JSONObject, defaultValue: Int, vararg keys: String): Int {
+        for (k in keys) {
+            if (obj.has(k)) {
+                return obj.optInt(k, defaultValue)
+            }
+        }
+        return defaultValue
+    }
+
     /**
      * Restores state from JSON or CSV text.
      * Re-creates the complete course hierarchy so each word is strictly mapped to its course.
-     * All items (courses, words, articles, games, question bank) are restored.
+     * All items (courses, words, articles, games, question bank, progress) are restored.
      */
     suspend fun restoreFromFileContent(content: String, isJson: Boolean, userId: String = "1235"): Result<Int> = withContext(Dispatchers.IO) {
         try {
@@ -716,28 +770,26 @@ class BackupManager(private val context: Context, private val database: AppDatab
                     val root = JSONObject(trimmed)
 
                     // 0. User Profile & Photo Restore
-                    if (root.has("profile")) {
-                        val pObj = root.getJSONObject("profile")
-                        val pName = pObj.optString("displayName", "User #1235")
-                        val pExam = pObj.optString("targetExam", "GRE / IELTS")
-                        val pGoal = pObj.optInt("dailyGoal", 20)
-                        val pBio = pObj.optString("bio", "")
+                    val profObj = root.optJSONObject("profile") ?: root.optJSONObject("userProfile") ?: root.optJSONObject("user")
+                    if (profObj != null) {
+                        val pName = findStr(profObj, "displayName", "display_name", "name", "Name").ifEmpty { "User #1235" }
+                        val pExam = findStr(profObj, "targetExam", "target_exam", "exam", "Exam").ifEmpty { "GRE / IELTS" }
+                        val pGoal = findIntVal(profObj, 20, "dailyGoal", "daily_goal", "goal")
+                        val pBio = findStr(profObj, "bio", "Bio", "about")
                         var restoredAvatarUri: String? = null
 
-                        if (pObj.has("avatarBase64")) {
+                        val b64 = findStr(profObj, "avatarBase64", "avatar_base64")
+                        if (b64.isNotBlank()) {
                             try {
-                                val b64 = pObj.getString("avatarBase64")
-                                if (b64.isNotBlank()) {
-                                    val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
-                                    val avatarFile = File(context.filesDir, "profile_avatar.jpg")
-                                    avatarFile.writeBytes(bytes)
-                                    restoredAvatarUri = Uri.fromFile(avatarFile).toString()
-                                }
+                                val bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                                val avatarFile = File(context.filesDir, "profile_avatar.jpg")
+                                avatarFile.writeBytes(bytes)
+                                restoredAvatarUri = Uri.fromFile(avatarFile).toString()
                             } catch (e: Exception) {
                                 android.util.Log.e("BackupManager", "Failed to decode avatarBase64: ${e.message}")
                             }
                         } else {
-                            val rawUri = pObj.optString("avatarUri", "")
+                            val rawUri = findStr(profObj, "avatarUri", "avatar_uri", "avatar")
                             if (rawUri.isNotBlank()) {
                                 restoredAvatarUri = rawUri
                             }
@@ -753,148 +805,407 @@ class BackupManager(private val context: Context, private val database: AppDatab
                             .apply()
                     }
 
-                    // 1. Courses
-                    if (root.has("courses")) {
-                        val cArr = root.getJSONArray("courses")
-                        for (i in 0 until cArr.length()) {
-                            val cObj = cArr.getJSONObject(i)
-                            coursesToInsert.add(
-                                CourseEntity(
-                                    id = cObj.optString("id", "course_${System.currentTimeMillis()}_$i"),
-                                    title = cObj.optString("title", "Course ${i + 1}"),
-                                    description = cObj.optString("description", "").ifEmpty { null },
-                                    createdAt = cObj.optLong("createdAt", System.currentTimeMillis()),
-                                    columnHeadersJson = cObj.optString("columnHeadersJson", "").ifEmpty { null }
+                    // Helper lambdas to parse a word JSON object:
+                    fun parseWordObj(wObj: JSONObject, fallbackCourseId: String, fallbackCourseTitle: String) {
+                        val wId = findStr(wObj, "id", "wordId", "word_id").ifEmpty {
+                            "word_${System.currentTimeMillis()}_${wordsToInsert.size}"
+                        }
+                        var word = findStr(wObj, "word", "Word", "place1", "Place1", "Place 1", "Place1: Word", "Place 1: Word", "term", "Term", "vocabulary", "Vocabulary", "name")
+                        if (word.isBlank()) {
+                            val keys = wObj.keys()
+                            while (keys.hasNext()) {
+                                val k = keys.next()
+                                val lk = k.lowercase()
+                                if (lk.contains("word") || lk.startsWith("place1") || lk.contains("term")) {
+                                    val v = wObj.optString(k, "").trim()
+                                    if (v.isNotBlank()) { word = v; break }
+                                }
+                            }
+                        }
+                        var meaning = findStr(wObj, "meaning", "Meaning", "place2", "Place2", "Place 2", "Place2: Meaning", "Place 2: Meaning", "definition", "Definition", "translation", "Translation", "desc", "description")
+                        if (meaning.isBlank()) {
+                            val keys = wObj.keys()
+                            while (keys.hasNext()) {
+                                val k = keys.next()
+                                val lk = k.lowercase()
+                                if (lk.contains("meaning") || lk.startsWith("place2") || lk.contains("definition")) {
+                                    val v = wObj.optString(k, "").trim()
+                                    if (v.isNotBlank()) { meaning = v; break }
+                                }
+                            }
+                        }
+
+                        if (word.isNotBlank()) {
+                            val rawGrp = findStr(wObj, "group", "Group", "grp", "category", "Category", "groupNumber", "group_number")
+                            val wordGroup = if (rawGrp.isNotBlank()) rawGrp else "1"
+                            val wordCourseId = findStr(wObj, "courseId", "course_id", "courseID", "course", "CourseId").ifEmpty {
+                                fallbackCourseId
+                            }
+                            val wordCourseTitle = findStr(wObj, "courseTitle", "course_title", "courseName", "course_name", "Course").ifEmpty {
+                                fallbackCourseTitle
+                            }
+
+                            if (wordCourseId.isNotBlank() && coursesToInsert.none { it.id == wordCourseId }) {
+                                coursesToInsert.add(CourseEntity(id = wordCourseId, title = wordCourseTitle.ifEmpty { "Restored Course" }))
+                            }
+
+                            wordsToInsert.add(
+                                VocabularyWordEntity(
+                                    id = wId,
+                                    word = word,
+                                    meaning = meaning,
+                                    group = wordGroup,
+                                    synonyms = findStr(wObj, "synonyms", "Synonyms", "synonym", "Synonym", "place4", "Place4", "Place 4").ifEmpty { null },
+                                    extraWord = findStr(wObj, "extraWord", "ExtraWord", "extra", "Extra", "forms", "Forms", "place5", "Place5", "Place 5").ifEmpty { null },
+                                    extraMeaning = findStr(wObj, "extraMeaning", "ExtraMeaning").ifEmpty { null },
+                                    example = findStr(wObj, "example", "Example", "place3", "Place3", "Place 3", "sentence", "Sentence").ifEmpty { null },
+                                    mnemonic = findStr(wObj, "mnemonic", "Mnemonic", "notes", "Notes", "hint", "Hint", "place6", "Place6", "Place 6").ifEmpty { null },
+                                    status = findStr(wObj, "status", "Status", "rating", "Rating").ifEmpty { "unrated" },
+                                    courseId = wordCourseId,
+                                    customPlacesJson = findStr(wObj, "customPlacesJson", "placesJson").ifEmpty { null },
+                                    timesReviewed = findIntVal(wObj, 0, "timesReviewed", "times_reviewed"),
+                                    lastReviewedAt = if (wObj.has("lastReviewedAt")) wObj.optLong("lastReviewedAt") else System.currentTimeMillis(),
+                                    lastQuizStatus = findStr(wObj, "lastQuizStatus", "last_quiz_status", "quizStatus").ifEmpty { "not_studied" },
+                                    quizCorrectCount = findIntVal(wObj, 0, "quizCorrectCount", "quiz_correct_count", "correctCount", "correct"),
+                                    quizIncorrectCount = findIntVal(wObj, 0, "quizIncorrectCount", "quiz_incorrect_count", "incorrectCount", "incorrect")
                                 )
                             )
                         }
                     }
 
-                    // 2. Words
-                    if (root.has("words")) {
-                        val wArr = root.getJSONArray("words")
+                    // Helper to parse game item:
+                    fun parseGameObj(gObj: JSONObject, defaultType: String) {
+                        val q = findStr(gObj, "question", "Question", "q", "Q", "prompt", "Prompt", "title")
+                        val o1 = findStr(gObj, "opt1", "Opt1", "option1", "Option1", "a", "A", "choice1", "Choice1")
+                        val o2 = findStr(gObj, "opt2", "Opt2", "option2", "Option2", "b", "B", "choice2", "Choice2")
+                        val o3 = findStr(gObj, "opt3", "Opt3", "option3", "Option3", "c", "C", "choice3", "Choice3")
+                        val o4 = findStr(gObj, "opt4", "Opt4", "option4", "Option4", "d", "D", "choice4", "Choice4")
+                        val ans = findStr(gObj, "answer", "Answer", "ans", "Ans", "correctAnswer", "correct_answer", "solution")
+
+                        if (q.isNotBlank() && (ans.isNotBlank() || o1.isNotBlank())) {
+                            val gId = findStr(gObj, "id", "gameId", "game_id").ifEmpty {
+                                "game_${System.currentTimeMillis()}_${gamesToInsert.size}"
+                            }
+                            val sType = findStr(gObj, "sheetType", "sheet_type", "type", "Type").ifEmpty { defaultType }
+                            gamesToInsert.add(
+                                GamePracticeEntity(
+                                    id = gId,
+                                    sheetType = sType,
+                                    question = q,
+                                    opt1 = o1,
+                                    opt2 = o2,
+                                    opt3 = o3,
+                                    opt4 = o4,
+                                    answer = ans,
+                                    explanation = findStr(gObj, "explanation", "Explanation", "exp", "Exp", "reason").ifEmpty { null },
+                                    lastAttemptStatus = findStr(gObj, "lastAttemptStatus", "last_attempt_status", "status").ifEmpty { "not_studied" },
+                                    correctCount = findIntVal(gObj, 0, "correctCount", "correct_count", "correct"),
+                                    incorrectCount = findIntVal(gObj, 0, "incorrectCount", "incorrect_count", "incorrect")
+                                )
+                            )
+                        }
+                    }
+
+                    // 1. Courses (and any nested words / games inside course objects)
+                    val cArr = root.optJSONArray("courses") ?: root.optJSONArray("courseList")
+                    if (cArr != null) {
+                        for (i in 0 until cArr.length()) {
+                            val cObj = cArr.getJSONObject(i)
+                            val cId = findStr(cObj, "id", "courseId", "course_id").ifEmpty { "course_${System.currentTimeMillis()}_$i" }
+                            val cTitle = findStr(cObj, "title", "name", "courseTitle", "courseName").ifEmpty { "Course ${i + 1}" }
+                            val cDesc = findStr(cObj, "description", "desc").ifEmpty { null }
+                            val cCreated = if (cObj.has("createdAt")) cObj.optLong("createdAt") else System.currentTimeMillis()
+                            val cHeaders = findStr(cObj, "columnHeadersJson", "headers").ifEmpty { null }
+
+                            if (coursesToInsert.none { it.id == cId }) {
+                                coursesToInsert.add(
+                                    CourseEntity(
+                                        id = cId,
+                                        title = cTitle,
+                                        description = cDesc,
+                                        createdAt = cCreated,
+                                        columnHeadersJson = cHeaders
+                                    )
+                                )
+                            }
+
+                            // Nested words inside course
+                            val nestedWords = cObj.optJSONArray("words") ?: cObj.optJSONArray("vocabulary") ?: cObj.optJSONArray("items") ?: cObj.optJSONArray("flashcards")
+                            if (nestedWords != null) {
+                                for (wIdx in 0 until nestedWords.length()) {
+                                    val wObj = nestedWords.getJSONObject(wIdx)
+                                    parseWordObj(wObj, fallbackCourseId = cId, fallbackCourseTitle = cTitle)
+                                }
+                            }
+
+                            // Nested games inside course
+                            val nestedGames = cObj.optJSONArray("games") ?: cObj.optJSONArray("gamePractice") ?: cObj.optJSONArray("quizzes")
+                            if (nestedGames != null) {
+                                for (gIdx in 0 until nestedGames.length()) {
+                                    val gObj = nestedGames.getJSONObject(gIdx)
+                                    parseGameObj(gObj, defaultType = "practice")
+                                }
+                            }
+
+                            // Nested articles inside course
+                            val nestedArticles = cObj.optJSONArray("articles")
+                            if (nestedArticles != null) {
+                                for (aIdx in 0 until nestedArticles.length()) {
+                                    val aObj = nestedArticles.getJSONObject(aIdx)
+                                    val aTitle = findStr(aObj, "title", "Title").ifEmpty { "Article" }
+                                    val aContent = findStr(aObj, "content", "Content", "body", "text")
+                                    if (aContent.isNotBlank()) {
+                                        articlesToInsert.add(
+                                            ArticleEntity(
+                                                id = findStr(aObj, "id").ifEmpty { "art_${System.currentTimeMillis()}_$aIdx" },
+                                                title = aTitle,
+                                                content = aContent,
+                                                author = findStr(aObj, "author").ifEmpty { "Author" },
+                                                courseId = cId,
+                                                createdAt = if (aObj.has("createdAt")) aObj.optLong("createdAt") else System.currentTimeMillis(),
+                                                wordCount = findIntVal(aObj, aContent.split("\\s+".toRegex()).size, "wordCount", "word_count")
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 2. Root-level Words
+                    val wArr = root.optJSONArray("words") ?: root.optJSONArray("vocabulary") ?: root.optJSONArray("items") ?: root.optJSONArray("flashcards") ?: root.optJSONArray("cards")
+                    if (wArr != null) {
+                        val fallbackCId = if (coursesToInsert.isNotEmpty()) coursesToInsert.first().id else "course_restored_${System.currentTimeMillis()}"
+                        val fallbackCTitle = if (coursesToInsert.isNotEmpty()) coursesToInsert.first().title else "Restored Course"
                         for (i in 0 until wArr.length()) {
                             val wObj = wArr.getJSONObject(i)
-                            val wId = wObj.optString("id", "word_${System.currentTimeMillis()}_$i")
-                            val word = wObj.optString("word", "")
-                            val meaning = wObj.optString("meaning", "")
-                            val cId = wObj.optString("courseId", "").ifEmpty { "course_default" }
-                            val cTitle = wObj.optString("courseTitle", "").ifEmpty { "Restored Course" }
+                            parseWordObj(wObj, fallbackCourseId = fallbackCId, fallbackCourseTitle = fallbackCTitle)
+                        }
+                    }
 
-                            if (word.isNotBlank()) {
-                                if (coursesToInsert.none { it.id == cId }) {
-                                    coursesToInsert.add(CourseEntity(id = cId, title = cTitle))
-                                }
-                                val rawGrp = wObj.optString("group", "").trim()
-                                val wordGroup = if (rawGrp.isNotBlank()) rawGrp else "1"
-                                wordsToInsert.add(
-                                    VocabularyWordEntity(
-                                        id = wId,
-                                        word = word,
-                                        meaning = meaning,
-                                        group = wordGroup,
-                                        synonyms = wObj.optString("synonyms", "").ifEmpty { null },
-                                        extraWord = wObj.optString("extraWord", "").ifEmpty { null },
-                                        extraMeaning = wObj.optString("extraMeaning", "").ifEmpty { null },
-                                        example = wObj.optString("example", "").ifEmpty { null },
-                                        mnemonic = wObj.optString("mnemonic", "").ifEmpty { null },
-                                        status = wObj.optString("status", "unrated"),
-                                        courseId = cId,
-                                        customPlacesJson = wObj.optString("customPlacesJson", "").ifEmpty { null },
-                                        timesReviewed = wObj.optInt("timesReviewed", 0),
-                                        lastReviewedAt = wObj.optLong("lastReviewedAt", System.currentTimeMillis())
+                    // 3. Root-level Articles
+                    val aArr = root.optJSONArray("articles")
+                    if (aArr != null) {
+                        for (i in 0 until aArr.length()) {
+                            val aObj = aArr.getJSONObject(i)
+                            val aTitle = findStr(aObj, "title", "Title").ifEmpty { "Article ${i + 1}" }
+                            val aContent = findStr(aObj, "content", "Content", "body", "text")
+                            val aCourseId = findStr(aObj, "courseId", "course_id").ifEmpty {
+                                if (coursesToInsert.isNotEmpty()) coursesToInsert.first().id else "course_restored_1"
+                            }
+                            if (aContent.isNotBlank()) {
+                                articlesToInsert.add(
+                                    ArticleEntity(
+                                        id = findStr(aObj, "id").ifEmpty { "art_$i" },
+                                        title = aTitle,
+                                        content = aContent,
+                                        author = findStr(aObj, "author").ifEmpty { "Unknown Author" },
+                                        courseId = aCourseId,
+                                        createdAt = if (aObj.has("createdAt")) aObj.optLong("createdAt") else System.currentTimeMillis(),
+                                        wordCount = findIntVal(aObj, aContent.split("\\s+".toRegex()).size, "wordCount")
                                     )
                                 )
                             }
                         }
                     }
 
-                    // 3. Articles
-                    if (root.has("articles")) {
-                        val aArr = root.getJSONArray("articles")
-                        for (i in 0 until aArr.length()) {
-                            val aObj = aArr.getJSONObject(i)
-                            articlesToInsert.add(
-                                ArticleEntity(
-                                    id = aObj.optString("id", "art_$i"),
-                                    title = aObj.optString("title", "Article"),
-                                    content = aObj.optString("content", ""),
-                                    author = aObj.optString("author", "Unknown Author"),
-                                    courseId = aObj.optString("courseId", "course_default"),
-                                    createdAt = aObj.optLong("createdAt", System.currentTimeMillis()),
-                                    wordCount = aObj.optInt("wordCount", 0)
-                                )
-                            )
+                    // 4. Root-level Games (check all variations and sheet types)
+                    val gamesArr = root.optJSONArray("games")
+                        ?: root.optJSONArray("gamePractice")
+                        ?: root.optJSONArray("game_practice")
+                        ?: root.optJSONArray("gamesPractice")
+                        ?: root.optJSONArray("practiceGames")
+                        ?: root.optJSONArray("quizzes")
+                        ?: root.optJSONArray("quiz")
+                        ?: root.optJSONArray("gameData")
+                        ?: root.optJSONArray("practice")
+                    if (gamesArr != null) {
+                        for (i in 0 until gamesArr.length()) {
+                            val gObj = gamesArr.getJSONObject(i)
+                            parseGameObj(gObj, defaultType = "practice")
                         }
                     }
 
-                    // 4. Games
-                    if (root.has("games")) {
-                        val gArr = root.getJSONArray("games")
-                        for (i in 0 until gArr.length()) {
-                            val gObj = gArr.getJSONObject(i)
-                            gamesToInsert.add(
-                                GamePracticeEntity(
-                                    id = gObj.optString("id", "game_$i"),
-                                    sheetType = gObj.optString("sheetType", "practice"),
-                                    question = gObj.optString("question", ""),
-                                    opt1 = gObj.optString("opt1", ""),
-                                    opt2 = gObj.optString("opt2", ""),
-                                    opt3 = gObj.optString("opt3", ""),
-                                    opt4 = gObj.optString("opt4", ""),
-                                    answer = gObj.optString("answer", ""),
-                                    explanation = gObj.optString("explanation", "").ifEmpty { null }
-                                )
-                            )
+                    // Specific game sheets
+                    val oooArr = root.optJSONArray("oddOneOut") ?: root.optJSONArray("odd_one_out")
+                    if (oooArr != null) {
+                        for (i in 0 until oooArr.length()) {
+                            parseGameObj(oooArr.getJSONObject(i), defaultType = "odd_one_out")
+                        }
+                    }
+                    val anaArr = root.optJSONArray("analogy") ?: root.optJSONArray("analogies")
+                    if (anaArr != null) {
+                        for (i in 0 until anaArr.length()) {
+                            parseGameObj(anaArr.getJSONObject(i), defaultType = "analogy")
+                        }
+                    }
+                    val matchArr = root.optJSONArray("matching") ?: root.optJSONArray("match")
+                    if (matchArr != null) {
+                        for (i in 0 until matchArr.length()) {
+                            parseGameObj(matchArr.getJSONObject(i), defaultType = "match")
                         }
                     }
 
-                    // 5. Question Bank
-                    if (root.has("questionBank")) {
-                        val qArr = root.getJSONArray("questionBank")
+                    // 5. Root-level Question Bank
+                    val qArr = root.optJSONArray("questionBank")
+                        ?: root.optJSONArray("question_bank")
+                        ?: root.optJSONArray("questions")
+                        ?: root.optJSONArray("qb")
+                    if (qArr != null) {
                         for (i in 0 until qArr.length()) {
                             val qObj = qArr.getJSONObject(i)
-                            questionsToInsert.add(
-                                QuestionBankEntity(
-                                    id = qObj.optString("id", "qb_$i"),
-                                    question = qObj.optString("question", ""),
-                                    opt1 = qObj.optString("opt1", ""),
-                                    opt2 = qObj.optString("opt2", ""),
-                                    opt3 = qObj.optString("opt3", ""),
-                                    opt4 = qObj.optString("opt4", ""),
-                                    answer = qObj.optString("answer", ""),
-                                    explanation = qObj.optString("explanation", "").ifEmpty { null },
-                                    filter1 = qObj.optString("filter1", "").ifEmpty { null },
-                                    filter2 = qObj.optString("filter2", "").ifEmpty { null },
-                                    filter3 = qObj.optString("filter3", "").ifEmpty { null }
+                            val qText = findStr(qObj, "question", "Question", "q", "Q", "prompt")
+                            val qAns = findStr(qObj, "answer", "Answer", "ans", "Ans", "correctAnswer")
+                            val o1 = findStr(qObj, "opt1", "Opt1", "option1", "Option1", "a", "A")
+                            val o2 = findStr(qObj, "opt2", "Opt2", "option2", "Option2", "b", "B")
+                            val o3 = findStr(qObj, "opt3", "Opt3", "option3", "Option3", "c", "C")
+                            val o4 = findStr(qObj, "opt4", "Opt4", "option4", "Option4", "d", "D")
+
+                            if (qText.isNotBlank() && (qAns.isNotBlank() || o1.isNotBlank())) {
+                                questionsToInsert.add(
+                                    QuestionBankEntity(
+                                        id = findStr(qObj, "id", "qbId").ifEmpty { "qb_$i" },
+                                        question = qText,
+                                        opt1 = o1,
+                                        opt2 = o2,
+                                        opt3 = o3,
+                                        opt4 = o4,
+                                        answer = qAns,
+                                        explanation = findStr(qObj, "explanation", "Explanation", "exp").ifEmpty { null },
+                                        filter1 = findStr(qObj, "filter1", "filter1Label").ifEmpty { null },
+                                        filter2 = findStr(qObj, "filter2", "filter2Label").ifEmpty { null },
+                                        filter3 = findStr(qObj, "filter3", "filter3Label").ifEmpty { null }
+                                    )
                                 )
-                            )
+                            }
                         }
                     }
 
-                    // 6. Progress
-                    if (root.has("progress")) {
-                        val pObj = root.getJSONObject("progress")
+                    // 6. Progress Restoration (with smart derivation from restored words)
+                    val pObj = root.optJSONObject("progress")
+                        ?: root.optJSONObject("userProgress")
+                        ?: root.optJSONObject("user_progress")
+                        ?: root.optJSONObject("statistics")
+                        ?: root.optJSONObject("stats")
+
+                    val knowFromWords = wordsToInsert.count { it.status.equals("know", ignoreCase = true) }
+                    val confFromWords = wordsToInsert.count { it.status.equals("confusion", ignoreCase = true) }
+                    val dontKnowFromWords = wordsToInsert.count { it.status.equals("dont_know", ignoreCase = true) }
+                    val unratedFromWords = wordsToInsert.count { it.status.equals("unrated", ignoreCase = true) }
+                    val quizFromWords = wordsToInsert.count { it.quizCorrectCount > 0 || (it.lastQuizStatus != null && it.lastQuizStatus != "not_studied") }
+                    val quizScoreFromWords = wordsToInsert.sumOf { it.quizCorrectCount }
+
+                    val pKnow = pObj?.optInt("knowCount", 0) ?: 0
+                    val pConf = pObj?.optInt("confusionCount", 0) ?: 0
+                    val pDontKnow = pObj?.optInt("dontKnowCount", 0) ?: 0
+                    val pUnrated = pObj?.optInt("unratedCount", 0) ?: 0
+                    val pTotal = pObj?.optInt("totalWords", 0) ?: 0
+                    val pStreak = pObj?.optInt("streakDays", 1) ?: 1
+                    val pQuiz = pObj?.optInt("quizCompleted", 0) ?: 0
+                    val pQuizScore = pObj?.optInt("quizTotalScore", 0) ?: 0
+
+                    val finalKnow = if (pKnow > 0) pKnow else knowFromWords
+                    val finalConf = if (pConf > 0) pConf else confFromWords
+                    val finalDontKnow = if (pDontKnow > 0) pDontKnow else dontKnowFromWords
+                    val finalUnrated = if (pUnrated > 0) pUnrated else unratedFromWords
+                    val finalTotal = if (pTotal > 0) pTotal else wordsToInsert.size
+                    val finalStreak = if (pStreak > 0) pStreak else 1
+                    val finalQuiz = if (pQuiz > 0) pQuiz else quizFromWords
+                    val finalQuizScore = if (pQuizScore > 0) pQuizScore else quizScoreFromWords
+
+                    val targetUids = setOf(userId, "1235")
+                    targetUids.forEach { uid ->
                         val restoredProg = UserProgressEntity(
-                            userId = pObj.optString("userId", userId),
-                            totalWords = pObj.optInt("totalWords", wordsToInsert.size),
-                            knowCount = pObj.optInt("knowCount", 0),
-                            confusionCount = pObj.optInt("confusionCount", 0),
-                            dontKnowCount = pObj.optInt("dontKnowCount", 0),
-                            unratedCount = pObj.optInt("unratedCount", 0),
-                            streakDays = pObj.optInt("streakDays", 1),
-                            quizCompleted = pObj.optInt("quizCompleted", 0),
-                            quizTotalScore = pObj.optInt("quizTotalScore", 0)
+                            userId = uid,
+                            totalWords = finalTotal,
+                            knowCount = finalKnow,
+                            confusionCount = finalConf,
+                            dontKnowCount = finalDontKnow,
+                            unratedCount = finalUnrated,
+                            streakDays = finalStreak,
+                            quizCompleted = finalQuiz,
+                            quizTotalScore = finalQuizScore
                         )
                         database.userProgressDao().insertOrUpdate(restoredProg)
                     }
                 } else {
-                    // Legacy JSON array of words directly
-                    val rawWords = FileParsers.parseJsonCourse(trimmed)
-                    wordsToInsert.addAll(rawWords)
-                    val distinctCIds = rawWords.map { it.courseId }.distinct()
-                    distinctCIds.forEach { cId ->
-                        coursesToInsert.add(CourseEntity(id = cId, title = "Course $cId"))
+                    // JSON array [...] at root
+                    val rootArr = JSONArray(trimmed)
+                    var hasCoursesOrWords = false
+                    for (i in 0 until rootArr.length()) {
+                        val item = rootArr.optJSONObject(i) ?: continue
+                        if (item.has("title") || item.has("courseTitle") || item.has("name")) {
+                            val cId = findStr(item, "id", "courseId").ifEmpty { "course_${System.currentTimeMillis()}_$i" }
+                            val cTitle = findStr(item, "title", "courseTitle", "name").ifEmpty { "Course ${i + 1}" }
+                            if (coursesToInsert.none { it.id == cId }) {
+                                coursesToInsert.add(CourseEntity(id = cId, title = cTitle))
+                            }
+                            val nestedW = item.optJSONArray("words") ?: item.optJSONArray("vocabulary")
+                            if (nestedW != null) {
+                                for (j in 0 until nestedW.length()) {
+                                    val wObj = nestedW.getJSONObject(j)
+                                    val word = findStr(wObj, "word", "Word", "place1", "Place1")
+                                    val meaning = findStr(wObj, "meaning", "Meaning", "place2", "Place2")
+                                    if (word.isNotBlank()) {
+                                        wordsToInsert.add(
+                                            VocabularyWordEntity(
+                                                id = findStr(wObj, "id").ifEmpty { "word_${System.currentTimeMillis()}_${wordsToInsert.size}" },
+                                                word = word,
+                                                meaning = meaning,
+                                                group = findStr(wObj, "group").ifEmpty { "1" },
+                                                courseId = cId
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                            hasCoursesOrWords = true
+                        } else if (item.has("question") || item.has("Question")) {
+                            val q = findStr(item, "question", "Question")
+                            val ans = findStr(item, "answer", "Answer", "ans")
+                            if (q.isNotBlank()) {
+                                gamesToInsert.add(
+                                    GamePracticeEntity(
+                                        id = "game_${System.currentTimeMillis()}_$i",
+                                        question = q,
+                                        opt1 = findStr(item, "opt1", "option1"),
+                                        opt2 = findStr(item, "opt2", "option2"),
+                                        opt3 = findStr(item, "opt3", "option3"),
+                                        opt4 = findStr(item, "opt4", "option4"),
+                                        answer = ans,
+                                        sheetType = findStr(item, "sheetType").ifEmpty { "practice" }
+                                    )
+                                )
+                            }
+                        } else if (item.has("word") || item.has("Word") || item.has("place1")) {
+                            val word = findStr(item, "word", "Word", "place1", "Place1")
+                            val meaning = findStr(item, "meaning", "Meaning", "place2", "Place2")
+                            val cId = findStr(item, "courseId", "course_id").ifEmpty { "course_restored_1" }
+                            if (word.isNotBlank()) {
+                                if (coursesToInsert.none { it.id == cId }) {
+                                    coursesToInsert.add(CourseEntity(id = cId, title = findStr(item, "courseTitle").ifEmpty { "Restored Course" }))
+                                }
+                                wordsToInsert.add(
+                                    VocabularyWordEntity(
+                                        id = findStr(item, "id").ifEmpty { "word_${System.currentTimeMillis()}_$i" },
+                                        word = word,
+                                        meaning = meaning,
+                                        group = findStr(item, "group").ifEmpty { "1" },
+                                        courseId = cId
+                                    )
+                                )
+                            }
+                            hasCoursesOrWords = true
+                        }
+                    }
+
+                    if (!hasCoursesOrWords) {
+                        val rawWords = FileParsers.parseJsonCourse(trimmed)
+                        wordsToInsert.addAll(rawWords)
+                        val distinctCIds = rawWords.map { it.courseId }.distinct()
+                        distinctCIds.forEach { cId ->
+                            coursesToInsert.add(CourseEntity(id = cId, title = "Course $cId"))
+                        }
                     }
                 }
             } else {
@@ -902,7 +1213,6 @@ class BackupManager(private val context: Context, private val database: AppDatab
                 val rawWords = FileParsers.parseCourseCsv(trimmed)
                 wordsToInsert.addAll(rawWords)
 
-                // Detect courses from CSV lines
                 val lines = trimmed.lines().filter { it.isNotBlank() }
                 if (lines.size >= 2) {
                     val headerLine = lines[0]
@@ -936,6 +1246,29 @@ class BackupManager(private val context: Context, private val database: AppDatab
                         coursesToInsert.add(CourseEntity(id = cId, title = "Course $cId"))
                     }
                 }
+            }
+
+            // Clean up any old sample course or Barron's references
+            database.courseDao().deleteCourseById("course_default")
+            database.vocabularyDao().deleteWordsByCourse("course_default")
+            val existing = database.courseDao().getAllCoursesList()
+            existing.filter { it.title.contains("Barron", ignoreCase = true) }.forEach {
+                database.courseDao().deleteCourseById(it.id)
+                database.vocabularyDao().deleteWordsByCourse(it.id)
+            }
+
+            // If words exist but courseId is pointing to course_default or missing, remap to the first restored course
+            if (coursesToInsert.isNotEmpty()) {
+                val validCourseId = coursesToInsert.first().id
+                val remappedWords = wordsToInsert.map { w ->
+                    if (w.courseId == "course_default" || coursesToInsert.none { it.id == w.courseId }) {
+                        w.copy(courseId = validCourseId)
+                    } else {
+                        w
+                    }
+                }
+                wordsToInsert.clear()
+                wordsToInsert.addAll(remappedWords)
             }
 
             val totalRestoredCount = wordsToInsert.size + coursesToInsert.size + articlesToInsert.size + gamesToInsert.size + questionsToInsert.size

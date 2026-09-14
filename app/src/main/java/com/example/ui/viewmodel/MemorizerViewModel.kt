@@ -5,7 +5,7 @@ import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.model.*
-import com.example.data.repository.MemorizerRepository
+import com.example.data.repository.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -82,13 +82,95 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         return false
     }
 
-    // Courses State
+    // Courses State & Persistent Active Course
     val allCourses: StateFlow<List<CourseEntity>> = repository.allCourses
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val activeCourseId = MutableStateFlow("")
+    private val coursePrefs = application.getSharedPreferences("memorizer_course_prefs", android.content.Context.MODE_PRIVATE)
+    val activeCourseId = MutableStateFlow(coursePrefs.getString("saved_active_course_id", "") ?: "")
+
+    // Google Drive Sync State & Safe Progress Preservation
+    private val _isSyncingDrive = MutableStateFlow(false)
+    val isSyncingDrive: StateFlow<Boolean> = _isSyncingDrive.asStateFlow()
+
+    private val _driveSyncSummary = MutableStateFlow<DriveSyncSummary?>(null)
+    val driveSyncSummary: StateFlow<DriveSyncSummary?> = _driveSyncSummary.asStateFlow()
+
+    private val syncPrefs = application.getSharedPreferences("memorizer_sync_prefs", android.content.Context.MODE_PRIVATE)
+    val driveSyncUrl = MutableStateFlow(
+        syncPrefs.getString("saved_drive_sync_url", "https://drive.google.com/drive/folders/1OBqSlB21FD_-0tpRZE8H6R5VFzDkeX2n") ?: ""
+    )
+
+    fun setDriveSyncUrl(url: String) {
+        driveSyncUrl.value = url
+        syncPrefs.edit().putString("saved_drive_sync_url", url).apply()
+    }
+
+    fun clearDriveSyncSummary() {
+        _driveSyncSummary.value = null
+    }
+
+    fun syncCoursesFromDrive(url: String = driveSyncUrl.value, preserveProgress: Boolean = true) {
+        val targetUrl = url.trim()
+        if (targetUrl.isBlank()) {
+            _statusMessage.value = "Please enter a valid Google Drive folder or file link."
+            return
+        }
+        setDriveSyncUrl(targetUrl)
+        viewModelScope.launch {
+            _isSyncingDrive.value = true
+            _statusMessage.value = "Connecting to Google Drive and scanning files..."
+            val uid = _currentUser.value?.userId ?: "1235"
+            val result = repository.syncCoursesFromDrive(targetUrl, preserveProgress, uid)
+            _isSyncingDrive.value = false
+            result.onSuccess { summary ->
+                _driveSyncSummary.value = summary
+                _statusMessage.value = "Sync complete: ${summary.totalCourses} course(s) processed (${summary.totalUpdatedWords} updated, ${summary.totalAddedWords} new words)!"
+                val courses = repository.allCourses.firstOrNull() ?: emptyList()
+                val savedId = coursePrefs.getString("saved_active_course_id", "") ?: ""
+                if (courses.isNotEmpty()) {
+                    if (savedId.isNotBlank() && courses.any { it.id == savedId }) {
+                        selectCourse(savedId)
+                    } else if (activeCourseId.value.isBlank() || courses.none { it.id == activeCourseId.value }) {
+                        selectCourse(courses.first().id)
+                    }
+                }
+            }.onFailure { err ->
+                _statusMessage.value = "Sync failed: ${err.message}"
+            }
+        }
+    }
+
+    fun importMultipleCourseFiles(files: List<LocalCourseFileInput>, preserveProgress: Boolean = true) {
+        if (files.isEmpty()) return
+        viewModelScope.launch {
+            _isSyncingDrive.value = true
+            _statusMessage.value = "Processing ${files.size} course file(s)..."
+            val uid = _currentUser.value?.userId ?: "1235"
+            val result = repository.importMultipleCourseFiles(files, preserveProgress, uid)
+            _isSyncingDrive.value = false
+            result.onSuccess { summary ->
+                _driveSyncSummary.value = summary
+                _statusMessage.value = "Batch import complete: ${summary.totalCourses} course(s) processed (${summary.totalUpdatedWords} updated, ${summary.totalAddedWords} new words)!"
+                val courses = repository.allCourses.firstOrNull() ?: emptyList()
+                val savedId = coursePrefs.getString("saved_active_course_id", "") ?: ""
+                if (courses.isNotEmpty()) {
+                    if (savedId.isNotBlank() && courses.any { it.id == savedId }) {
+                        selectCourse(savedId)
+                    } else if (activeCourseId.value.isBlank() || courses.none { it.id == activeCourseId.value }) {
+                        selectCourse(courses.first().id)
+                    }
+                }
+            }.onFailure { err ->
+                _statusMessage.value = "Batch import failed: ${err.message}"
+            }
+        }
+    }
 
     fun selectCourse(id: String) {
+        if (id.isNotBlank()) {
+            coursePrefs.edit().putString("saved_active_course_id", id).apply()
+        }
         activeCourseId.value = id
         currentWordIndex.value = 0
     }
@@ -420,12 +502,22 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
     init {
         viewModelScope.launch {
             allCourses.collect { list ->
-                if (activeCourseId.value.isBlank() && list.isNotEmpty()) {
-                    activeCourseId.value = list.first().id
-                } else if (list.isNotEmpty() && list.none { it.id == activeCourseId.value }) {
-                    activeCourseId.value = list.first().id
-                } else if (list.isEmpty()) {
+                if (list.isEmpty()) {
                     activeCourseId.value = ""
+                    return@collect
+                }
+                val savedId = coursePrefs.getString("saved_active_course_id", "") ?: ""
+                val current = activeCourseId.value
+                if (savedId.isNotBlank() && list.any { it.id == savedId }) {
+                    if (current != savedId) {
+                        activeCourseId.value = savedId
+                    }
+                } else if (current.isNotBlank() && list.any { it.id == current }) {
+                    coursePrefs.edit().putString("saved_active_course_id", current).apply()
+                } else {
+                    val fallbackId = list.first().id
+                    activeCourseId.value = fallbackId
+                    coursePrefs.edit().putString("saved_active_course_id", fallbackId).apply()
                 }
             }
         }
@@ -688,8 +780,13 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
                 _statusMessage.value = "Successfully restored $count items from linked Drive folder!"
                 repository.refreshProgressAndSync(uid)
                 val courses = repository.allCourses.firstOrNull() ?: emptyList()
-                if (activeCourseId.value.isBlank() && courses.isNotEmpty()) {
-                    activeCourseId.value = courses.first().id
+                val savedId = coursePrefs.getString("saved_active_course_id", "") ?: ""
+                if (courses.isNotEmpty()) {
+                    if (savedId.isNotBlank() && courses.any { it.id == savedId }) {
+                        selectCourse(savedId)
+                    } else if (activeCourseId.value.isBlank() || courses.none { it.id == activeCourseId.value }) {
+                        selectCourse(courses.first().id)
+                    }
                 }
             }.onFailure { err ->
                 _statusMessage.value = err.message ?: "Drive restore failed"
@@ -727,8 +824,13 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
                 _statusMessage.value = "Successfully restored $count items from Google Drive / Storage!"
                 repository.refreshProgressAndSync(uid)
                 val courses = repository.allCourses.firstOrNull() ?: emptyList()
-                if (activeCourseId.value.isBlank() && courses.isNotEmpty()) {
-                    activeCourseId.value = courses.first().id
+                val savedId = coursePrefs.getString("saved_active_course_id", "") ?: ""
+                if (courses.isNotEmpty()) {
+                    if (savedId.isNotBlank() && courses.any { it.id == savedId }) {
+                        selectCourse(savedId)
+                    } else if (activeCourseId.value.isBlank() || courses.none { it.id == activeCourseId.value }) {
+                        selectCourse(courses.first().id)
+                    }
                 }
             }.onFailure { err ->
                 _statusMessage.value = "Restore failed: ${err.message}"
@@ -761,8 +863,13 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
                 _statusMessage.value = "Successfully restored $count vocabulary words across courses!"
                 repository.refreshProgressAndSync(uid)
                 val courses = repository.allCourses.firstOrNull() ?: emptyList()
-                if (activeCourseId.value.isBlank() && courses.isNotEmpty()) {
-                    activeCourseId.value = courses.first().id
+                val savedId = coursePrefs.getString("saved_active_course_id", "") ?: ""
+                if (courses.isNotEmpty()) {
+                    if (savedId.isNotBlank() && courses.any { it.id == savedId }) {
+                        selectCourse(savedId)
+                    } else if (activeCourseId.value.isBlank() || courses.none { it.id == activeCourseId.value }) {
+                        selectCourse(courses.first().id)
+                    }
                 }
             }.onFailure { err ->
                 _statusMessage.value = "Restore failed: ${err.message}"
@@ -850,10 +957,43 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun deleteGamesBySection(section: String) {
+        viewModelScope.launch {
+            repository.deleteGamesBySection(section)
+            _statusMessage.value = "Game items deleted"
+        }
+    }
+
+    fun clearAllGames() {
+        viewModelScope.launch {
+            repository.clearAllGames()
+            _statusMessage.value = "All game items cleared"
+        }
+    }
+
+    fun recordGameAnswer(questionId: String, isCorrect: Boolean) {
+        viewModelScope.launch {
+            repository.recordGameAnswer(questionId, isCorrect)
+        }
+    }
+
+    fun recordWordQuizAnswer(wordId: String, isCorrect: Boolean) {
+        viewModelScope.launch {
+            repository.recordWordQuizAnswer(wordId, isCorrect)
+        }
+    }
+
     fun deleteQuestionBankItem(id: String) {
         viewModelScope.launch {
             repository.deleteQuestionBankItem(id)
             _statusMessage.value = "Question bank item removed"
+        }
+    }
+
+    fun clearAllQuestionBank() {
+        viewModelScope.launch {
+            repository.clearAllQuestionBank()
+            _statusMessage.value = "Question bank cleared"
         }
     }
 

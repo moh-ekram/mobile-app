@@ -236,7 +236,7 @@ object SampleData {
             explanation = "The sentence requires a word meaning to lessen or decrease in intensity.",
             filter1 = "GRE High Frequency",
             filter2 = "Easy",
-            filter3 = "Barron's 333",
+            filter3 = "Exam Prep",
             filter1Label = "Category",
             filter2Label = "Difficulty",
             filter3Label = "Source"
@@ -268,7 +268,7 @@ object SampleData {
             explanation = "'Far from being garrulous' contrasts with rarely speaking.",
             filter1 = "Sentence Equivalence",
             filter2 = "Easy",
-            filter3 = "Barron's 333",
+            filter3 = "Exam Prep",
             filter1Label = "Category",
             filter2Label = "Difficulty",
             filter3Label = "Source"
@@ -316,7 +316,7 @@ object SampleData {
             explanation = "'Pragmatic' means dealing with things realistically and practically.",
             filter1 = "Vocabulary Mastery",
             filter2 = "Easy",
-            filter3 = "Barron's 333",
+            filter3 = "Exam Prep",
             filter1Label = "Category",
             filter2Label = "Difficulty",
             filter3Label = "Source"

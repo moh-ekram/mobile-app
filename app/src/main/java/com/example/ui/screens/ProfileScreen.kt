@@ -852,8 +852,9 @@ fun ProfileScreen(
                             val fontSizeOptions = remember {
                                 listOf(
                                     "small" to "Small",
-                                    "medium" to "Medium",
-                                    "large" to "Large"
+                                    "medium" to "Medium (Default)",
+                                    "large" to "Large",
+                                    "extra_large" to "Extra Large"
                                 )
                             }
                             WidgetDropdownSelector(

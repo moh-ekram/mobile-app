@@ -15,7 +15,7 @@ import com.example.data.model.*
         CourseEntity::class,
         ArticleEntity::class
     ],
-    version = 5,
+    version = 7,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

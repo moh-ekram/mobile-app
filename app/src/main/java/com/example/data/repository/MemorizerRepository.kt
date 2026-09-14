@@ -19,6 +19,31 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
+import com.example.data.sync.GoogleDriveSyncService
+import java.io.ByteArrayInputStream
+import java.util.UUID
+
+data class CourseSyncDetail(
+    val courseId: String,
+    val courseTitle: String,
+    val updatedCount: Int,
+    val newCount: Int,
+    val totalWords: Int
+)
+
+data class DriveSyncSummary(
+    val totalCourses: Int,
+    val totalUpdatedWords: Int,
+    val totalAddedWords: Int,
+    val courseDetails: List<CourseSyncDetail>,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+data class LocalCourseFileInput(
+    val fileName: String,
+    val bytes: ByteArray
+)
+
 class MemorizerRepository(
     private val context: Context,
     private val database: AppDatabase = AppDatabase.getDatabase(context)
@@ -45,48 +70,22 @@ class MemorizerRepository(
         database.userProgressDao().getProgress(userId)
 
     init {
-        // Default starts empty as requested by user. Data is imported or downloaded from Drive.
+        // As requested by user: NO sample data anywhere. Clean up any leftover sample courses from previous runs.
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                database.courseDao().deleteCourseById("course_default")
+                database.vocabularyDao().deleteWordsByCourse("course_default")
+                val existing = database.courseDao().getAllCoursesList()
+                existing.filter { it.title.contains("Barron", ignoreCase = true) }.forEach {
+                    database.courseDao().deleteCourseById(it.id)
+                    database.vocabularyDao().deleteWordsByCourse(it.id)
+                }
+            } catch (_: Exception) {}
+        }
     }
 
     suspend fun seedInitialData() = withContext(Dispatchers.IO) {
-        val defaultCourse = CourseEntity(
-            id = "course_default",
-            title = "Barron's 333 High-Frequency GRE",
-            description = "Essential GRE vocabulary words with mnemonics, meanings, and derivatives."
-        )
-        database.courseDao().insertCourse(defaultCourse)
-
-        val wordsWithCourse = SampleData.sampleWords.map { it.copy(courseId = "course_default") }
-        database.vocabularyDao().insertWords(wordsWithCourse)
-        database.gamePracticeDao().insertItems(SampleData.sampleGames)
-        database.questionBankDao().insertQuestions(SampleData.sampleQuestionBank)
-
-        // Seed sample reading article
-        val sampleArticle = ArticleEntity(
-            id = "article_seed_1",
-            title = "The Art of Eloquent Rhetoric",
-            content = "In ancient debates, scholars strove to be eloquent rather than capricious. An esoteric paradox would often confound the novice, while pragmatic leaders sought lucid arguments to mitigate public fear. Through meticulous scrutiny, one could discern genuine wisdom from superficial rhetoric.",
-            courseId = "course_default",
-            wordCount = 42
-        )
-        database.articleDao().insertArticle(sampleArticle)
-
-        // Seed initial progress for default user
-        val initialProgress = UserProgressEntity(
-            userId = "1235",
-            totalWords = wordsWithCourse.size,
-            knowCount = 0,
-            confusionCount = 0,
-            dontKnowCount = 0,
-            unratedCount = wordsWithCourse.size,
-            streakDays = 1,
-            quizCompleted = 0,
-            quizTotalScore = 0
-        )
-        database.userProgressDao().insertOrUpdate(initialProgress)
-
-        // Create initial backup files on device
-        backupManager.saveBackupFiles("1235")
+        // No-op: user explicitly requested NO sample data anywhere.
     }
 
     suspend fun createCourse(title: String, description: String? = null, headersJson: String? = null): CourseEntity = withContext(Dispatchers.IO) {
@@ -169,12 +168,46 @@ class MemorizerRepository(
         database.gamePracticeDao().deleteItemById(id)
     }
 
+    suspend fun deleteGamesBySection(section: String) = withContext(Dispatchers.IO) {
+        database.gamePracticeDao().deleteItemsBySection(section)
+    }
+
+    suspend fun deleteGameItems(ids: List<String>) = withContext(Dispatchers.IO) {
+        if (ids.isNotEmpty()) {
+            database.gamePracticeDao().deleteItemsByIds(ids)
+        }
+    }
+
+    suspend fun clearAllGames() = withContext(Dispatchers.IO) {
+        database.gamePracticeDao().clearAll()
+    }
+
+    suspend fun recordGameAnswer(questionId: String, isCorrect: Boolean) = withContext(Dispatchers.IO) {
+        val status = if (isCorrect) "correct" else "incorrect"
+        database.gamePracticeDao().recordAttempt(questionId, status, isCorrect)
+    }
+
+    suspend fun recordWordQuizAnswer(wordId: String, isCorrect: Boolean) = withContext(Dispatchers.IO) {
+        val status = if (isCorrect) "correct" else "incorrect"
+        database.vocabularyDao().recordQuizAttempt(wordId, status, isCorrect)
+    }
+
     suspend fun addQuestionBankItem(item: QuestionBankEntity) = withContext(Dispatchers.IO) {
         database.questionBankDao().insertQuestion(item)
     }
 
     suspend fun deleteQuestionBankItem(id: String) = withContext(Dispatchers.IO) {
         database.questionBankDao().deleteQuestionById(id)
+    }
+
+    suspend fun deleteQuestionBankItems(ids: List<String>) = withContext(Dispatchers.IO) {
+        if (ids.isNotEmpty()) {
+            database.questionBankDao().deleteQuestionsByIds(ids)
+        }
+    }
+
+    suspend fun clearAllQuestionBank() = withContext(Dispatchers.IO) {
+        database.questionBankDao().clearAll()
     }
 
     suspend fun recordQuizResult(score: Int, total: Int, userId: String = "1235") = withContext(Dispatchers.IO) {
@@ -227,7 +260,7 @@ class MemorizerRepository(
                         }
                     }
                 }
-                database.vocabularyDao().insertWords(words)
+                database.vocabularyDao().safeUpsertWordsPreservingProgress(words)
                 refreshProgressAndSync(userId)
                 Result.success(words.size)
             } else {
@@ -236,6 +269,137 @@ class MemorizerRepository(
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    /**
+     * Downloads and synchronizes all courses found inside a Google Drive folder link,
+     * Google Sheet link, or Google Drive file link.
+     * ID-based safe upsert ensures all user learning status (Know, Confusion, Don't Know),
+     * review counts, and quiz statistics are preserved for existing words.
+     */
+    suspend fun syncCoursesFromDrive(
+        inputUrl: String,
+        preserveProgress: Boolean = true,
+        userId: String = "1235"
+    ): Result<DriveSyncSummary> = withContext(Dispatchers.IO) {
+        try {
+            val downloadedFiles = GoogleDriveSyncService.fetchFilesFromInput(inputUrl)
+            if (downloadedFiles.isEmpty()) {
+                return@withContext Result.failure(Exception("No readable course files found in the provided Google Drive link."))
+            }
+            processDownloadedOrBatchFiles(
+                files = downloadedFiles.map { LocalCourseFileInput(it.fileName, it.bytes) },
+                preserveProgress = preserveProgress,
+                userId = userId
+            )
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Synchronizes multiple course files selected directly from the user's device.
+     * Each file becomes a distinct course, preserving existing IDs and user learning progress.
+     */
+    suspend fun importMultipleCourseFiles(
+        files: List<LocalCourseFileInput>,
+        preserveProgress: Boolean = true,
+        userId: String = "1235"
+    ): Result<DriveSyncSummary> = withContext(Dispatchers.IO) {
+        try {
+            if (files.isEmpty()) {
+                return@withContext Result.failure(Exception("No files selected."))
+            }
+            processDownloadedOrBatchFiles(files, preserveProgress, userId)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private suspend fun processDownloadedOrBatchFiles(
+        files: List<LocalCourseFileInput>,
+        preserveProgress: Boolean,
+        userId: String
+    ): Result<DriveSyncSummary> {
+        val existingCourses = database.courseDao().getAllCoursesList().toMutableList()
+        val details = mutableListOf<CourseSyncDetail>()
+        var overallUpdated = 0
+        var overallAdded = 0
+
+        for (file in files) {
+            val cleanTitle = file.fileName
+                .substringBeforeLast(".")
+                .replace("_", " ")
+                .replace("-", " ")
+                .trim()
+                .ifBlank { "Imported Course" }
+
+            // Find existing course by title or create new
+            var course = existingCourses.find { it.title.equals(cleanTitle, ignoreCase = true) }
+            if (course == null) {
+                val newCourseId = "c_" + UUID.randomUUID().toString().take(8)
+                course = CourseEntity(id = newCourseId, title = cleanTitle)
+                database.courseDao().insertCourse(course)
+                existingCourses.add(course)
+            }
+            val courseId = course.id
+
+            val words = mutableListOf<VocabularyWordEntity>()
+            val isExcel = file.fileName.endsWith(".xlsx", ignoreCase = true) ||
+                (file.bytes.size > 4 && file.bytes[0] == 0x50.toByte() && file.bytes[1] == 0x4B.toByte())
+
+            if (isExcel) {
+                val sheets = FileParsers.parseMultiSheetXlsx(ByteArrayInputStream(file.bytes))
+                for (sheet in sheets) {
+                    val sheetWords = FileParsers.parseCourseRows(sheet.rows, courseId, defaultGroupName = sheet.sheetName)
+                    words.addAll(sheetWords)
+                }
+            } else if (file.fileName.endsWith(".json", ignoreCase = true)) {
+                val jsonStr = String(file.bytes, Charsets.UTF_8)
+                val jsonWords = FileParsers.parseJsonCourse(jsonStr, courseId)
+                words.addAll(jsonWords)
+            } else {
+                // CSV / TSV
+                val csvStr = String(file.bytes, Charsets.UTF_8)
+                val csvWords = FileParsers.parseCourseCsv(csvStr, courseId)
+                words.addAll(csvWords)
+            }
+
+            if (words.isNotEmpty()) {
+                val (updated, inserted) = if (preserveProgress) {
+                    database.vocabularyDao().safeUpsertWordsPreservingProgress(words)
+                } else {
+                    database.vocabularyDao().insertWords(words)
+                    Pair(0, words.size)
+                }
+                overallUpdated += updated
+                overallAdded += inserted
+                details.add(
+                    CourseSyncDetail(
+                        courseId = courseId,
+                        courseTitle = cleanTitle,
+                        updatedCount = updated,
+                        newCount = inserted,
+                        totalWords = words.size
+                    )
+                )
+            }
+        }
+
+        if (details.isEmpty()) {
+            return Result.failure(Exception("None of the files contained valid vocabulary rows."))
+        }
+
+        refreshProgressAndSync(userId)
+
+        return Result.success(
+            DriveSyncSummary(
+                totalCourses = details.size,
+                totalUpdatedWords = overallUpdated,
+                totalAddedWords = overallAdded,
+                courseDetails = details
+            )
+        )
     }
 
     suspend fun importGameItems(items: List<GamePracticeEntity>): Result<Int> = withContext(Dispatchers.IO) {
@@ -283,6 +447,19 @@ class MemorizerRepository(
         database.vocabularyDao().clearAll()
         database.gamePracticeDao().clearAll()
         database.questionBankDao().clearAll()
-        seedInitialData()
+        database.articleDao().clearAll()
+        database.courseDao().clearAll()
+        val emptyProgress = UserProgressEntity(
+            userId = userId,
+            totalWords = 0,
+            knowCount = 0,
+            confusionCount = 0,
+            dontKnowCount = 0,
+            unratedCount = 0,
+            streakDays = 1,
+            quizCompleted = 0,
+            quizTotalScore = 0
+        )
+        database.userProgressDao().insertOrUpdate(emptyProgress)
     }
 }

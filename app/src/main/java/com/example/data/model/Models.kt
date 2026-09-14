@@ -42,7 +42,10 @@ data class VocabularyWordEntity(
     val timesReviewed: Int = 0,
     val lastReviewedAt: Long = System.currentTimeMillis(),
     val isReported: Boolean = false,
-    val reportReason: String? = null
+    val reportReason: String? = null,
+    val lastQuizStatus: String? = "not_studied", // "correct", "incorrect", "not_studied"
+    val quizCorrectCount: Int = 0,
+    val quizIncorrectCount: Int = 0
 )
 
 @Entity(tableName = "game_practice_items")
@@ -55,7 +58,10 @@ data class GamePracticeEntity(
     val opt3: String,
     val opt4: String,
     val answer: String,
-    val explanation: String? = null
+    val explanation: String? = null,
+    val lastAttemptStatus: String? = "not_studied", // "correct", "incorrect", "not_studied"
+    val correctCount: Int = 0,
+    val incorrectCount: Int = 0
 )
 
 @Entity(tableName = "question_bank_items")

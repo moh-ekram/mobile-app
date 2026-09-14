@@ -29,6 +29,9 @@ interface CourseDao {
 
     @Query("UPDATE courses SET title = :newTitle WHERE id = :courseId")
     suspend fun updateCourseTitle(courseId: String, newTitle: String)
+
+    @Query("DELETE FROM courses")
+    suspend fun clearAll()
 }
 
 @Dao
@@ -56,6 +59,9 @@ interface ArticleDao {
 
     @Query("DELETE FROM saved_articles WHERE id = :id")
     suspend fun deleteArticleById(id: String)
+
+    @Query("DELETE FROM saved_articles")
+    suspend fun clearAll()
 }
 
 @Dao
@@ -84,6 +90,9 @@ interface VocabularyDao {
     @Query("SELECT * FROM vocabulary_words WHERE id = :id LIMIT 1")
     suspend fun getWordById(id: String): VocabularyWordEntity?
 
+    @Query("SELECT * FROM vocabulary_words WHERE id IN (:ids)")
+    suspend fun getWordsByIds(ids: List<String>): List<VocabularyWordEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertWords(words: List<VocabularyWordEntity>)
 
@@ -93,11 +102,53 @@ interface VocabularyDao {
     @Update
     suspend fun updateWord(word: VocabularyWordEntity)
 
+    /**
+     * Upserts incoming words while preserving all user learning progress,
+     * flashcard ratings, quiz counts, and review timestamps for any matching word IDs.
+     * Returns Pair(updatedExistingCount, insertedNewCount).
+     */
+    @Transaction
+    suspend fun safeUpsertWordsPreservingProgress(incomingWords: List<VocabularyWordEntity>): Pair<Int, Int> {
+        if (incomingWords.isEmpty()) return Pair(0, 0)
+        val incomingIds = incomingWords.map { it.id }
+        // Batch fetch all existing words that share IDs with incoming words
+        val existingWordsMap = getWordsByIds(incomingIds).associateBy { it.id }
+
+        var updatedCount = 0
+        var insertedCount = 0
+
+        val merged = incomingWords.map { incoming ->
+            val existing = existingWordsMap[incoming.id]
+            if (existing != null) {
+                updatedCount++
+                // Preserve user learning progress and quiz statistics
+                incoming.copy(
+                    status = if (existing.status.isNotBlank() && existing.status != "unrated") existing.status else incoming.status,
+                    timesReviewed = existing.timesReviewed,
+                    lastReviewedAt = existing.lastReviewedAt,
+                    isReported = existing.isReported,
+                    reportReason = existing.reportReason,
+                    lastQuizStatus = existing.lastQuizStatus,
+                    quizCorrectCount = existing.quizCorrectCount,
+                    quizIncorrectCount = existing.quizIncorrectCount
+                )
+            } else {
+                insertedCount++
+                incoming
+            }
+        }
+        insertWords(merged)
+        return Pair(updatedCount, insertedCount)
+    }
+
     @Query("UPDATE vocabulary_words SET status = :status, timesReviewed = timesReviewed + 1, lastReviewedAt = :timestamp WHERE id = :id")
     suspend fun updateWordStatus(id: String, status: String, timestamp: Long = System.currentTimeMillis())
 
     @Query("UPDATE vocabulary_words SET isReported = :isReported, reportReason = :reason WHERE id = :id")
     suspend fun reportWord(id: String, isReported: Boolean = true, reason: String? = null)
+
+    @Query("UPDATE vocabulary_words SET lastQuizStatus = :status, quizCorrectCount = CASE WHEN :isCorrect = 1 THEN quizCorrectCount + 1 ELSE quizCorrectCount END, quizIncorrectCount = CASE WHEN :isCorrect = 0 THEN quizIncorrectCount + 1 ELSE quizIncorrectCount END WHERE id = :id")
+    suspend fun recordQuizAttempt(id: String, status: String, isCorrect: Boolean)
 
     @Delete
     suspend fun deleteWord(word: VocabularyWordEntity)
@@ -135,6 +186,15 @@ interface GamePracticeDao {
     @Query("DELETE FROM game_practice_items WHERE id = :id")
     suspend fun deleteItemById(id: String)
 
+    @Query("DELETE FROM game_practice_items WHERE sheetType = :section")
+    suspend fun deleteItemsBySection(section: String)
+
+    @Query("DELETE FROM game_practice_items WHERE id IN (:ids)")
+    suspend fun deleteItemsByIds(ids: List<String>)
+
+    @Query("UPDATE game_practice_items SET lastAttemptStatus = :status, correctCount = CASE WHEN :isCorrect = 1 THEN correctCount + 1 ELSE correctCount END, incorrectCount = CASE WHEN :isCorrect = 0 THEN incorrectCount + 1 ELSE incorrectCount END WHERE id = :id")
+    suspend fun recordAttempt(id: String, status: String, isCorrect: Boolean)
+
     @Query("DELETE FROM game_practice_items")
     suspend fun clearAll()
 }
@@ -158,6 +218,9 @@ interface QuestionBankDao {
 
     @Query("DELETE FROM question_bank_items WHERE id = :id")
     suspend fun deleteQuestionById(id: String)
+
+    @Query("DELETE FROM question_bank_items WHERE id IN (:ids)")
+    suspend fun deleteQuestionsByIds(ids: List<String>)
 
     @Query("DELETE FROM question_bank_items")
     suspend fun clearAll()

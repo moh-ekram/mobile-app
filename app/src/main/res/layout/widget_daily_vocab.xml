@@ -12,6 +12,7 @@
 
     <!-- Top Bar: Course Name (small), Tag Badge & Next Button -->
     <LinearLayout
+        android:id="@+id/widget_header"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
@@ -99,6 +100,7 @@
             android:textColor="#334155"
             android:maxLines="3"
             android:ellipsize="end"
+            android:lineSpacingMultiplier="1.15"
             android:includeFontPadding="false" />
 
         <!-- Extra: Example or note -->
@@ -113,6 +115,7 @@
             android:textColor="#64748B"
             android:maxLines="2"
             android:ellipsize="end"
+            android:lineSpacingMultiplier="1.15"
             android:includeFontPadding="false"
             android:visibility="gone" />
     </LinearLayout>

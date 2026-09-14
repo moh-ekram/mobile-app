@@ -1,6 +1,10 @@
 package com.example.ui.screens
 
 import android.speech.tts.TextToSpeech
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -48,6 +52,7 @@ fun HomeScreen(
     onCreateCourseClick: () -> Unit = {},
     onNavigate: (String) -> Unit,
     onSelectGroup: (String?) -> Unit,
+    onSelectStatus: (String) -> Unit = {},
     widgetWord: VocabularyWordEntity? = null,
     widgetCategory: String = "all",
     onSetWidgetCategory: (String) -> Unit = {},
@@ -75,6 +80,44 @@ fun HomeScreen(
     val dontKnowCount = activeWords.count { it.status == "dont_know" }
     val unratedCount = activeWords.count { it.status == "unrated" }
     val masteryPercent = if (totalWords > 0) ((knowCount.toFloat() / totalWords) * 100).toInt() else 0
+
+    var startAnimation by remember { mutableStateOf(false) }
+    LaunchedEffect(activeCourseId, totalWords) {
+        startAnimation = false
+        kotlinx.coroutines.delay(40)
+        startAnimation = true
+    }
+
+    val animatedKnowCount by animateIntAsState(
+        targetValue = if (startAnimation) knowCount else 0,
+        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        label = "know_count_anim"
+    )
+    val animatedConfusionCount by animateIntAsState(
+        targetValue = if (startAnimation) confusionCount else 0,
+        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        label = "confusion_count_anim"
+    )
+    val animatedDontKnowCount by animateIntAsState(
+        targetValue = if (startAnimation) dontKnowCount else 0,
+        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        label = "dont_know_count_anim"
+    )
+    val animatedUnratedCount by animateIntAsState(
+        targetValue = if (startAnimation) unratedCount else 0,
+        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        label = "unrated_count_anim"
+    )
+    val animatedMasteryPercent by animateIntAsState(
+        targetValue = if (startAnimation) masteryPercent else 0,
+        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        label = "mastery_percent_anim"
+    )
+    val animatedProgress by animateFloatAsState(
+        targetValue = if (startAnimation && totalWords > 0) knowCount.toFloat() / totalWords else 0f,
+        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        label = "progress_anim"
+    )
 
     val palette = LocalAppPalette.current
 
@@ -321,7 +364,7 @@ fun HomeScreen(
                     Spacer(modifier = Modifier.height(6.dp))
 
                     LinearProgressIndicator(
-                        progress = { if (totalWords > 0) knowCount.toFloat() / totalWords else 0f },
+                        progress = { animatedProgress },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(8.dp)
@@ -337,14 +380,14 @@ fun HomeScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "$masteryPercent% Mastered",
+                            text = "$animatedMasteryPercent% Mastered",
                             fontFamily = PoppinsFontFamily,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
                         Text(
-                            text = "$knowCount of $totalWords words",
+                            text = "$animatedKnowCount of $totalWords words",
                             fontFamily = PoppinsFontFamily,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
@@ -451,7 +494,7 @@ fun HomeScreen(
                     color = SlateText
                 )
                 Text(
-                    text = "$knowCount / $totalWords mastered",
+                    text = "$animatedKnowCount / $totalWords mastered",
                     fontFamily = PoppinsFontFamily,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
@@ -467,35 +510,39 @@ fun HomeScreen(
             ) {
                 StatCard(
                     title = "Know",
-                    count = knowCount,
+                    count = animatedKnowCount,
                     bg = EmeraldLight,
                     border = EmeraldBorder,
                     textColor = EmeraldSuccess,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    onClick = { onSelectStatus("know") }
                 )
                 StatCard(
                     title = "Confusion",
-                    count = confusionCount,
+                    count = animatedConfusionCount,
                     bg = AmberLight,
                     border = AmberBorder,
                     textColor = AmberWarning,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    onClick = { onSelectStatus("confusion") }
                 )
                 StatCard(
                     title = "Don't Know",
-                    count = dontKnowCount,
+                    count = animatedDontKnowCount,
                     bg = RoseLight,
                     border = RoseBorder,
                     textColor = RoseError,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    onClick = { onSelectStatus("dont_know") }
                 )
                 StatCard(
                     title = "Unrated",
-                    count = unratedCount,
+                    count = animatedUnratedCount,
                     bg = Color(0xFFF1F5F9),
                     border = SlateBorder,
                     textColor = SlateText,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    onClick = { onSelectStatus("unrated") }
                 )
             }
         }
@@ -703,13 +750,18 @@ private fun StatCard(
     bg: Color,
     border: Color,
     textColor: Color,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
 ) {
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(16.dp))
             .background(bg)
             .border(1.dp, border, RoundedCornerShape(16.dp))
+            .then(
+                if (onClick != null) Modifier.clickable { onClick() }
+                else Modifier
+            )
             .padding(vertical = 12.dp, horizontal = 6.dp),
         contentAlignment = Alignment.Center
     ) {

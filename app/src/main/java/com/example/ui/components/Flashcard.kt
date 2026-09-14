@@ -280,37 +280,37 @@ private fun FrontFaceContent(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // Action Buttons: Google Search (icon only, searches "{word} meaning") and Pronounce Button side by side
+            // Action Buttons: Google Search (icon only, searches "{word} meaning") and Pronounce Button side by side (compact size)
             Row(
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.testTag("front_action_buttons_row")
             ) {
-                // Google Search Button: Icon only, no text on the button, searches "{word} meaning" on click
+                // Google Search Button: Compact icon only, no text on the button, searches "{word} meaning" on click
                 Box(
                     modifier = Modifier
-                        .size(44.dp)
+                        .size(26.dp)
                         .clip(CircleShape)
                         .background(if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9))
                         .border(1.dp, if (palette.isDark) Color(0xFF334155) else Color(0xFFCBD5E1), CircleShape)
-                    .clickable {
-                        val query = "${word.word} meaning"
-                        try {
-                            val url = "https://www.google.com/search?q=" + Uri.encode(query)
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                            context.startActivity(intent)
-                        } catch (_: Exception) {}
-                    }
-                    .testTag("google_search_button"),
-                contentAlignment = Alignment.Center
-            ) {
-                GoogleGVectorIcon(modifier = Modifier.size(20.dp))
-            }
+                        .clickable {
+                            val query = "${word.word} meaning"
+                            try {
+                                val url = "https://www.google.com/search?q=" + Uri.encode(query)
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                context.startActivity(intent)
+                            } catch (_: Exception) {}
+                        }
+                        .testTag("google_search_button"),
+                    contentAlignment = Alignment.Center
+                ) {
+                    GoogleGVectorIcon(modifier = Modifier.size(12.dp))
+                }
 
-                // Pronounce Button (moved from top-right corner to be next to Google button)
+                // Pronounce Button: Compact size next to Google button
                 Box(
                     modifier = Modifier
-                        .size(44.dp)
+                        .size(26.dp)
                         .clip(CircleShape)
                         .background(if (palette.isDark) Color(0xFF312E81) else IndigoLight)
                         .border(1.dp, if (palette.isDark) Color(0xFF4338CA) else Color(0xFFC7D2FE), CircleShape)
@@ -322,7 +322,7 @@ private fun FrontFaceContent(
                         imageVector = Icons.AutoMirrored.Filled.VolumeUp,
                         contentDescription = "Speak word",
                         tint = if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(12.dp)
                     )
                 }
             }
@@ -715,7 +715,7 @@ private fun TopBarSection(
                 // Speak Word Button
                 Box(
                     modifier = Modifier
-                        .size(38.dp)
+                        .size(26.dp)
                         .clip(CircleShape)
                         .background(IndigoLight)
                         .clickable { onSpeak() }
@@ -726,7 +726,7 @@ private fun TopBarSection(
                         imageVector = Icons.AutoMirrored.Filled.VolumeUp,
                         contentDescription = "Speak word",
                         tint = IndigoPrimary,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(13.dp)
                     )
                 }
             }

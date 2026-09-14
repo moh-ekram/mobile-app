@@ -63,36 +63,30 @@ fun ArticleReaderScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = "Articles",
-                        fontFamily = PoppinsFontFamily,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = SlateText
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = {
-                        if (activeArticle != null) {
-                            onSelectArticle(null)
-                        } else {
-                            onBack()
+            if (activeArticle == null) {
+                TopAppBar(
+                    title = {
+                        Text(
+                            text = "Articles",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = SlateText
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = SlateText)
                         }
-                    }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = SlateText)
-                    }
-                },
-                actions = {
-                    if (activeArticle == null) {
+                    },
+                    actions = {
                         IconButton(onClick = { showAddDialog = true }) {
                             Icon(Icons.Default.Add, contentDescription = "Add Article", tint = IndigoPrimary)
                         }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
-            )
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
+                )
+            }
         }
     ) { innerPadding ->
         ArticleReaderView(
@@ -105,7 +99,7 @@ fun ArticleReaderScreen(
             onRateWord = onRateWord,
             showAddDialogFromParent = showAddDialog,
             onDismissAddDialog = { showAddDialog = false },
-            modifier = Modifier.padding(innerPadding)
+            modifier = if (activeArticle == null) Modifier.padding(innerPadding) else Modifier.statusBarsPadding()
         )
     }
 }
@@ -257,9 +251,38 @@ fun ArticleReaderView(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Saved Articles (${articles.size})",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = SlateText
+                            )
+                            Button(
+                                onClick = { showAddDialog = true },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier.height(34.dp)
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Add Article", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+
                     items(articles, key = { it.id }) { art ->
                         Card(
                             modifier = Modifier
@@ -344,141 +367,135 @@ fun ArticleReaderView(
                 }
             }
         } else {
-            // FULL SCREEN MODE: All other options hidden, full screen reader
-            Column(
+            // FULL SCREEN MODE: Ultra-slim navigation & action bar
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(Color.White)
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                IconButton(onClick = { onSelectArticle(null) }, modifier = Modifier.size(34.dp)) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back to Articles List",
+                        tint = SlateText,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                Column(modifier = Modifier.weight(1f).padding(horizontal = 4.dp)) {
+                    Text(
+                        text = currentArticle.title,
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = SlateText,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "By ${currentArticle.author} • ${currentArticle.wordCount} words",
+                        fontSize = 9.5.sp,
+                        color = IndigoPrimary,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                }
+
+                IconButton(
+                    onClick = {
+                        tts?.speak(currentArticle.content, TextToSpeech.QUEUE_FLUSH, null, "article_tts")
+                    },
+                    modifier = Modifier.size(32.dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        IconButton(onClick = { onSelectArticle(null) }) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back to Articles List",
-                                tint = SlateText
-                            )
-                        }
-                        Column(modifier = Modifier.padding(start = 4.dp)) {
-                            Text(
-                                text = currentArticle.title,
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = SlateText,
-                                maxLines = 1
-                            )
-                            Text(
-                                text = "By ${currentArticle.author} • ${currentArticle.wordCount} words",
-                                fontSize = 11.sp,
-                                color = IndigoPrimary
-                            )
-                        }
-                    }
+                    Icon(
+                        Icons.Default.VolumeUp,
+                        contentDescription = "Listen to Article",
+                        tint = IndigoPrimary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
 
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(
-                            onClick = {
-                                tts?.speak(currentArticle.content, TextToSpeech.QUEUE_FLUSH, null, "article_tts")
-                            }
-                        ) {
-                            Icon(
-                                Icons.Default.VolumeUp,
-                                contentDescription = "Listen to Article",
-                                tint = IndigoPrimary,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
+                IconButton(onClick = { showEditDialog = true }, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        Icons.Default.Edit,
+                        contentDescription = "Edit Article",
+                        tint = IndigoPrimary,
+                        modifier = Modifier.size(15.dp)
+                    )
+                }
 
-                        IconButton(onClick = { showEditDialog = true }) {
-                            Icon(
-                                Icons.Default.Edit,
-                                contentDescription = "Edit Article",
-                                tint = IndigoPrimary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
+                IconButton(onClick = { showAddDialog = true }, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = "Add New Article",
+                        tint = EmeraldSuccess,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
 
-                        IconButton(onClick = {
-                            onDeleteArticle(currentArticle.id)
-                            onSelectArticle(null)
-                        }) {
-                            Icon(
-                                Icons.Default.DeleteOutline,
-                                contentDescription = "Delete Article",
-                                tint = RoseError,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
+                IconButton(onClick = {
+                    onDeleteArticle(currentArticle.id)
+                    onSelectArticle(null)
+                }, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        Icons.Default.DeleteOutline,
+                        contentDescription = "Delete Article",
+                        tint = RoseError,
+                        modifier = Modifier.size(16.dp)
+                    )
                 }
             }
 
-            // Article Content Area in Full Screen
+            // Article Content Area - TAKES FULL WIDTH OF THE PHONE SCREEN
             LazyColumn(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                contentPadding = PaddingValues(top = 14.dp, bottom = 32.dp)
+                    .background(Color.White),
+                contentPadding = PaddingValues(top = 4.dp, bottom = 28.dp)
             ) {
                 item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color.White),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-                        border = CardDefaults.outlinedCardBorder().copy(
-                            brush = androidx.compose.ui.graphics.SolidColor(SlateBorder)
-                        )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
                     ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(22.dp)
-                        ) {
-                            // Highlighted Interactive Text
-                            val annotatedText = buildPlaceHighlightedAnnotatedString(
-                                content = currentArticle.content,
-                                place1Map = place1Map,
-                                place2Map = place2Map
-                            )
+                        // Highlighted Interactive Text taking full width of phone screen
+                        val annotatedText = buildPlaceHighlightedAnnotatedString(
+                            content = currentArticle.content,
+                            place1Map = place1Map,
+                            place2Map = place2Map
+                        )
 
-                            ClickableText(
-                                text = annotatedText,
-                                style = TextStyle(
-                                    fontSize = 16.sp,
-                                    lineHeight = 26.sp,
-                                    color = SlateText,
-                                    fontFamily = PoppinsFontFamily
-                                ),
-                                onClick = { offset ->
-                                    annotatedText.getStringAnnotations(
-                                        tag = "VOCAB_MATCH",
-                                        start = offset,
-                                        end = offset
-                                    ).firstOrNull()?.let { annotation ->
-                                        val key = annotation.item.lowercase(Locale.ROOT)
-                                        val matchedWord = place1Map[key] ?: place2Map[key]
-                                        if (matchedWord != null) {
-                                            selectedWordForDetails = matchedWord
-                                        }
+                        ClickableText(
+                            text = annotatedText,
+                            style = TextStyle(
+                                fontSize = 16.sp,
+                                lineHeight = 26.sp,
+                                color = SlateText,
+                                fontFamily = PoppinsFontFamily
+                            ),
+                            onClick = { offset ->
+                                annotatedText.getStringAnnotations(
+                                    tag = "VOCAB_MATCH",
+                                    start = offset,
+                                    end = offset
+                                ).firstOrNull()?.let { annotation ->
+                                    val key = annotation.item.lowercase(Locale.ROOT)
+                                    val matchedWord = place1Map[key] ?: place2Map[key]
+                                    if (matchedWord != null) {
+                                        selectedWordForDetails = matchedWord
                                     }
                                 }
-                            )
-                        }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
                 }
             }
-        }
+            }
 
         // Word Detail Bottom Card / Popup
         AnimatedVisibility(visible = selectedWordForDetails != null) {
@@ -516,13 +533,13 @@ fun ArticleReaderView(
 
                                 IconButton(
                                     onClick = { tts?.speak(word.word, TextToSpeech.QUEUE_FLUSH, null, "tts_article") },
-                                    modifier = Modifier.size(28.dp)
+                                    modifier = Modifier.size(24.dp)
                                 ) {
                                     Icon(
                                         Icons.Default.VolumeUp,
                                         contentDescription = "Speak",
                                         tint = Color(0xFF818CF8),
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(15.dp)
                                     )
                                 }
 
@@ -630,16 +647,20 @@ fun ArticleReaderView(
     }
 
     // Add / Upload Article Dialog (Editable Title and Author name by default)
-    if (showAddDialog) {
+    if (isAdding) {
         ArticleEditorDialog(
             initialTitle = "Daily Reading Passage",
             initialAuthor = "Anonymous Author",
             initialContent = "",
             isEditing = false,
-            onDismiss = { showAddDialog = false },
+            onDismiss = {
+                showAddDialog = false
+                onDismissAddDialog()
+            },
             onSave = { title, content, author ->
                 onSaveArticle(title, content, author, null)
                 showAddDialog = false
+                onDismissAddDialog()
             }
         )
     }

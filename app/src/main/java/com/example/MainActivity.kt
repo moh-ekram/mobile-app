@@ -137,6 +137,9 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
     val isFlipAnimationEnabled by viewModel.isFlipAnimationEnabled.collectAsState()
     val currentWidgetWord by viewModel.currentWidgetWord.collectAsState()
     val widgetCategory by viewModel.widgetCategory.collectAsState()
+    val isSyncingDrive by viewModel.isSyncingDrive.collectAsState()
+    val driveSyncUrl by viewModel.driveSyncUrl.collectAsState()
+    val driveSyncSummary by viewModel.driveSyncSummary.collectAsState()
     val palette = LocalAppPalette.current
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -312,6 +315,10 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             onCreateCourseClick = { viewModel.setRoute("admin") },
                             onNavigate = { target -> viewModel.setRoute(target) },
                             onSelectGroup = { grp -> viewModel.selectGroup(grp) },
+                            onSelectStatus = { status ->
+                                viewModel.selectStatusFilter(status)
+                                viewModel.setRoute("flashcard")
+                            },
                             widgetWord = currentWidgetWord,
                             widgetCategory = widgetCategory,
                             onSetWidgetCategory = { cat -> viewModel.setWidgetCategory(cat) },
@@ -351,8 +358,16 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                         "games" -> GamePracticeScreen(
                             games = allGames,
                             questions = allQuestions,
+                            courses = allCourses,
+                            activeCourseId = activeCourseId,
                             onCompleteQuiz = { score, total ->
                                 viewModel.recordQuizCompletion(score, total)
+                            },
+                            onRecordGameAnswer = { qId, isCorrect ->
+                                viewModel.recordGameAnswer(qId, isCorrect)
+                            },
+                            onRecordWordQuizAnswer = { wId, isCorrect ->
+                                viewModel.recordWordQuizAnswer(wId, isCorrect)
                             },
                             articles = allArticles,
                             activeArticle = activeArticle,
@@ -383,6 +398,12 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             questions = allQuestions,
                             courses = allCourses,
                             activeCourseId = activeCourseId,
+                            isSyncingDrive = isSyncingDrive,
+                            driveSyncUrl = driveSyncUrl,
+                            driveSyncSummary = driveSyncSummary,
+                            onSyncFromDrive = { url, preserve -> viewModel.syncCoursesFromDrive(url, preserve) },
+                            onBatchImportFiles = { files, preserve -> viewModel.importMultipleCourseFiles(files, preserve) },
+                            onClearDriveSummary = { viewModel.clearDriveSyncSummary() },
                             onCreateCourse = { title, desc, fileContent, isJson -> viewModel.createCourse(title, desc, fileContent, isJson) },
                             onSelectCourse = { cId -> viewModel.setActiveCourse(cId) },
                             onDeleteCourse = { cId -> viewModel.deleteCourse(cId) },
@@ -391,7 +412,10 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             onUpdateCourse = { cId, title, desc -> viewModel.updateCourse(cId, title, desc) },
                             onDeleteWord = { id -> viewModel.deleteWord(id) },
                             onDeleteGame = { id -> viewModel.deleteGameItem(id) },
+                            onDeleteGamesBySection = { sec -> viewModel.deleteGamesBySection(sec) },
+                            onClearAllGames = { viewModel.clearAllGames() },
                             onDeleteQuestion = { id -> viewModel.deleteQuestionBankItem(id) },
+                            onClearAllQB = { viewModel.clearAllQuestionBank() },
                             onImportCourse = { content, isJson, cId, title -> viewModel.importCourseFile(content, isJson, cId, title) },
                             onImportGame = { content, type -> viewModel.importGameFile(content, type) },
                             onImportGameItems = { items -> viewModel.importGameItems(items) },

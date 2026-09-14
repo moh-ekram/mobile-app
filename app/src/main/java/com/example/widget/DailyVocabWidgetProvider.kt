@@ -6,7 +6,11 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Color
+import android.os.Bundle
+import android.util.TypedValue
+import android.view.View
 import android.widget.RemoteViews
 import com.example.MainActivity
 import com.example.R
@@ -24,6 +28,16 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
         for (appWidgetId in appWidgetIds) {
             updateAppWidget(context, appWidgetManager, appWidgetId)
         }
+    }
+
+    override fun onAppWidgetOptionsChanged(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetId: Int,
+        newOptions: Bundle
+    ) {
+        super.onAppWidgetOptionsChanged(context, appWidgetManager, appWidgetId, newOptions)
+        updateAppWidget(context, appWidgetManager, appWidgetId)
     }
 
     override fun onEnabled(context: Context) {
@@ -90,6 +104,180 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
             }
         }
 
+        data class ResponsiveWidgetConfig(
+            val titleSp: Float,
+            val meaningSp: Float,
+            val exampleSp: Float,
+            val courseSp: Float,
+            val badgeSp: Float,
+            val nextSp: Float,
+            val hPadDp: Int,
+            val vPadDp: Int,
+            val headerBottomPadDp: Int,
+            val meaningTopPadDp: Int,
+            val exampleTopPadDp: Int,
+            val maxTitleLines: Int,
+            val maxMeaningLines: Int,
+            val maxExampleLines: Int,
+            val showExample: Boolean
+        )
+
+        private fun calculateResponsiveConfig(
+            widthDp: Int,
+            heightDp: Int,
+            prefWidgetSize: String
+        ): ResponsiveWidgetConfig {
+            var effW = if (widthDp > 0) widthDp else 240
+            var effH = if (heightDp > 0) heightDp else 130
+
+            if (prefWidgetSize == "large") {
+                effW = maxOf(effW, 300)
+                effH = maxOf(effH, 200)
+            } else if (prefWidgetSize == "compact") {
+                effW = minOf(effW, 180)
+                effH = minOf(effH, 90)
+            }
+
+            return when {
+                // Jumbo / Full-Screen / Large Tablet / 4x4+ (effH >= 240 && effW >= 240)
+                effH >= 240 && effW >= 240 -> ResponsiveWidgetConfig(
+                    titleSp = 36f,
+                    meaningSp = 20f,
+                    exampleSp = 16.5f,
+                    courseSp = 14f,
+                    badgeSp = 12f,
+                    nextSp = 14f,
+                    hPadDp = 18,
+                    vPadDp = 16,
+                    headerBottomPadDp = 8,
+                    meaningTopPadDp = 8,
+                    exampleTopPadDp = 6,
+                    maxTitleLines = 2,
+                    maxMeaningLines = 6,
+                    maxExampleLines = 3,
+                    showExample = true
+                )
+                // Extra Large / 4x3 / 3x3 / Tall (effH >= 170 || (effH >= 140 && effW >= 280))
+                effH >= 170 || (effH >= 140 && effW >= 280) -> ResponsiveWidgetConfig(
+                    titleSp = 28f,
+                    meaningSp = 17f,
+                    exampleSp = 14.5f,
+                    courseSp = 12.5f,
+                    badgeSp = 11f,
+                    nextSp = 12.5f,
+                    hPadDp = 15,
+                    vPadDp = 12,
+                    headerBottomPadDp = 6,
+                    meaningTopPadDp = 6,
+                    exampleTopPadDp = 5,
+                    maxTitleLines = 2,
+                    maxMeaningLines = 4,
+                    maxExampleLines = 3,
+                    showExample = true
+                )
+                // Wide / Medium (e.g. 4x2 or 3x2) (effW >= 220 && effH >= 100)
+                effW >= 220 && effH >= 100 -> ResponsiveWidgetConfig(
+                    titleSp = 23f,
+                    meaningSp = 15f,
+                    exampleSp = 12.5f,
+                    courseSp = 11f,
+                    badgeSp = 10f,
+                    nextSp = 11.5f,
+                    hPadDp = 13,
+                    vPadDp = 9,
+                    headerBottomPadDp = 4,
+                    meaningTopPadDp = 4,
+                    exampleTopPadDp = 3,
+                    maxTitleLines = 2,
+                    maxMeaningLines = 3,
+                    maxExampleLines = 2,
+                    showExample = true
+                )
+                // Standard 2x2 / 3x1 (effH >= 85)
+                effH >= 85 -> ResponsiveWidgetConfig(
+                    titleSp = 20f,
+                    meaningSp = 13.5f,
+                    exampleSp = 11.5f,
+                    courseSp = 10f,
+                    badgeSp = 9f,
+                    nextSp = 10.5f,
+                    hPadDp = 11,
+                    vPadDp = 8,
+                    headerBottomPadDp = 3,
+                    meaningTopPadDp = 3,
+                    exampleTopPadDp = 2,
+                    maxTitleLines = 2,
+                    maxMeaningLines = 3,
+                    maxExampleLines = 1,
+                    showExample = true
+                )
+                // Very Compact 2x1
+                else -> ResponsiveWidgetConfig(
+                    titleSp = 17f,
+                    meaningSp = 12f,
+                    exampleSp = 10.5f,
+                    courseSp = 9.5f,
+                    badgeSp = 8.5f,
+                    nextSp = 9.5f,
+                    hPadDp = 9,
+                    vPadDp = 6,
+                    headerBottomPadDp = 2,
+                    meaningTopPadDp = 2,
+                    exampleTopPadDp = 2,
+                    maxTitleLines = 1,
+                    maxMeaningLines = 2,
+                    maxExampleLines = 1,
+                    showExample = false
+                )
+            }
+        }
+
+        private fun applyResponsiveStyling(
+            context: Context,
+            views: RemoteViews,
+            config: ResponsiveWidgetConfig,
+            prefFontSize: String
+        ) {
+            val fontFactor = when (prefFontSize) {
+                "small" -> 0.85f
+                "large" -> 1.25f
+                "extra_large", "huge" -> 1.5f
+                else -> 1.0f
+            }
+
+            val finalTitleSp = config.titleSp * fontFactor
+            val finalMeaningSp = config.meaningSp * fontFactor
+            val finalExampleSp = config.exampleSp * fontFactor
+            val finalCourseSp = config.courseSp * (0.6f + fontFactor * 0.4f)
+            val finalBadgeSp = config.badgeSp * (0.6f + fontFactor * 0.4f)
+            val finalNextSp = config.nextSp * (0.6f + fontFactor * 0.4f)
+
+            val density = context.resources.displayMetrics.density
+            val hPadPx = (config.hPadDp * density).toInt()
+            val vPadPx = (config.vPadDp * density).toInt()
+            views.setViewPadding(R.id.widget_root, hPadPx, vPadPx, hPadPx, vPadPx)
+
+            val headerBottomPx = (config.headerBottomPadDp * density).toInt()
+            views.setViewPadding(R.id.widget_header, 0, 0, 0, headerBottomPx)
+
+            val meaningTopPx = (config.meaningTopPadDp * density).toInt()
+            views.setViewPadding(R.id.widget_word_meaning, 0, meaningTopPx, 0, 0)
+
+            val exampleTopPx = (config.exampleTopPadDp * density).toInt()
+            views.setViewPadding(R.id.widget_word_example, 0, exampleTopPx, 0, 0)
+
+            views.setInt(R.id.widget_word_title, "setMaxLines", config.maxTitleLines)
+            views.setInt(R.id.widget_word_meaning, "setMaxLines", config.maxMeaningLines)
+            views.setInt(R.id.widget_word_example, "setMaxLines", config.maxExampleLines)
+
+            views.setTextViewTextSize(R.id.widget_word_title, TypedValue.COMPLEX_UNIT_SP, finalTitleSp)
+            views.setTextViewTextSize(R.id.widget_word_meaning, TypedValue.COMPLEX_UNIT_SP, finalMeaningSp)
+            views.setTextViewTextSize(R.id.widget_word_example, TypedValue.COMPLEX_UNIT_SP, finalExampleSp)
+            views.setTextViewTextSize(R.id.widget_course_title, TypedValue.COMPLEX_UNIT_SP, finalCourseSp)
+            views.setTextViewTextSize(R.id.widget_badge, TypedValue.COMPLEX_UNIT_SP, finalBadgeSp)
+            views.setTextViewTextSize(R.id.widget_next_button, TypedValue.COMPLEX_UNIT_SP, finalNextSp)
+        }
+
         fun updateAppWidget(
             context: Context,
             appWidgetManager: AppWidgetManager,
@@ -97,9 +285,38 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
         ) {
             val scope = CoroutineScope(Dispatchers.IO)
             scope.launch {
+                val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                val prefFontSize = prefs.getString(KEY_WIDGET_FONT_SIZE, "medium") ?: "medium"
+                val prefWidgetSize = prefs.getString(KEY_WIDGET_SIZE, "standard") ?: "standard"
+
+                // Read current widget physical dimensions from launcher options
+                val options = appWidgetManager.getAppWidgetOptions(appWidgetId)
+                val isLandscape = context.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+                val optMinW = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0)
+                val optMaxW = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, 0)
+                val optMinH = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0)
+                val optMaxH = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0)
+
+                val rawWidthDp = if (isLandscape) {
+                    if (optMaxW > 0) optMaxW else optMinW
+                } else {
+                    if (optMinW > 0) optMinW else optMaxW
+                }
+
+                val rawHeightDp = if (isLandscape) {
+                    if (optMinH > 0) optMinH else optMaxH
+                } else {
+                    if (optMaxH > 0) optMaxH else optMinH
+                }
+
+                // If resized by user, launchers update min/max dimensions. Take maximum resolved bounds so font scales up appropriately.
+                val resolvedW = maxOf(rawWidthDp, optMinW, optMaxW)
+                val resolvedH = maxOf(rawHeightDp, optMinH, optMaxH)
+
+                val config = calculateResponsiveConfig(resolvedW, resolvedH, prefWidgetSize)
+
                 try {
                     val db = AppDatabase.getDatabase(context)
-                    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                     val prefCourseId = prefs.getString(KEY_WIDGET_COURSE_ID, "all") ?: "all"
                     val prefTagFilter = prefs.getString(KEY_WIDGET_TAG_FILTER, "all") ?: "all"
                     val lastShownWordId = prefs.getString(KEY_LAST_SHOWN_WORD_ID, null)
@@ -183,24 +400,16 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
                     // Place 2 (Meaning)
                     views.setTextViewText(R.id.widget_word_meaning, displayMeaning)
 
-                    // Apply Font Size setting with refined values to prevent vertical overflow/whitespace
-                    val prefFontSize = prefs.getString(KEY_WIDGET_FONT_SIZE, "medium") ?: "medium"
-                    val (titleSize, meaningSize) = when (prefFontSize) {
-                        "small" -> Pair(15f, 10.5f)
-                        "large" -> Pair(20f, 13f)
-                        else -> Pair(17f, 11.5f)
-                    }
-                    views.setTextViewTextSize(R.id.widget_word_title, android.util.TypedValue.COMPLEX_UNIT_SP, titleSize)
-                    views.setTextViewTextSize(R.id.widget_word_meaning, android.util.TypedValue.COMPLEX_UNIT_SP, meaningSize)
+                    // Apply fully responsive typography, paddings, line counts & spacing
+                    applyResponsiveStyling(context, views, config, prefFontSize)
 
                     // Apply Widget Size setting & hide example completely if absent to remove empty void
-                    val prefWidgetSize = prefs.getString(KEY_WIDGET_SIZE, "standard") ?: "standard"
-                    val hasExample = word != null && !word.example.isNullOrBlank() && prefWidgetSize != "compact"
+                    val hasExample = word != null && !word.example.isNullOrBlank() && prefWidgetSize != "compact" && config.showExample
                     if (hasExample) {
-                        views.setViewVisibility(R.id.widget_word_example, android.view.View.VISIBLE)
+                        views.setViewVisibility(R.id.widget_word_example, View.VISIBLE)
                         views.setTextViewText(R.id.widget_word_example, "\"${word?.example?.trim()}\"")
                     } else {
-                        views.setViewVisibility(R.id.widget_word_example, android.view.View.GONE)
+                        views.setViewVisibility(R.id.widget_word_example, View.GONE)
                     }
 
                     // Click intent for the whole widget -> open MainActivity
@@ -238,6 +447,9 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
                         views.setTextViewText(R.id.widget_badge, "DAILY VOCAB")
                         views.setTextColor(R.id.widget_badge, Color.parseColor("#4F46E5"))
                         views.setTextViewText(R.id.widget_word_example, "Tap to open Memorizer")
+
+                        applyResponsiveStyling(context, views, config, prefFontSize)
+
                         appWidgetManager.updateAppWidget(appWidgetId, views)
                     } catch (_: Exception) {}
                 }
@@ -245,3 +457,4 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
         }
     }
 }
+

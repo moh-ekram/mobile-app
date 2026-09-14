@@ -44,9 +44,23 @@ object FileParsers {
     fun parseCourseCsv(content: String, courseId: String = "course_default"): List<VocabularyWordEntity> {
         val lines = content.lines().filter { it.isNotBlank() }
         if (lines.size < 2) return emptyList()
+        val rows = lines.map { parseCsvLine(it) }
+        return parseCourseRows(rows, courseId)
+    }
 
-        val headerLine = lines[0]
-        val headers = parseCsvLine(headerLine).map { it.trim() }
+    /**
+     * Parses tabular rows (from CSV or Excel sheets) into VocabularyWordEntity items.
+     * ID tracking is fully supported: uses existing 'id', 'no', 'sl', '#' column or generates
+     * a deterministic stable ID based on course and word so subsequent updates match accurately.
+     */
+    fun parseCourseRows(
+        rows: List<List<String>>,
+        courseId: String = "course_default",
+        defaultGroupName: String = "1"
+    ): List<VocabularyWordEntity> {
+        if (rows.size < 2) return emptyList()
+
+        val headers = rows[0].map { it.trim() }
 
         // Map column indices
         var idIndex = -1
@@ -80,8 +94,8 @@ object FileParsers {
             }
 
             when {
-                lower == "id" -> idIndex = index
-                lower == "group" -> groupIndex = index
+                lower in listOf("id", "id*", "word_id", "wordid", "no", "no.", "sl", "sl.", "serial", "#") -> idIndex = index
+                lower == "group" || lower == "group_id" || lower == "unit" || lower == "chapter" -> groupIndex = index
                 lower == "courseid" || lower == "course_id" -> courseIdIndex = index
                 lower == "coursetitle" || lower == "course_title" || lower == "coursename" -> courseTitleIndex = index
                 lower == "status" -> statusIndex = index
@@ -121,19 +135,34 @@ object FileParsers {
         }
 
         val result = mutableListOf<VocabularyWordEntity>()
-        for (i in 1 until lines.size) {
-            val values = parseCsvLine(lines[i])
-            if (values.isEmpty()) continue
+        for (i in 1 until rows.size) {
+            val values = rows[i]
+            if (values.isEmpty() || values.all { it.isBlank() }) continue
 
             val rowCourseId = if (courseIdIndex in values.indices && values[courseIdIndex].isNotBlank()) {
                 values[courseIdIndex].trim()
             } else {
                 courseId
             }
-            val id = if (idIndex in values.indices && values[idIndex].isNotBlank()) values[idIndex].trim() else "word_${rowCourseId}_$i"
+
+            val rawWord = if (wordIndex in values.indices) values[wordIndex].trim() else "Word $i"
+            if (rawWord.isBlank()) continue
+
+            val stableWordSlug = rawWord.lowercase().replace(Regex("[^a-z0-9]"), "_").take(24).trim('_')
+            val id = if (idIndex in values.indices && values[idIndex].isNotBlank()) {
+                values[idIndex].trim()
+            } else {
+                "w_${rowCourseId}_${stableWordSlug}_$i"
+            }
+
             val rawGroup = if (groupIndex in values.indices) values[groupIndex].trim() else ""
-            val group = if (rawGroup.isNotBlank()) rawGroup else "1"
-            val word = if (wordIndex in values.indices) values[wordIndex].trim() else "Word $i"
+            val group = if (rawGroup.isNotBlank()) {
+                rawGroup
+            } else {
+                val cleanDefaultGroup = defaultGroupName.replace(Regex("(?i)^sheet|^group"), "").trim()
+                if (cleanDefaultGroup.isNotBlank() && cleanDefaultGroup.any { it.isDigit() }) cleanDefaultGroup else defaultGroupName
+            }
+
             val meaning = if (meaningIndex in values.indices) values[meaningIndex].trim() else ""
             val example = if (exampleIndex in values.indices && values[exampleIndex].isNotBlank()) values[exampleIndex].trim() else null
             val synonyms = if (synonymsIndex in values.indices && values[synonymsIndex].isNotBlank()) values[synonymsIndex].trim() else null
@@ -149,23 +178,21 @@ object FileParsers {
                 }
             }
 
-            if (word.isNotBlank()) {
-                result.add(
-                    VocabularyWordEntity(
-                        id = id,
-                        word = word,
-                        meaning = meaning,
-                        group = group,
-                        synonyms = synonyms,
-                        extraWord = extraWord,
-                        example = example,
-                        mnemonic = mnemonic,
-                        status = status,
-                        customPlacesJson = if (placeJsonObj.length() > 0) placeJsonObj.toString() else null,
-                        courseId = rowCourseId
-                    )
+            result.add(
+                VocabularyWordEntity(
+                    id = id,
+                    word = rawWord,
+                    meaning = meaning,
+                    group = group,
+                    synonyms = synonyms,
+                    extraWord = extraWord,
+                    example = example,
+                    mnemonic = mnemonic,
+                    status = status,
+                    customPlacesJson = if (placeJsonObj.length() > 0) placeJsonObj.toString() else null,
+                    courseId = rowCourseId
                 )
-            }
+            )
         }
         return result
     }

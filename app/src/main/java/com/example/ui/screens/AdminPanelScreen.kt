@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -17,6 +18,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -37,6 +40,8 @@ import com.example.data.model.VocabularyWordEntity
 import com.example.data.parser.FileParsers
 import com.example.data.parser.GameValidationSummary
 import com.example.data.parser.ParsedSheet
+import com.example.data.repository.DriveSyncSummary
+import com.example.data.repository.LocalCourseFileInput
 import com.example.ui.theme.*
 import java.io.ByteArrayInputStream
 
@@ -47,6 +52,12 @@ fun AdminPanelScreen(
     questions: List<QuestionBankEntity>,
     courses: List<CourseEntity> = emptyList(),
     activeCourseId: String = "",
+    isSyncingDrive: Boolean = false,
+    driveSyncUrl: String = "",
+    driveSyncSummary: DriveSyncSummary? = null,
+    onSyncFromDrive: (String, Boolean) -> Unit = { _, _ -> },
+    onBatchImportFiles: (List<LocalCourseFileInput>, Boolean) -> Unit = { _, _ -> },
+    onClearDriveSummary: () -> Unit = {},
     onCreateCourse: (String, String?, String?, Boolean) -> Unit = { _, _, _, _ -> },
     onSelectCourse: (String) -> Unit = {},
     onDeleteCourse: (String) -> Unit = {},
@@ -55,24 +66,60 @@ fun AdminPanelScreen(
     onUpdateCourse: (String, String, String?) -> Unit = { _, _, _ -> },
     onDeleteWord: (String) -> Unit,
     onDeleteGame: (String) -> Unit,
+    onDeleteGamesBySection: (String) -> Unit = {},
+    onClearAllGames: () -> Unit = {},
     onDeleteQuestion: (String) -> Unit,
+    onClearAllQB: () -> Unit = {},
     onImportCourse: (String, Boolean, String, String?) -> Unit = { _, _, _, _ -> },
     onImportGame: (String, String) -> Unit,
     onImportGameItems: (List<GamePracticeEntity>) -> Unit = {},
     onImportQB: (String) -> Unit,
-    onResetData: () -> Unit,
+    onResetData: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var selectedSection by remember { mutableStateOf("courses") } // "courses", "words", "games", "qb"
+    var selectedSubPage by remember { mutableStateOf<String?>(null) } // null = Main Dashboard, "courses", "words", "games", "qb"
     var showCreateCourseDialog by remember { mutableStateOf(false) }
     var showAddWordDialog by remember { mutableStateOf(false) }
     var showUploadCourseDialog by remember { mutableStateOf(false) }
     var showUploadGameDialog by remember { mutableStateOf(false) }
     var showUploadQBDialog by remember { mutableStateOf(false) }
+    var showDriveSyncDialog by remember { mutableStateOf(false) }
     var targetCourseIdForUpload by remember(activeCourseId) { mutableStateOf(activeCourseId) }
     var wordBeingEdited by remember { mutableStateOf<VocabularyWordEntity?>(null) }
     var courseBeingEdited by remember { mutableStateOf<CourseEntity?>(null) }
+
+    // Multi-file picker for batch course files from device
+    val batchFilePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            val fileInputs = mutableListOf<LocalCourseFileInput>()
+            for (uri in uris) {
+                try {
+                    var fileName = "Course_${System.currentTimeMillis()}"
+                    context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        if (nameIndex != -1 && cursor.moveToFirst()) {
+                            fileName = cursor.getString(nameIndex)
+                        }
+                    }
+                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    if (bytes != null && bytes.isNotEmpty()) {
+                        fileInputs.add(LocalCourseFileInput(fileName, bytes))
+                    }
+                } catch (_: Exception) {}
+            }
+            if (fileInputs.isNotEmpty()) {
+                onBatchImportFiles(fileInputs, true)
+            }
+        }
+    }
+
+    // Intercept back button if in a sub-page
+    BackHandler(enabled = selectedSubPage != null) {
+        selectedSubPage = null
+    }
 
     Column(
         modifier = modifier
@@ -80,200 +127,287 @@ fun AdminPanelScreen(
             .background(SlateBg)
             .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
-        // Control Header
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 6.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Text(
-                    text = "Control",
-                    fontFamily = PoppinsFontFamily,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = SlateText
-                )
-                Text(
-                    text = "Manage courses, manual edits, vocabulary & practice data",
-                    fontFamily = PoppinsFontFamily,
-                    fontSize = 11.sp,
-                    color = SlateMuted
-                )
-            }
-        }
-
-        // Section Pills
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            FilterChip(
-                selected = selectedSection == "courses",
-                onClick = { selectedSection = "courses" },
-                label = { Text("Courses (${courses.size})", fontSize = 11.sp) },
-                shape = CircleShape,
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = IndigoPrimary,
-                    selectedLabelColor = Color.White
-                )
-            )
-
-            FilterChip(
-                selected = selectedSection == "words",
-                onClick = { selectedSection = "words" },
-                label = { Text("Words (${words.size})", fontSize = 11.sp) },
-                shape = CircleShape,
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = IndigoPrimary,
-                    selectedLabelColor = Color.White
-                )
-            )
-
-            FilterChip(
-                selected = selectedSection == "games",
-                onClick = { selectedSection = "games" },
-                label = { Text("Games (${games.size})", fontSize = 11.sp) },
-                shape = CircleShape,
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = IndigoPrimary,
-                    selectedLabelColor = Color.White
-                )
-            )
-
-            FilterChip(
-                selected = selectedSection == "qb",
-                onClick = { selectedSection = "qb" },
-                label = { Text("QB (${questions.size})", fontSize = 11.sp) },
-                shape = CircleShape,
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = IndigoPrimary,
-                    selectedLabelColor = Color.White
-                )
-            )
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Download Course Data Banner (Google Drive Link)
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(14.dp),
-            colors = CardDefaults.cardColors(containerColor = EmeraldLight),
-            border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(EmeraldBorder))
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+        if (selectedSubPage == null) {
+            // First page of Control Panel: Download button & Main categories in list order with modern minimal tabs
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
+                // Header
+                item {
+                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
                         Text(
-                            text = "Download Course Data",
+                            text = "Control Panel",
                             fontFamily = PoppinsFontFamily,
-                            fontSize = 13.sp,
+                            fontSize = 22.sp,
                             fontWeight = FontWeight.Bold,
-                            color = EmeraldSuccess
+                            color = SlateText
                         )
-                        Box(
-                            modifier = Modifier
-                                .clip(CircleShape)
-                                .background(Color(0xFFDCFCE7))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text("Google Drive", fontFamily = PoppinsFontFamily, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = EmeraldSuccess)
-                        }
+                        Text(
+                            text = "Manage courses, vocabulary, practice games & question bank",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 12.sp,
+                            color = SlateMuted
+                        )
                     }
-                    Text(
-                        text = "Download course spreadsheets and files",
-                        fontFamily = PoppinsFontFamily,
-                        fontSize = 11.sp,
-                        color = SlateMuted
+                }
+
+                // Google Drive Course Sync Card (Cloud Sync with ID-Based Progress Preservation)
+                item {
+                    GoogleDriveSyncCard(
+                        isSyncing = isSyncingDrive,
+                        onOpenSyncDialog = { showDriveSyncDialog = true }
                     )
                 }
 
-                Button(
-                    onClick = {
-                        val intent = Intent(
-                            Intent.ACTION_VIEW,
-                            Uri.parse("https://drive.google.com/drive/folders/1OBqSlB21FD_-0tpRZE8H6R5VFzDkeX2n")
-                        )
-                        context.startActivity(intent)
-                    },
-                    shape = CircleShape,
-                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    modifier = Modifier.height(34.dp)
-                ) {
-                    Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Download", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
+                // Modern Minimal Download Button / Card (Google Drive Link)
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                val intent = Intent(
+                                    Intent.ACTION_VIEW,
+                                    Uri.parse("https://drive.google.com/drive/folders/1OBqSlB21FD_-0tpRZE8H6R5VFzDkeX2n")
+                                )
+                                context.startActivity(intent)
+                            },
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = EmeraldLight),
+                        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(EmeraldBorder))
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(42.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFFDCFCE7)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        Icons.Default.CloudDownload,
+                                        contentDescription = null,
+                                        tint = EmeraldSuccess,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                                Column {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = "Download Datasets",
+                                            fontFamily = PoppinsFontFamily,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = EmeraldSuccess
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(CircleShape)
+                                                .background(Color(0xFFBBF7D0))
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                "Google Drive",
+                                                fontFamily = PoppinsFontFamily,
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = EmeraldSuccess
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = "Download JSON & Excel vocabulary sets",
+                                        fontFamily = PoppinsFontFamily,
+                                        fontSize = 11.5.sp,
+                                        color = SlateMuted
+                                    )
+                                }
+                            }
 
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Content by Selected Section
-        when (selectedSection) {
-            "courses" -> {
-                CoursesAdminView(
-                    courses = courses,
-                    activeCourseId = activeCourseId,
-                    words = words,
-                    onCreateCourseClick = { showCreateCourseDialog = true },
-                    onSelectCourse = onSelectCourse,
-                    onDeleteCourse = onDeleteCourse,
-                    onEditCourse = { course -> courseBeingEdited = course },
-                    onManageWords = { selectedSection = "words" },
-                    onUploadToCourse = { cId ->
-                        targetCourseIdForUpload = cId
-                        showUploadCourseDialog = true
-                    }
-                )
-            }
-            "words" -> {
-                WordsAdminView(
-                    words = words,
-                    courses = courses,
-                    activeCourseId = activeCourseId,
-                    onSelectCourse = onSelectCourse,
-                    onAddWordClick = { showAddWordDialog = true },
-                    onUploadClick = {
-                        targetCourseIdForUpload = activeCourseId
-                        showUploadCourseDialog = true
-                    },
-                    onEditWord = { word -> wordBeingEdited = word },
-                    onDeleteWord = onDeleteWord,
-                    onClearReport = { wordId ->
-                        val word = words.find { it.id == wordId }
-                        if (word != null) {
-                            onUpdateWord(word.copy(isReported = false, reportReason = null))
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = null,
+                                tint = EmeraldSuccess,
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     }
-                )
+                }
+
+                item {
+                    Text(
+                        text = "MAIN CATEGORIES",
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = SlateLight,
+                        letterSpacing = 1.sp,
+                        modifier = Modifier.padding(start = 4.dp, top = 4.dp)
+                    )
+                }
+
+                // 1. Courses Tab
+                item {
+                    val activeCourseTitle = courses.find { it.id == activeCourseId }?.title ?: "Default"
+                    AdminCategoryListCard(
+                        title = "Courses",
+                        subtitle = "${courses.size} courses • Active: $activeCourseTitle",
+                        badge = "${courses.size}",
+                        icon = Icons.Default.School,
+                        iconBg = IndigoLight,
+                        iconTint = IndigoPrimary,
+                        onClick = { selectedSubPage = "courses" }
+                    )
+                }
+
+                // 2. Words Tab
+                item {
+                    AdminCategoryListCard(
+                        title = "Words",
+                        subtitle = "${words.size} vocabulary items • Search, filter & edit",
+                        badge = "${words.size}",
+                        icon = Icons.Default.Translate,
+                        iconBg = Color(0xFFEFF6FF),
+                        iconTint = Color(0xFF2563EB),
+                        onClick = { selectedSubPage = "words" }
+                    )
+                }
+
+                // 3. Games Tab
+                item {
+                    AdminCategoryListCard(
+                        title = "Games",
+                        subtitle = "${games.size} questions • Odd One Out, Analogy, Practice Quiz",
+                        badge = "${games.size}",
+                        icon = Icons.Default.SportsEsports,
+                        iconBg = Color(0xFFFEF3C7),
+                        iconTint = Color(0xFFD97706),
+                        onClick = { selectedSubPage = "games" }
+                    )
+                }
+
+                // 4. Question Bank (QB) Tab
+                item {
+                    AdminCategoryListCard(
+                        title = "Question Bank (QB)",
+                        subtitle = "${questions.size} questions • Multi-filter question bank",
+                        badge = "${questions.size}",
+                        icon = Icons.Default.Quiz,
+                        iconBg = Color(0xFFF3E8FF),
+                        iconTint = Color(0xFF9333EA),
+                        onClick = { selectedSubPage = "qb" }
+                    )
+                }
             }
-            "games" -> {
-                GamesAdminView(
-                    games = games,
-                    onUploadClick = { showUploadGameDialog = true },
-                    onDeleteGame = onDeleteGame
-                )
+        } else {
+            // Sub-page Top Navigation Bar (Slim, minimal)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = { selectedSubPage = null },
+                    modifier = Modifier.size(34.dp)
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back to Control Panel",
+                        tint = SlateText,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(6.dp))
+                Column {
+                    Text(
+                        text = when (selectedSubPage) {
+                            "courses" -> "Courses (${courses.size})"
+                            "words" -> "Words (${words.size})"
+                            "games" -> "Games (${games.size})"
+                            "qb" -> "Question Bank (${questions.size})"
+                            else -> "Control"
+                        },
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = SlateText
+                    )
+                }
             }
-            "qb" -> {
-                QbAdminView(
-                    questions = questions,
-                    onUploadClick = { showUploadQBDialog = true },
-                    onDeleteQuestion = onDeleteQuestion
-                )
+
+            // Sub-page Content
+            when (selectedSubPage) {
+                "courses" -> {
+                    CoursesAdminView(
+                        courses = courses,
+                        activeCourseId = activeCourseId,
+                        words = words,
+                        onOpenDriveSync = { showDriveSyncDialog = true },
+                        onBatchUpload = { batchFilePicker.launch("*/*") },
+                        onCreateCourseClick = { showCreateCourseDialog = true },
+                        onSelectCourse = onSelectCourse,
+                        onDeleteCourse = onDeleteCourse,
+                        onEditCourse = { course -> courseBeingEdited = course },
+                        onManageWords = { selectedSubPage = "words" },
+                        onUploadToCourse = { cId ->
+                            targetCourseIdForUpload = cId
+                            showUploadCourseDialog = true
+                        }
+                    )
+                }
+                "words" -> {
+                    WordsAdminView(
+                        words = words,
+                        courses = courses,
+                        activeCourseId = activeCourseId,
+                        onSelectCourse = onSelectCourse,
+                        onAddWordClick = { showAddWordDialog = true },
+                        onUploadClick = {
+                            targetCourseIdForUpload = activeCourseId
+                            showUploadCourseDialog = true
+                        },
+                        onEditWord = { word -> wordBeingEdited = word },
+                        onDeleteWord = onDeleteWord,
+                        onClearReport = { wordId ->
+                            val word = words.find { it.id == wordId }
+                            if (word != null) {
+                                onUpdateWord(word.copy(isReported = false, reportReason = null))
+                            }
+                        }
+                    )
+                }
+                "games" -> {
+                    GamesAdminView(
+                        games = games,
+                        onUploadClick = { showUploadGameDialog = true },
+                        onDeleteGame = onDeleteGame,
+                        onDeleteGamesBySection = onDeleteGamesBySection,
+                        onClearAllGames = onClearAllGames
+                    )
+                }
+                "qb" -> {
+                    QbAdminView(
+                        questions = questions,
+                        onUploadClick = { showUploadQBDialog = true },
+                        onDeleteQuestion = onDeleteQuestion,
+                        onClearAllQB = onClearAllQB
+                    )
+                }
             }
         }
     }
@@ -336,7 +470,7 @@ fun AdminPanelScreen(
         UploadFileDialog(
             title = "Upload Question Bank File (Excel / CSV)",
             subtitle = "Columns format: Id*, Question*, Opt1-4*, Ans*, Explanation, Filter1:label, Filter2:label, Filter3:label\nSupports Excel (.xlsx) and CSV files from device.",
-            defaultContent = "Id,Question,Opt1,Opt2,Opt3,Opt4,Ans,Explanation,Filter1:Category,Filter2:Difficulty,Filter3:Source\n\"qb_101\",\"Identify the appropriate synonym for 'Ephemeral':\",\"Transient#\",\"Eternal\",\"Persistent\",\"Enduring\",\"Transient\",\"Ephemeral means fleeting or transient.\",\"Vocabulary Mastery\",\"Medium\",\"Barron's 333\"",
+            defaultContent = "Id,Question,Opt1,Opt2,Opt3,Opt4,Ans,Explanation,Filter1:Category,Filter2:Difficulty,Filter3:Source\n\"qb_101\",\"Identify the appropriate synonym for 'Ephemeral':\",\"Transient#\",\"Eternal\",\"Persistent\",\"Enduring\",\"Transient\",\"Ephemeral means fleeting or transient.\",\"Vocabulary Mastery\",\"Medium\",\"Exam Prep\"",
             onDismiss = { showUploadQBDialog = false },
             onImport = { content, _, _ ->
                 onImportQB(content)
@@ -368,6 +502,125 @@ fun AdminPanelScreen(
             }
         )
     }
+
+    // Google Drive Sync Dialog
+    if (showDriveSyncDialog) {
+        GoogleDriveSyncDialog(
+            initialUrl = driveSyncUrl,
+            isSyncing = isSyncingDrive,
+            onDismiss = { showDriveSyncDialog = false },
+            onSync = { url, preserve ->
+                onSyncFromDrive(url, preserve)
+                showDriveSyncDialog = false
+            },
+            onPickBatchFiles = {
+                batchFilePicker.launch("*/*")
+            }
+        )
+    }
+
+    // Google Drive Sync Summary Dialog
+    if (driveSyncSummary != null) {
+        DriveSyncSummaryDialog(
+            summary = driveSyncSummary,
+            onDismiss = onClearDriveSummary
+        )
+    }
+}
+
+@Composable
+private fun AdminCategoryListCard(
+    title: String,
+    subtitle: String,
+    badge: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    iconBg: Color,
+    iconTint: Color,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(SlateBorder)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(iconBg),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = iconTint,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = title,
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = SlateText
+                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(Color(0xFFF1F5F9))
+                                .padding(horizontal = 7.dp, vertical = 1.5.dp)
+                        ) {
+                            Text(
+                                text = badge,
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = SlateMuted
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = subtitle,
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 11.5.sp,
+                        color = SlateMuted,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                contentDescription = null,
+                tint = SlateLight,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+    }
 }
 
 @Composable
@@ -375,6 +628,8 @@ private fun CoursesAdminView(
     courses: List<CourseEntity>,
     activeCourseId: String,
     words: List<VocabularyWordEntity>,
+    onOpenDriveSync: () -> Unit = {},
+    onBatchUpload: () -> Unit = {},
     onCreateCourseClick: () -> Unit,
     onSelectCourse: (String) -> Unit,
     onDeleteCourse: (String) -> Unit,
@@ -384,19 +639,53 @@ private fun CoursesAdminView(
 ) {
     var coursePendingDelete by remember { mutableStateOf<CourseEntity?>(null) }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        Button(
-            onClick = onCreateCourseClick,
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
-        ) {
-            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(modifier = Modifier.width(6.dp))
-            Text("Create New Course", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-        }
+    Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // Google Drive Course Sync Card
+        GoogleDriveSyncCard(
+            isSyncing = false,
+            onOpenSyncDialog = onOpenDriveSync
+        )
 
-        Spacer(modifier = Modifier.height(10.dp))
+        // Actions Row: Batch Upload from device & Create New Course
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedButton(
+                onClick = onBatchUpload,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp),
+                border = ButtonDefaults.outlinedButtonBorder.copy(
+                    brush = androidx.compose.ui.graphics.SolidColor(Color(0xFFCBD5E1))
+                )
+            ) {
+                Icon(Icons.Default.FileOpen, contentDescription = null, modifier = Modifier.size(16.dp), tint = SlateText)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Batch Files",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = SlateText
+                )
+            }
+
+            Button(
+                onClick = onCreateCourseClick,
+                modifier = Modifier.weight(1.2f),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Create Course",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
 
         if (courses.isEmpty()) {
             Card(
@@ -792,98 +1081,120 @@ private fun WordsAdminView(
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        // Course Selector Header / Horizontal Chips
+        // Compact Course Selector Chips Row (no bulky label or margins)
         if (courses.isNotEmpty()) {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    text = "Filter by Course:",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = SlateMuted,
-                    modifier = Modifier.padding(bottom = 4.dp)
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    courses.forEach { course ->
-                        val isSelected = selectedCourseFilterId == course.id
-                        val count = words.count { it.courseId == course.id }
-                        FilterChip(
-                            selected = isSelected,
-                            onClick = {
-                                selectedCourseFilterId = course.id
-                                onSelectCourse(course.id)
-                            },
-                            label = {
-                                Text(
-                                    text = "${course.title} ($count)",
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                )
-                            },
-                            shape = CircleShape,
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = IndigoPrimary,
-                                selectedLabelColor = Color.White
-                            )
-                        )
-                    }
-
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                courses.forEach { course ->
+                    val isSelected = selectedCourseFilterId == course.id
+                    val count = words.count { it.courseId == course.id }
                     FilterChip(
-                        selected = selectedCourseFilterId.isBlank(),
-                        onClick = { selectedCourseFilterId = "" },
+                        selected = isSelected,
+                        onClick = {
+                            selectedCourseFilterId = course.id
+                            onSelectCourse(course.id)
+                        },
                         label = {
                             Text(
-                                text = "All Courses (${words.size})",
-                                fontSize = 11.sp,
-                                fontWeight = if (selectedCourseFilterId.isBlank()) FontWeight.Bold else FontWeight.Normal
+                                text = "${course.title} ($count)",
+                                fontSize = 10.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                             )
                         },
                         shape = CircleShape,
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = IndigoPrimary,
                             selectedLabelColor = Color.White
-                        )
+                        ),
+                        modifier = Modifier.height(28.dp)
                     )
                 }
+
+                FilterChip(
+                    selected = selectedCourseFilterId.isBlank(),
+                    onClick = { selectedCourseFilterId = "" },
+                    label = {
+                        Text(
+                            text = "All (${words.size})",
+                            fontSize = 10.sp,
+                            fontWeight = if (selectedCourseFilterId.isBlank()) FontWeight.Bold else FontWeight.Normal
+                        )
+                    },
+                    shape = CircleShape,
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = IndigoPrimary,
+                        selectedLabelColor = Color.White
+                    ),
+                    modifier = Modifier.height(28.dp)
+                )
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(4.dp))
         }
 
-        // Action Row & Reported Filter
+        // Compact Search & Action Row
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Button(
-                onClick = onAddWordClick,
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+            // Search Bar (compact 36dp)
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Search words, meanings...", fontSize = 11.sp, color = SlateLight) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = SlateLight, modifier = Modifier.size(16.dp)) },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery = "" }, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear", tint = SlateLight, modifier = Modifier.size(14.dp))
+                        }
+                    }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(40.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = Color.White,
+                    unfocusedContainerColor = Color.White,
+                    focusedBorderColor = IndigoPrimary,
+                    unfocusedBorderColor = SlateBorder
+                )
+            )
+
+            // Add Word Button (compact)
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(IndigoPrimary)
+                    .clickable { onAddWordClick() },
+                contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Add Word", fontSize = 12.sp)
+                Icon(Icons.Default.Add, contentDescription = "Add Word", tint = Color.White, modifier = Modifier.size(18.dp))
             }
 
-            OutlinedButton(
-                onClick = onUploadClick,
-                modifier = Modifier.weight(1.1f),
-                shape = RoundedCornerShape(12.dp),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+            // Upload Button (compact)
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color.White)
+                    .border(1.dp, SlateBorder, RoundedCornerShape(10.dp))
+                    .clickable { onUploadClick() },
+                contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Upload File", fontSize = 12.sp)
+                Icon(Icons.Default.CloudUpload, contentDescription = "Upload File", tint = IndigoPrimary, modifier = Modifier.size(18.dp))
             }
 
-            // Reported filter chip
+            // Reported filter chip (compact)
             FilterChip(
                 selected = showOnlyReported,
                 onClick = { showOnlyReported = !showOnlyReported },
@@ -892,13 +1203,13 @@ private fun WordsAdminView(
                         imageVector = Icons.Default.Flag,
                         contentDescription = null,
                         tint = if (showOnlyReported) Color.White else (if (reportedCountInCourse > 0) RoseError else SlateLight),
-                        modifier = Modifier.size(15.dp)
+                        modifier = Modifier.size(13.dp)
                     )
                 },
                 label = {
                     Text(
-                        text = "Reported ($reportedCountInCourse)",
-                        fontSize = 11.sp,
+                        text = "$reportedCountInCourse",
+                        fontSize = 10.sp,
                         fontWeight = if (showOnlyReported) FontWeight.Bold else FontWeight.Normal
                     )
                 },
@@ -906,41 +1217,12 @@ private fun WordsAdminView(
                 colors = FilterChipDefaults.filterChipColors(
                     selectedContainerColor = RoseError,
                     selectedLabelColor = Color.White
-                )
+                ),
+                modifier = Modifier.height(30.dp)
             )
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Search bar
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { searchQuery = it },
-            placeholder = { Text("Search words, meanings, or report notes...", fontSize = 12.sp, color = SlateLight) },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = SlateLight, modifier = Modifier.size(18.dp)) },
-            trailingIcon = {
-                if (searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { searchQuery = "" }) {
-                        Icon(Icons.Default.Close, contentDescription = "Clear", tint = SlateLight, modifier = Modifier.size(16.dp))
-                    }
-                }
-            },
-            singleLine = true,
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(50.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = Color.White,
-                unfocusedContainerColor = Color.White,
-                focusedBorderColor = IndigoPrimary,
-                unfocusedBorderColor = SlateBorder
-            )
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // List Status Header
+        // Single tiny status line
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -949,22 +1231,12 @@ private fun WordsAdminView(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "${displayedWords.size} words shown" + (if (activeCourseObj != null && selectedCourseFilterId.isNotBlank()) " in ${activeCourseObj.title}" else ""),
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
+                text = "${displayedWords.size} words" + if (showOnlyReported) " (Reported only)" else "",
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium,
                 color = SlateMuted
             )
-            if (showOnlyReported) {
-                Text(
-                    text = "Showing reported items only",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = RoseError
-                )
-            }
         }
-
-        Spacer(modifier = Modifier.height(4.dp))
 
         if (displayedWords.isEmpty()) {
             Card(
@@ -1155,19 +1427,30 @@ private fun WordsAdminView(
 private fun GamesAdminView(
     games: List<GamePracticeEntity>,
     onUploadClick: () -> Unit,
-    onDeleteGame: (String) -> Unit
+    onDeleteGame: (String) -> Unit,
+    onDeleteGamesBySection: (String) -> Unit = {},
+    onClearAllGames: () -> Unit = {}
 ) {
     var showInstructions by remember { mutableStateOf(false) }
+    var expandedSectionKey by remember { mutableStateOf<String?>(null) }
+    var sectionPendingDelete by remember { mutableStateOf<Pair<String, String>?>(null) } // key, title
+    var showClearAllConfirm by remember { mutableStateOf(false) }
+
+    val gameSections = listOf(
+        Triple("odd_one_out", "Odd One Out", "Find the word that does not belong to the set"),
+        Triple("analogy", "Analogy Practice", "Solve word relationship and analogy pairs"),
+        Triple("practice", "Practice Quiz", "Standard multiple-choice practice questions")
+    )
 
     Column(modifier = Modifier.fillMaxSize()) {
         // Expandable Instructions Card
         Card(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(14.dp),
+            shape = RoundedCornerShape(12.dp),
             colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
             border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Color(0xFFCBD5E1)))
         ) {
-            Column(modifier = Modifier.padding(12.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1179,10 +1462,10 @@ private fun GamesAdminView(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Icon(Icons.Default.Info, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Info, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(16.dp))
                         Text(
                             text = "Game Data Format & Input Instructions",
-                            fontSize = 12.sp,
+                            fontSize = 11.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = SlateText
                         )
@@ -1190,114 +1473,257 @@ private fun GamesAdminView(
                     Icon(
                         imageVector = if (showInstructions) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                         contentDescription = null,
-                        tint = SlateMuted
+                        tint = SlateMuted,
+                        modifier = Modifier.size(18.dp)
                     )
                 }
 
                 AnimatedVisibility(visible = showInstructions) {
                     Column(
-                        modifier = Modifier.padding(top = 10.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        modifier = Modifier.padding(top = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Text(
-                            text = "1. File Formats: Multi-sheet Excel (.xlsx) or standard CSV (.csv).",
-                            fontSize = 11.sp,
-                            color = SlateText
-                        )
-                        Text(
-                            text = "2. Sheet Names: 'practice', 'quiz', 'odd_one_out', 'analogy'. Each sheet is automatically categorized by its name.",
-                            fontSize = 11.sp,
-                            color = SlateText
-                        )
-                        Text(
-                            text = "3. Required Columns: Question, Opt1, Opt2, Opt3, Opt4, Ans, Explanation.",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = IndigoPrimary
-                        )
-                        Text(
-                            text = "4. Correct Answer Indicator: In the 'Ans' column, enter the answer text, option index (1-4), or letter (A-D). Alternatively, append '#' to the correct option text (e.g. 'Abate#') if leaving 'Ans' empty.",
-                            fontSize = 11.sp,
-                            color = SlateText
-                        )
+                        Text("• Formats: Multi-sheet Excel (.xlsx) or CSV (.csv)", fontSize = 11.sp, color = SlateText)
+                        Text("• Sheet names: 'odd_one_out', 'analogy', 'practice' (or 'quiz')", fontSize = 11.sp, color = SlateText)
+                        Text("• Columns: Question, Opt1, Opt2, Opt3, Opt4, Ans, Explanation", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = IndigoPrimary)
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-        Button(
-            onClick = onUploadClick,
+        // Action Buttons Row: Upload + Bulk Clear All
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(modifier = Modifier.width(6.dp))
-            Text("Upload Games File with Validation (Excel / CSV)", fontSize = 13.sp)
+            Button(
+                onClick = onUploadClick,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(40.dp),
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                contentPadding = PaddingValues(horizontal = 10.dp)
+            ) {
+                Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Upload Games File", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+
+            if (games.isNotEmpty()) {
+                OutlinedButton(
+                    onClick = { showClearAllConfirm = true },
+                    modifier = Modifier.height(40.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = RoseError),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, RoseError.copy(alpha = 0.5f)),
+                    contentPadding = PaddingValues(horizontal = 10.dp)
+                ) {
+                    Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(16.dp), tint = RoseError)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Clear All", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = RoseError)
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        if (games.isEmpty()) {
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(Icons.Default.SportsEsports, contentDescription = null, tint = SlateLight, modifier = Modifier.size(36.dp))
-                    Text("No Game Questions Loaded", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = SlateText)
-                    Text("Upload an Excel file with sheets like 'quiz' or 'practice' to start playing.", fontSize = 12.sp, color = SlateMuted)
+        // Three Separate Sections for Games Shown in List
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            items(gameSections, key = { it.first }) { (secKey, secTitle, secDesc) ->
+                val sectionItems = games.filter {
+                    it.sheetType.equals(secKey, ignoreCase = true) ||
+                    (secKey == "practice" && (it.sheetType.equals("quiz", ignoreCase = true) || it.sheetType.isBlank()))
                 }
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(games, key = { it.id }) { item ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color.White),
-                        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(SlateBorder))
-                    ) {
+                val isExpanded = expandedSectionKey == secKey
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(SlateBorder))
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(14.dp),
+                            modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(
+                                            when (secKey) {
+                                                "odd_one_out" -> Color(0xFFFEF3C7)
+                                                "analogy" -> Color(0xFFEFF6FF)
+                                                else -> Color(0xFFF3E8FF)
+                                            }
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = when (secKey) {
+                                            "odd_one_out" -> Icons.Default.Shuffle
+                                            "analogy" -> Icons.Default.CompareArrows
+                                            else -> Icons.Default.SportsEsports
+                                        },
+                                        contentDescription = null,
+                                        tint = when (secKey) {
+                                            "odd_one_out" -> Color(0xFFD97706)
+                                            "analogy" -> Color(0xFF2563EB)
+                                            else -> Color(0xFF9333EA)
+                                        },
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                Column {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(
+                                            text = secTitle,
+                                            fontFamily = PoppinsFontFamily,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = SlateText
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(CircleShape)
+                                                .background(if (sectionItems.isNotEmpty()) IndigoLight else Color(0xFFF1F5F9))
+                                                .padding(horizontal = 6.dp, vertical = 1.5.dp)
+                                        ) {
+                                            Text(
+                                                text = "${sectionItems.size}",
+                                                fontFamily = PoppinsFontFamily,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (sectionItems.isNotEmpty()) IndigoPrimary else SlateMuted
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = secDesc,
+                                        fontFamily = PoppinsFontFamily,
+                                        fontSize = 11.sp,
+                                        color = SlateMuted
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Controls Row: View Questions toggle + Section Bulk Delete
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    expandedSectionKey = if (isExpanded) null else secKey
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.height(32.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                            ) {
                                 Text(
-                                    text = item.sheetType.uppercase(),
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = IndigoPrimary
-                                )
-                                Text(
-                                    text = item.question,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = SlateText
-                                )
-                                Text(
-                                    text = "Answer: ${item.answer}",
-                                    fontSize = 12.sp,
-                                    color = EmeraldSuccess,
+                                    text = if (isExpanded) "Hide Questions" else "View Questions (${sectionItems.size})",
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.SemiBold
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Icon(
+                                    imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp)
                                 )
                             }
 
-                            IconButton(onClick = { onDeleteGame(item.id) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete Game", tint = RoseError)
+                            if (sectionItems.isNotEmpty()) {
+                                IconButton(
+                                    onClick = { sectionPendingDelete = Pair(secKey, secTitle) },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = "Bulk Delete $secTitle",
+                                        tint = RoseError,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Expanded Questions List
+                        if (isExpanded) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            if (sectionItems.isEmpty()) {
+                                Text(
+                                    text = "No questions in this category. Upload an Excel or CSV file to add questions.",
+                                    fontSize = 11.5.sp,
+                                    color = SlateMuted,
+                                    modifier = Modifier.padding(vertical = 8.dp)
+                                )
+                            } else {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    sectionItems.forEachIndexed { idx, item ->
+                                        Card(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            shape = RoundedCornerShape(8.dp),
+                                            colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0))
+                                        ) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(10.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = "${idx + 1}. ${item.question}",
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = SlateText
+                                                    )
+                                                    Text(
+                                                        text = "Ans: ${item.answer}",
+                                                        fontSize = 11.sp,
+                                                        color = EmeraldSuccess,
+                                                        fontWeight = FontWeight.SemiBold
+                                                    )
+                                                }
+                                                IconButton(
+                                                    onClick = { onDeleteGame(item.id) },
+                                                    modifier = Modifier.size(28.dp)
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.Close,
+                                                        contentDescription = "Delete",
+                                                        tint = RoseError,
+                                                        modifier = Modifier.size(15.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -1305,29 +1731,147 @@ private fun GamesAdminView(
             }
         }
     }
+
+    // Confirmation dialog for section bulk delete
+    if (sectionPendingDelete != null) {
+        val (secKey, secTitle) = sectionPendingDelete!!
+        AlertDialog(
+            onDismissRequest = { sectionPendingDelete = null },
+            title = { Text("Delete All $secTitle?") },
+            text = { Text("Are you sure you want to delete all questions in $secTitle? This action cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeleteGamesBySection(secKey)
+                        sectionPendingDelete = null
+                    }
+                ) {
+                    Text("Delete All", color = RoseError, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { sectionPendingDelete = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Confirmation dialog for clear all games
+    if (showClearAllConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearAllConfirm = false },
+            title = { Text("Clear All Game Data?") },
+            text = { Text("Are you sure you want to delete all ${games.size} questions across all game categories? This action cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onClearAllGames()
+                        showClearAllConfirm = false
+                    }
+                ) {
+                    Text("Clear All", color = RoseError, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearAllConfirm = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
 
 @Composable
 private fun QbAdminView(
     questions: List<QuestionBankEntity>,
     onUploadClick: () -> Unit,
-    onDeleteQuestion: (String) -> Unit
+    onDeleteQuestion: (String) -> Unit,
+    onClearAllQB: () -> Unit = {}
 ) {
+    var showClearAllConfirm by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+
+    val filteredQuestions = remember(questions, searchQuery) {
+        if (searchQuery.isBlank()) questions
+        else {
+            val q = searchQuery.trim().lowercase()
+            questions.filter {
+                it.question.lowercase().contains(q) ||
+                it.answer.lowercase().contains(q) ||
+                (it.filter1?.lowercase()?.contains(q) == true) ||
+                (it.filter2?.lowercase()?.contains(q) == true)
+            }
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
-        Button(
-            onClick = onUploadClick,
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(modifier = Modifier.width(6.dp))
-            Text("Upload Question Bank File (Excel / CSV)", fontSize = 13.sp)
+            Button(
+                onClick = onUploadClick,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(40.dp),
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                contentPadding = PaddingValues(horizontal = 10.dp)
+            ) {
+                Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Upload QB File", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+
+            if (questions.isNotEmpty()) {
+                OutlinedButton(
+                    onClick = { showClearAllConfirm = true },
+                    modifier = Modifier.height(40.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = RoseError),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, RoseError.copy(alpha = 0.5f)),
+                    contentPadding = PaddingValues(horizontal = 10.dp)
+                ) {
+                    Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(16.dp), tint = RoseError)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Clear All", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = RoseError)
+                }
+            }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
-        if (questions.isEmpty()) {
+        if (questions.isNotEmpty()) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Search question bank...", fontSize = 11.sp, color = SlateLight) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = SlateLight, modifier = Modifier.size(16.dp)) },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery = "" }, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.Default.Close, contentDescription = "Clear", tint = SlateLight, modifier = Modifier.size(14.dp))
+                        }
+                    }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(40.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = Color.White,
+                    unfocusedContainerColor = Color.White,
+                    focusedBorderColor = IndigoPrimary,
+                    unfocusedBorderColor = SlateBorder
+                )
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        if (filteredQuestions.isEmpty()) {
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -1339,7 +1883,12 @@ private fun QbAdminView(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Icon(Icons.Default.Quiz, contentDescription = null, tint = SlateLight, modifier = Modifier.size(36.dp))
-                    Text("Question Bank is Empty", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = SlateText)
+                    Text(
+                        if (questions.isEmpty()) "Question Bank is Empty" else "No matching questions",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = SlateText
+                    )
                     Text("Upload an Excel or CSV file with QB questions.", fontSize = 12.sp, color = SlateMuted)
                 }
             }
@@ -1348,7 +1897,7 @@ private fun QbAdminView(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(questions, key = { it.id }) { item ->
+                items(filteredQuestions, key = { it.id }) { item ->
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(14.dp),
@@ -1358,7 +1907,7 @@ private fun QbAdminView(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(14.dp),
+                                .padding(12.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -1391,6 +1940,29 @@ private fun QbAdminView(
                 }
             }
         }
+    }
+
+    if (showClearAllConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearAllConfirm = false },
+            title = { Text("Clear Question Bank?") },
+            text = { Text("Are you sure you want to delete all ${questions.size} questions from Question Bank? This action cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onClearAllQB()
+                        showClearAllConfirm = false
+                    }
+                ) {
+                    Text("Clear All", color = RoseError, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearAllConfirm = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 
