@@ -7,6 +7,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -133,116 +134,84 @@ fun AdminPanelScreen(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Header
+                // Two minimal side-by-side buttons for Drive Course Sync & Download Datasets (Zero description to save space)
                 item {
-                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                        Text(
-                            text = "Control Panel",
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = SlateText
-                        )
-                        Text(
-                            text = "Manage courses, vocabulary, practice games & question bank",
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 12.sp,
-                            color = SlateMuted
-                        )
-                    }
-                }
-
-                // Google Drive Course Sync Card (Cloud Sync with ID-Based Progress Preservation)
-                item {
-                    GoogleDriveSyncCard(
-                        isSyncing = isSyncingDrive,
-                        onOpenSyncDialog = { showDriveSyncDialog = true }
-                    )
-                }
-
-                // Modern Minimal Download Button / Card (Google Drive Link)
-                item {
-                    Card(
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable {
+                            .padding(vertical = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { showDriveSyncDialog = true },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(38.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            if (isSyncingDrive) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = Color.White
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Syncing...",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Default.CloudSync,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Drive Course Sync",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+
+                        OutlinedButton(
+                            onClick = {
                                 val intent = Intent(
                                     Intent.ACTION_VIEW,
                                     Uri.parse("https://drive.google.com/drive/folders/1OBqSlB21FD_-0tpRZE8H6R5VFzDkeX2n")
                                 )
                                 context.startActivity(intent)
                             },
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = EmeraldLight),
-                        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(EmeraldBorder))
-                    ) {
-                        Row(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(14.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                                .weight(1f)
+                                .height(38.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, EmeraldSuccess),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = EmeraldSuccess),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(42.dp)
-                                        .clip(CircleShape)
-                                        .background(Color(0xFFDCFCE7)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        Icons.Default.CloudDownload,
-                                        contentDescription = null,
-                                        tint = EmeraldSuccess,
-                                        modifier = Modifier.size(22.dp)
-                                    )
-                                }
-                                Column {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Text(
-                                            text = "Download Datasets",
-                                            fontFamily = PoppinsFontFamily,
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = EmeraldSuccess
-                                        )
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(CircleShape)
-                                                .background(Color(0xFFBBF7D0))
-                                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                                        ) {
-                                            Text(
-                                                "Google Drive",
-                                                fontFamily = PoppinsFontFamily,
-                                                fontSize = 9.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = EmeraldSuccess
-                                            )
-                                        }
-                                    }
-                                    Text(
-                                        text = "Download JSON & Excel vocabulary sets",
-                                        fontFamily = PoppinsFontFamily,
-                                        fontSize = 11.5.sp,
-                                        color = SlateMuted
-                                    )
-                                }
-                            }
-
                             Icon(
-                                Icons.AutoMirrored.Filled.ArrowForward,
+                                Icons.Default.CloudDownload,
                                 contentDescription = null,
-                                tint = EmeraldSuccess,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(17.dp),
+                                tint = EmeraldSuccess
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Download Dataset",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = EmeraldSuccess,
+                                maxLines = 1
                             )
                         }
                     }

@@ -202,28 +202,46 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(IndigoPrimary),
-                                    contentAlignment = Alignment.Center
-                                ) {
+                                if (currentRoute == "home") {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(IndigoPrimary),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "M",
+                                            fontFamily = PoppinsFontFamily,
+                                            fontSize = 18.sp,
+                                            fontWeight = FontWeight.Black,
+                                            color = Color.White
+                                        )
+                                    }
                                     Text(
-                                        text = "M",
+                                        text = "Memorizer",
                                         fontFamily = PoppinsFontFamily,
-                                        fontSize = 18.sp,
-                                        fontWeight = FontWeight.Black,
-                                        color = Color.White
+                                        fontSize = 20.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = palette.textPrimary
+                                    )
+                                } else {
+                                    val screenTitle = when (currentRoute) {
+                                        "flashcard" -> "Flashcards"
+                                        "games" -> "Games"
+                                        "admin" -> "Control"
+                                        "profile" -> "Profile"
+                                        "article_reader" -> "Articles"
+                                        else -> currentRoute.replaceFirstChar { it.uppercase() }
+                                    }
+                                    Text(
+                                        text = screenTitle,
+                                        fontFamily = PoppinsFontFamily,
+                                        fontSize = 20.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = palette.textPrimary
                                     )
                                 }
-                                Text(
-                                    text = if (currentRoute == "flashcard") "Flashcards" else if (currentRoute == "admin") "Control" else "Memorizer",
-                                    fontFamily = PoppinsFontFamily,
-                                    fontSize = 20.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = palette.textPrimary
-                                )
                             }
                         },
                         actions = {

@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Article Reader</string>
+    <string name="widget_description">Daily vocabulary word and meaning widget</string>
 </resources>

@@ -1037,7 +1037,8 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun recordWordQuizAnswer(wordId: String, isCorrect: Boolean) {
         viewModelScope.launch {
-            repository.recordWordQuizAnswer(wordId, isCorrect)
+            val uid = _currentUser.value?.userId ?: "1235"
+            repository.recordWordQuizAnswer(wordId, isCorrect, uid)
         }
     }
 

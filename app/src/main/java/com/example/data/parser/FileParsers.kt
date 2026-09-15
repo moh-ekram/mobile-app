@@ -101,6 +101,7 @@ object FileParsers {
                 lower == "status" -> statusIndex = index
                 lower.startsWith("place1") || (wordIndex == -1 && (lower.contains("word") || lower == "term" || lower == "vocabulary")) -> {
                     wordIndex = index
+                    customPlacesMap[index] = cleanLabel
                 }
                 lower.startsWith("place2") || (meaningIndex == -1 && (lower.contains("meaning") || lower.contains("definition") || lower.contains("translation"))) -> {
                     meaningIndex = index

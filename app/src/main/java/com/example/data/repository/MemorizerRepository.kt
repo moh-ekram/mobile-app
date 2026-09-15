@@ -286,9 +286,16 @@ class MemorizerRepository(
         database.gamePracticeDao().recordAttempt(questionId, status, isCorrect)
     }
 
-    suspend fun recordWordQuizAnswer(wordId: String, isCorrect: Boolean) = withContext(Dispatchers.IO) {
-        val status = if (isCorrect) "correct" else "incorrect"
-        database.vocabularyDao().recordQuizAttempt(wordId, status, isCorrect)
+    suspend fun recordWordQuizAnswer(wordId: String, isCorrect: Boolean, userId: String = "1235") = withContext(Dispatchers.IO) {
+        val quizStatus = if (isCorrect) "correct" else "incorrect"
+        database.vocabularyDao().recordQuizAttempt(wordId, quizStatus, isCorrect)
+
+        // Correct option marks word as 'know', Incorrect option marks as 'dont_know'
+        val ratingStatus = if (isCorrect) "know" else "dont_know"
+        database.vocabularyDao().updateWordStatus(wordId, ratingStatus)
+
+        // Sync and refresh stats for Flashcard and Homepage
+        refreshProgressAndSync(userId)
     }
 
     suspend fun addQuestionBankItem(item: QuestionBankEntity) = withContext(Dispatchers.IO) {

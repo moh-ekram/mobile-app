@@ -151,9 +151,13 @@ fun ColorizedQuestionText(
                         append(question.substring(lastIndex, range.first))
                     }
                     val wordInside = match.groupValues[1]
+                    val isBengali = isBengaliText(wordInside)
                     pushStyle(
                         SpanStyle(
-                            color = highlightColor
+                            color = highlightColor,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontFamily = if (isBengali) KalpurushFontFamily else PoppinsFontFamily,
+                            fontSynthesis = androidx.compose.ui.text.font.FontSynthesis.All
                         )
                     )
                     append(wordInside)
@@ -214,8 +218,16 @@ fun GamePracticeScreen(
     var isQuizCompleted by remember { mutableStateOf(false) }
 
     // Quiz test (Course Vocabulary Quiz) Config - Multi-Selection Grid Style
-    var courseQuizCourseIds by remember(activeCourseId) {
-        mutableStateOf(if (activeCourseId.isNotBlank() && activeCourseId != "all") setOf(activeCourseId) else setOf("all"))
+    var courseQuizCourseIds by remember(activeCourseId, courses) {
+        mutableStateOf(
+            if (activeCourseId.isNotBlank() && activeCourseId != "all") {
+                setOf(activeCourseId)
+            } else if (courses.isNotEmpty()) {
+                setOf(courses.first().id)
+            } else {
+                setOf("all")
+            }
+        )
     }
     var courseQuizStatusFilters by remember { mutableStateOf(setOf("all")) }
     var courseQuizGroupFilters by remember { mutableStateOf(setOf("all")) }
@@ -238,8 +250,8 @@ fun GamePracticeScreen(
                 val keys = json.keys()
                 while (keys.hasNext()) {
                     val k = keys.next()
-                    val kLower = k.lowercase()
-                    if (kLower.startsWith("place1") || kLower.contains("place 1") || kLower == "word") {
+                    val kClean = k.lowercase().replace("_", "").replace(" ", "").replace("-", "")
+                    if (kClean == "place1" || kClean.startsWith("place1") || kClean == "word") {
                         val v = json.optString(k, "").trim()
                         if (v.isNotBlank()) return v
                     }
@@ -256,9 +268,9 @@ fun GamePracticeScreen(
                 val keys = json.keys()
                 while (keys.hasNext()) {
                     val k = keys.next()
-                    val kLower = k.lowercase()
-                    if (kLower.startsWith("place2") || kLower.contains("place 2") ||
-                        kLower.contains("meaning") || kLower.contains("definition") || kLower.contains("translation")
+                    val kClean = k.lowercase().replace("_", "").replace(" ", "").replace("-", "")
+                    if (kClean == "place2" || kClean.startsWith("place2") ||
+                        kClean == "meaning" || kClean.contains("meaning") || kClean.contains("definition") || kClean.contains("translation")
                     ) {
                         val v = json.optString(k, "").trim()
                         if (v.isNotBlank()) return v
@@ -290,14 +302,14 @@ fun GamePracticeScreen(
     fun startQuizForCategory(section: String, statusFilter: String = "all", maxCount: Int? = null) {
         val list = when (section) {
             "course_quiz" -> {
-                val targetCourseIds = if (courseQuizCourseIds.isEmpty() || "all" in courseQuizCourseIds) {
-                    if (activeCourseId.isNotBlank() && activeCourseId != "all") {
-                        setOf(activeCourseId)
-                    } else {
-                        emptySet()
-                    }
-                } else {
+                val targetCourseIds = if (courseQuizCourseIds.isNotEmpty() && "all" !in courseQuizCourseIds) {
                     courseQuizCourseIds
+                } else if (activeCourseId.isNotBlank() && activeCourseId != "all") {
+                    setOf(activeCourseId)
+                } else if (courses.isNotEmpty()) {
+                    setOf(courses.first().id)
+                } else {
+                    words.map { it.courseId }.filter { it.isNotBlank() }.distinct().take(1).toSet()
                 }
 
                 val courseWords = if (targetCourseIds.isNotEmpty()) {
@@ -322,12 +334,6 @@ fun GamePracticeScreen(
                 val eligibleWords = (if (statusFiltered.isNotEmpty()) statusFiltered else groupFiltered)
                     .filter { getPlace1(it).isNotBlank() && getPlace2(it).isNotBlank() }
 
-                // Distractors and options must ONLY come from the selected course(s) (courseWords)
-                val selectedCoursePlace2 = courseWords
-                    .map { getPlace2(it) }
-                    .filter { it.isNotBlank() }
-                    .distinct()
-
                 val count = if (courseQuizCount > 0) courseQuizCount else eligibleWords.size
                 val selectedWords = if (count > 0 && count < eligibleWords.size) {
                     eligibleWords.shuffled().take(count)
@@ -336,16 +342,24 @@ fun GamePracticeScreen(
                 }
 
                 selectedWords.map { word ->
-                    val p1 = getPlace1(word)
-                    val p2 = getPlace2(word)
-                    // Options strictly restricted to the selected course
-                    val courseDistractors = (selectedCoursePlace2 - p2).shuffled()
-                    val distractors = courseDistractors.take(3)
+                    // Question text strictly uses place1 word
+                    val p1 = getPlace1(word).removePrefix("[").removeSuffix("]").trim()
+                    // Answer is strictly place2 word
+                    val p2 = getPlace2(word).trim()
+
+                    // Options strictly come ONLY from the selected course of this word, ONLY place2 words!
+                    val coursePlace2List = words
+                        .filter { it.courseId == word.courseId }
+                        .map { getPlace2(it).trim() }
+                        .filter { it.isNotBlank() && it != p2 }
+                        .distinct()
+
+                    val distractors = coursePlace2List.shuffled().take(3)
                     val allOpts = (distractors + p2).shuffled()
                     val opt1 = allOpts.getOrElse(0) { p2 }
-                    val opt2 = allOpts.getOrElse(1) { if (distractors.isNotEmpty()) distractors[0] else p2 }
-                    val opt3 = allOpts.getOrElse(2) { if (distractors.size > 1) distractors[1] else p2 }
-                    val opt4 = allOpts.getOrElse(3) { if (distractors.size > 2) distractors[2] else p2 }
+                    val opt2 = allOpts.getOrElse(1) { "" }
+                    val opt3 = allOpts.getOrElse(2) { "" }
+                    val opt4 = allOpts.getOrElse(3) { "" }
 
                     QuizQuestionItem(
                         id = word.id,
@@ -406,18 +420,6 @@ fun GamePracticeScreen(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                item {
-                    Column(modifier = Modifier.padding(vertical = 6.dp)) {
-                        Text(
-                            text = "Games & Practice",
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = SlateText
-                        )
-                    }
-                }
-
                 // 0. Quiz test (Course Vocabulary Quiz - Placed at Top)
                 item {
                     val currentCourseWords = if (courseQuizCourseIds.isEmpty() || "all" in courseQuizCourseIds) {
@@ -881,9 +883,10 @@ fun GamePracticeScreen(
                                                         currentScore += 1
                                                     }
                                                     if (currentQ.id.isNotBlank()) {
-                                                        if (currentQ.sheetType == "course_quiz") {
+                                                        if (currentQ.sheetType == "course_quiz" || words.any { it.id == currentQ.id }) {
                                                             onRecordWordQuizAnswer(currentQ.id, isCorrect)
-                                                        } else {
+                                                        }
+                                                        if (currentQ.sheetType != "course_quiz") {
                                                             onRecordGameAnswer(currentQ.id, isCorrect)
                                                         }
                                                     }
@@ -897,7 +900,7 @@ fun GamePracticeScreen(
                                             ) {
                                                 Text(
                                                     text = "${('A' + optIdx)}.  $opt",
-                                                    fontFamily = PoppinsFontFamily,
+                                                    fontFamily = selectFontForText(opt),
                                                     fontSize = 14.sp,
                                                     fontWeight = if (isThisOptionSelected || (isAnswered && isThisOptionAnswer)) FontWeight.Bold else FontWeight.Medium,
                                                     color = btnText,
@@ -946,7 +949,7 @@ fun GamePracticeScreen(
                                             Spacer(modifier = Modifier.height(3.dp))
                                             Text(
                                                 text = currentQ.explanation ?: "",
-                                                fontFamily = PoppinsFontFamily,
+                                                fontFamily = selectFontForText(currentQ.explanation ?: ""),
                                                 fontSize = 12.sp,
                                                 fontWeight = FontWeight.Normal,
                                                 color = SlateText,

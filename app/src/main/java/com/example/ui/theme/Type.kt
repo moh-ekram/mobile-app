@@ -15,12 +15,20 @@ val PoppinsFontFamily = FontFamily(
     Font(R.font.poppins_bold, FontWeight.Bold)
 )
 
+val KalpurushFontFamily = FontFamily(
+    Font(R.font.kalpurush, FontWeight.Normal)
+)
+
 // Global font alias
-val KalpurushFont = PoppinsFontFamily
+val KalpurushFont = KalpurushFontFamily
 
-fun isBengaliText(text: String?): Boolean = false
+fun isBengaliText(text: String?): Boolean {
+    if (text.isNullOrBlank()) return false
+    return text.any { it in '\u0980'..'\u09FF' }
+}
 
-fun selectFontForText(text: String?): FontFamily = PoppinsFontFamily
+fun selectFontForText(text: String?): FontFamily =
+    if (isBengaliText(text)) KalpurushFontFamily else PoppinsFontFamily
 
 // Material 3 typography with Poppins font family across all text styles
 val Typography = Typography(

@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.*
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -48,6 +49,8 @@ import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.text.font.FontSynthesis
+import org.json.JSONObject
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -73,6 +76,7 @@ fun ArticleReaderScreen(
 ) {
     var showAddDialog by remember { mutableStateOf(false) }
     var showSyncDialog by remember { mutableStateOf(false) }
+    var showReaderSettingsDialog by remember { mutableStateOf(false) }
 
     BackHandler {
         if (activeArticle != null) {
@@ -118,6 +122,9 @@ fun ArticleReaderScreen(
                         IconButton(onClick = { showAddDialog = true }) {
                             Icon(Icons.Default.Add, contentDescription = "Add Article", tint = IndigoPrimary)
                         }
+                        IconButton(onClick = { showReaderSettingsDialog = true }) {
+                            Icon(Icons.Default.Settings, contentDescription = "Reader Settings", tint = SlateText)
+                        }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
                 )
@@ -142,6 +149,8 @@ fun ArticleReaderScreen(
             onDismissAddDialog = { showAddDialog = false },
             showSyncDialogFromParent = showSyncDialog,
             onDismissSyncDialog = { showSyncDialog = false },
+            showReaderSettingsFromParent = showReaderSettingsDialog,
+            onDismissReaderSettings = { showReaderSettingsDialog = false },
             modifier = if (activeArticle == null) Modifier.padding(innerPadding) else Modifier.statusBarsPadding()
         )
     }
@@ -168,18 +177,31 @@ fun ArticleReaderView(
     onDismissAddDialog: () -> Unit = {},
     showSyncDialogFromParent: Boolean = false,
     onDismissSyncDialog: () -> Unit = {},
+    showReaderSettingsFromParent: Boolean = false,
+    onDismissReaderSettings: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     var showAddDialog by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
     var showSyncDialog by remember { mutableStateOf(false) }
+    var showLocalReaderSettings by remember { mutableStateOf(false) }
     var showCourseFilterDialog by remember { mutableStateOf(false) }
     var selectedCourseIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var selectedWordForDetails by remember { mutableStateOf<VocabularyWordEntity?>(null) }
 
     val isAdding = showAddDialog || showAddDialogFromParent
     val isSyncingDialogVisible = showSyncDialog || showSyncDialogFromParent
+    val isReaderSettingsVisible = showLocalReaderSettings || showReaderSettingsFromParent
+
+    // Reader Display Settings State (Persisted in SharedPreferences)
+    val readerPrefs = remember { context.getSharedPreferences("reader_display_prefs", Context.MODE_PRIVATE) }
+    var readerFontSize by remember { mutableFloatStateOf(readerPrefs.getFloat("reader_font_size", 16f)) }
+    var readerPaddingDp by remember { mutableIntStateOf(readerPrefs.getInt("reader_padding_dp", 8)) }
+    var readerLineSpacing by remember { mutableFloatStateOf(readerPrefs.getFloat("reader_line_spacing", 1.6f)) }
+    var readerFontFamily by remember { mutableStateOf(readerPrefs.getString("reader_font_family", "default") ?: "default") }
+    var readerHighlightBold by remember { mutableStateOf(readerPrefs.getString("reader_highlight_bold", "bold") ?: "bold") }
+    var readerJustify by remember { mutableStateOf(readerPrefs.getBoolean("reader_justify", false)) }
 
     // TTS engine for audio pronunciation
     var tts: TextToSpeech? by remember { mutableStateOf(null) }
@@ -213,12 +235,54 @@ fun ArticleReaderView(
         }
     }
 
+    fun getPlace1(w: VocabularyWordEntity): String {
+        if (!w.customPlacesJson.isNullOrBlank()) {
+            try {
+                val json = JSONObject(w.customPlacesJson)
+                val keys = json.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    val kClean = k.lowercase().replace("_", "").replace(" ", "").replace("-", "")
+                    if (kClean == "place1" || kClean.startsWith("place1") || kClean == "word") {
+                        val v = json.optString(k, "").trim()
+                        if (v.isNotBlank()) return v
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+        return w.word.trim()
+    }
+
+    fun getPlace2(w: VocabularyWordEntity): String {
+        if (!w.customPlacesJson.isNullOrBlank()) {
+            try {
+                val json = JSONObject(w.customPlacesJson)
+                val keys = json.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    val kClean = k.lowercase().replace("_", "").replace(" ", "").replace("-", "")
+                    if (kClean == "place2" || kClean.startsWith("place2") ||
+                        kClean == "meaning" || kClean.contains("meaning") || kClean.contains("definition") || kClean.contains("translation")
+                    ) {
+                        val v = json.optString(k, "").trim()
+                        if (v.isNotBlank()) return v
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+        return w.meaning.trim()
+    }
+
     // Place1 (Word) and Place2 (Meaning) lookup maps based on activeWords
     val place1Map = remember(activeWords) {
         val map = mutableMapOf<String, VocabularyWordEntity>()
         activeWords.forEach { w ->
             if (w.word.isNotBlank()) {
                 map[w.word.trim().lowercase(Locale.ROOT)] = w
+            }
+            val p1 = getPlace1(w)
+            if (p1.isNotBlank()) {
+                map[p1.trim().lowercase(Locale.ROOT)] = w
             }
         }
         map
@@ -231,6 +295,15 @@ fun ArticleReaderView(
                 val trimmedMeaning = w.meaning.trim().lowercase(Locale.ROOT)
                 map[trimmedMeaning] = w
                 val parts = trimmedMeaning.split("[,;/]+".toRegex()).map { it.trim() }.filter { it.isNotBlank() }
+                parts.forEach { part ->
+                    map[part] = w
+                }
+            }
+            val p2 = getPlace2(w)
+            if (p2.isNotBlank()) {
+                val trimmedP2 = p2.trim().lowercase(Locale.ROOT)
+                map[trimmedP2] = w
+                val parts = trimmedP2.split("[,;/]+".toRegex()).map { it.trim() }.filter { it.isNotBlank() }
                 parts.forEach { part ->
                     map[part] = w
                 }
@@ -335,7 +408,10 @@ fun ArticleReaderView(
                                 color = SlateMuted
                             )
 
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 OutlinedButton(
                                     onClick = {
                                         if (syncUrl.isNotBlank()) {
@@ -377,6 +453,19 @@ fun ArticleReaderView(
                                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(15.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text("Add", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                }
+
+                                // Minimal Settings Gear Icon right beside sync & add
+                                IconButton(
+                                    onClick = { showLocalReaderSettings = true },
+                                    modifier = Modifier.size(34.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Settings,
+                                        contentDescription = "Reader Display Settings",
+                                        tint = SlateText,
+                                        modifier = Modifier.size(19.dp)
+                                    )
                                 }
                             }
                         }
@@ -541,6 +630,18 @@ fun ArticleReaderView(
                     )
                 }
 
+                IconButton(
+                    onClick = { showLocalReaderSettings = true },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Settings,
+                        contentDescription = "Reader Display Settings",
+                        tint = SlateText,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
                 IconButton(onClick = {
                     onDeleteArticle(currentArticle.id)
                     onSelectArticle(null)
@@ -566,22 +667,31 @@ fun ArticleReaderView(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                            .padding(horizontal = readerPaddingDp.dp, vertical = 2.dp)
                     ) {
-                        // Highlighted Interactive Text taking full width of phone screen
+                        val selectedFont = when (readerFontFamily) {
+                            "serif" -> FontFamily.Serif
+                            "monospace" -> FontFamily.Monospace
+                            else -> selectFontForText(currentArticle.content)
+                        }
+                        val isExtraBold = (readerHighlightBold == "extra_bold")
+
+                        // Highlighted Interactive Text taking full width of phone screen with custom padding & font size
                         val annotatedText = buildPlaceHighlightedAnnotatedString(
                             content = currentArticle.content,
                             place1Map = place1Map,
-                            place2Map = place2Map
+                            place2Map = place2Map,
+                            isExtraBold = isExtraBold
                         )
 
                         ClickableText(
                             text = annotatedText,
                             style = TextStyle(
-                                fontSize = 16.sp,
-                                lineHeight = 26.sp,
+                                fontSize = readerFontSize.sp,
+                                lineHeight = (readerFontSize * readerLineSpacing).sp,
                                 color = SlateText,
-                                fontFamily = PoppinsFontFamily
+                                fontFamily = selectedFont,
+                                textAlign = if (readerJustify) TextAlign.Justify else TextAlign.Start
                             ),
                             onClick = { offset ->
                                 annotatedText.getStringAnnotations(
@@ -1032,20 +1142,56 @@ fun ArticleReaderView(
             }
         )
     }
+
+    // Reader Display Settings Dialog (English, Minimalist layout, font size, padding, alignment)
+    if (isReaderSettingsVisible) {
+        ReaderSettingsDialog(
+            fontSize = readerFontSize,
+            paddingDp = readerPaddingDp,
+            lineSpacing = readerLineSpacing,
+            fontFamily = readerFontFamily,
+            highlightBold = readerHighlightBold,
+            isJustified = readerJustify,
+            onSave = { newSize, newPadding, newSpacing, newFont, newBold, newJust ->
+                readerFontSize = newSize
+                readerPaddingDp = newPadding
+                readerLineSpacing = newSpacing
+                readerFontFamily = newFont
+                readerHighlightBold = newBold
+                readerJustify = newJust
+                readerPrefs.edit()
+                    .putFloat("reader_font_size", newSize)
+                    .putInt("reader_padding_dp", newPadding)
+                    .putFloat("reader_line_spacing", newSpacing)
+                    .putString("reader_font_family", newFont)
+                    .putString("reader_highlight_bold", newBold)
+                    .putBoolean("reader_justify", newJust)
+                    .apply()
+            },
+            onDismiss = {
+                showLocalReaderSettings = false
+                onDismissReaderSettings()
+            }
+        )
+    }
 }
 
 /**
  * Builds an AnnotatedString that highlights words matching Place 1 (Word) or Place 2 (Meaning).
- * Normal text with color - no background highlight, no underline.
+ * Normal text with color - no background highlight, no underline. Bolded for high visibility.
+ * Automatically displays Bengali words in Kalpurush font.
  */
 private fun buildPlaceHighlightedAnnotatedString(
     content: String,
     place1Map: Map<String, VocabularyWordEntity>,
-    place2Map: Map<String, VocabularyWordEntity>
+    place2Map: Map<String, VocabularyWordEntity>,
+    isExtraBold: Boolean = false
 ): AnnotatedString {
     return buildAnnotatedString {
         val regex = Regex("""[\w\u0980-\u09FF]+|[^\w\s\u0980-\u09FF]+|\s+""")
         val matches = regex.findAll(content)
+
+        val targetWeight = if (isExtraBold) FontWeight.Black else FontWeight.ExtraBold
 
         for (m in matches) {
             val token = m.value
@@ -1054,33 +1200,45 @@ private fun buildPlaceHighlightedAnnotatedString(
             val isPlace2 = place2Map.containsKey(cleanToken)
 
             if (isPlace1) {
-                // Place 1 (Word) Highlight - Just normal text with colour. No background, no underline!
-                val start = length
+                // Place 1 (Word) Highlight - Distinct Blue, Bold. No background, no underline!
+                val isBengali = isBengaliText(token)
                 pushStringAnnotation(tag = "VOCAB_MATCH", annotation = cleanToken)
                 withStyle(
                     SpanStyle(
-                        color = Color(0xFF4338CA),
-                        fontWeight = FontWeight.SemiBold
+                        color = Color(0xFF1D4ED8),
+                        fontWeight = targetWeight,
+                        fontFamily = if (isBengali) KalpurushFontFamily else PoppinsFontFamily,
+                        fontSynthesis = FontSynthesis.All
                     )
                 ) {
                     append(token)
                 }
                 pop()
             } else if (isPlace2) {
-                // Place 2 (Meaning) Highlight - Just normal text with colour. No background, no underline!
-                val start = length
+                // Place 2 (Meaning) Highlight - Distinct Green, Bold. No background, no underline!
+                val isBengali = isBengaliText(token)
                 pushStringAnnotation(tag = "VOCAB_MATCH", annotation = cleanToken)
                 withStyle(
                     SpanStyle(
                         color = Color(0xFF047857),
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = targetWeight,
+                        fontFamily = if (isBengali) KalpurushFontFamily else PoppinsFontFamily,
+                        fontSynthesis = FontSynthesis.All
                     )
                 ) {
                     append(token)
                 }
                 pop()
             } else {
-                append(token)
+                val isBengali = isBengaliText(token)
+                withStyle(
+                    SpanStyle(
+                        fontFamily = if (isBengali) KalpurushFontFamily else PoppinsFontFamily,
+                        fontWeight = FontWeight.Normal
+                    )
+                ) {
+                    append(token)
+                }
             }
         }
     }
@@ -1574,6 +1732,300 @@ private fun ArticleEditorDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+private fun ReaderSettingsDialog(
+    fontSize: Float,
+    paddingDp: Int,
+    lineSpacing: Float,
+    fontFamily: String,
+    highlightBold: String,
+    isJustified: Boolean,
+    onSave: (fontSize: Float, paddingDp: Int, lineSpacing: Float, fontFamily: String, highlightBold: String, isJustified: Boolean) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var tempFontSize by remember { mutableFloatStateOf(fontSize) }
+    var tempPaddingDp by remember { mutableIntStateOf(paddingDp) }
+    var tempLineSpacing by remember { mutableFloatStateOf(lineSpacing) }
+    var tempFontFamily by remember { mutableStateOf(fontFamily) }
+    var tempHighlightBold by remember { mutableStateOf(highlightBold) }
+    var tempJustified by remember { mutableStateOf(isJustified) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(Icons.Default.Tune, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(20.dp))
+                Text(
+                    text = "Reader Settings",
+                    fontFamily = PoppinsFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp,
+                    color = SlateText
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                // Font Size Control
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Font Size",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = SlateText
+                        )
+                        Text(
+                            text = "${tempFontSize.toInt()} sp",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = IndigoPrimary
+                        )
+                    }
+                    Slider(
+                        value = tempFontSize,
+                        onValueChange = { tempFontSize = it },
+                        valueRange = 13f..26f,
+                        steps = 12,
+                        colors = SliderDefaults.colors(
+                            thumbColor = IndigoPrimary,
+                            activeTrackColor = IndigoPrimary
+                        )
+                    )
+                }
+
+                // Screen Margin / Padding
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "Screen Padding",
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = SlateText
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf(
+                            Triple("Compact", 4, "4 dp"),
+                            Triple("Normal", 10, "10 dp"),
+                            Triple("Spacious", 18, "18 dp")
+                        ).forEach { (label, padVal, _) ->
+                            val isSelected = tempPaddingDp == padVal
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSelected) IndigoLight else Color(0xFFF1F5F9))
+                                    .border(
+                                        width = if (isSelected) 1.5.dp else 1.dp,
+                                        color = if (isSelected) IndigoPrimary else Color(0xFFCBD5E1),
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                    .clickable { tempPaddingDp = padVal }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSelected) IndigoPrimary else SlateText
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Line Spacing
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "Line Spacing",
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = SlateText
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf(
+                            Pair("Tight", 1.35f),
+                            Pair("Normal", 1.6f),
+                            Pair("Relaxed", 1.9f)
+                        ).forEach { (label, mult) ->
+                            val isSelected = Math.abs(tempLineSpacing - mult) < 0.05f
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSelected) IndigoLight else Color(0xFFF1F5F9))
+                                    .border(
+                                        width = if (isSelected) 1.5.dp else 1.dp,
+                                        color = if (isSelected) IndigoPrimary else Color(0xFFCBD5E1),
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                    .clickable { tempLineSpacing = mult }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSelected) IndigoPrimary else SlateText
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Text Alignment
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "Alignment",
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = SlateText
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        val isLeftSelected = !tempJustified
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isLeftSelected) IndigoLight else Color(0xFFF1F5F9))
+                                .border(
+                                    width = if (isLeftSelected) 1.5.dp else 1.dp,
+                                    color = if (isLeftSelected) IndigoPrimary else Color(0xFFCBD5E1),
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                                .clickable { tempJustified = false }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Left Align",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 11.5.sp,
+                                fontWeight = if (isLeftSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isLeftSelected) IndigoPrimary else SlateText
+                            )
+                        }
+
+                        val isJustifySelected = tempJustified
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isJustifySelected) IndigoLight else Color(0xFFF1F5F9))
+                                .border(
+                                    width = if (isJustifySelected) 1.5.dp else 1.dp,
+                                    color = if (isJustifySelected) IndigoPrimary else Color(0xFFCBD5E1),
+                                    shape = RoundedCornerShape(8.dp)
+                                )
+                                .clickable { tempJustified = true }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Justify",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 11.5.sp,
+                                fontWeight = if (isJustifySelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isJustifySelected) IndigoPrimary else SlateText
+                            )
+                        }
+                    }
+                }
+
+                // Word Highlight Boldness Emphasis
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "Highlight Boldness",
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = SlateText
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf(
+                            Pair("Bold", "bold"),
+                            Pair("Extra Bold", "extra_bold")
+                        ).forEach { (label, mode) ->
+                            val isSelected = tempHighlightBold == mode
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSelected) IndigoLight else Color(0xFFF1F5F9))
+                                    .border(
+                                        width = if (isSelected) 1.5.dp else 1.dp,
+                                        color = if (isSelected) IndigoPrimary else Color(0xFFCBD5E1),
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                    .clickable { tempHighlightBold = mode }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSelected) IndigoPrimary else SlateText
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onSave(tempFontSize, tempPaddingDp, tempLineSpacing, tempFontFamily, tempHighlightBold, tempJustified)
+                    onDismiss()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Text("Apply", fontFamily = PoppinsFontFamily, fontWeight = FontWeight.SemiBold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close", fontFamily = PoppinsFontFamily, color = SlateMuted)
+            }
         }
     )
 }
