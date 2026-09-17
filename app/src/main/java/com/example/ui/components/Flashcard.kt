@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.VocabularyWordEntity
 import com.example.ui.theme.*
+import com.example.ui.util.HapticHelper
 
 @Composable
 fun Flashcard(
@@ -61,6 +62,7 @@ fun Flashcard(
     courseName: String = "",
     isFlipAnimationEnabled: Boolean = true,
     isFocusMode: Boolean = false,
+    isHapticEnabled: Boolean = true,
     onRate: (String) -> Unit,
     onNext: () -> Unit,
     onSpeak: (String) -> Unit,
@@ -69,6 +71,7 @@ fun Flashcard(
 ) {
     val context = LocalContext.current
     val palette = LocalAppPalette.current
+    val hapticHelper = remember { HapticHelper(context) }
     var isFlipped by remember(word.id) { mutableStateOf(false) }
     var hasFlippedCurrentCard by remember(word.id) { mutableStateOf(false) }
 
@@ -96,6 +99,7 @@ fun Flashcard(
     )
 
     fun openGoogleSearch(text: String) {
+        if (isHapticEnabled) hapticHelper.subtleTick()
         if (text.isBlank()) return
         try {
             val url = "https://www.google.com/search?q=" + Uri.encode("$text meaning")
@@ -136,6 +140,9 @@ fun Flashcard(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
                 ) {
+                    if (isHapticEnabled) {
+                        hapticHelper.cardFlip()
+                    }
                     if (flipCount < 3) {
                         flipCount += 1
                         prefs.edit().putInt("flip_tutorial_shown_count", flipCount).apply()
@@ -158,8 +165,14 @@ fun Flashcard(
                     bounceY = bounceY,
                     isFocusMode = isFocusMode,
                     onSearch = { openGoogleSearch(word.word) },
-                    onSpeak = { onSpeak(word.word) },
-                    onReportClick = onReportClick,
+                    onSpeak = {
+                        if (isHapticEnabled) hapticHelper.subtleTick()
+                        onSpeak(word.word)
+                    },
+                    onReportClick = {
+                        if (isHapticEnabled) hapticHelper.subtleTick()
+                        onReportClick()
+                    },
                     onRate = onRate,
                     onNext = onNext
                 )
@@ -178,8 +191,14 @@ fun Flashcard(
                         courseName = courseName,
                         isFocusMode = isFocusMode,
                         onSearch = { openGoogleSearch(word.word) },
-                        onSpeak = { onSpeak(word.word) },
-                        onReportClick = onReportClick,
+                        onSpeak = {
+                            if (isHapticEnabled) hapticHelper.subtleTick()
+                            onSpeak(word.word)
+                        },
+                        onReportClick = {
+                            if (isHapticEnabled) hapticHelper.subtleTick()
+                            onReportClick()
+                        },
                         onRate = onRate,
                         onNext = onNext
                     )
@@ -432,7 +451,7 @@ private fun BackFaceContent(
             onSpeak = onSpeak
         )
 
-        // Center Details Section (Only renders columns that were present in the uploaded course file)
+        // Center Details Section (Only renders columns that were present in the uploaded course file, excluding place1/word)
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -441,14 +460,21 @@ private fun BackFaceContent(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceEvenly
         ) {
-            if (customPlacesList.isNotEmpty()) {
-                // Dynamically show ONLY columns present in the uploaded course excel file
-                customPlacesList.forEachIndexed { index, (label, value) ->
+            // Filter out place1 because place1 (the word) is exclusively shown on the front face
+            val backPlacesList = remember(customPlacesList) {
+                customPlacesList.filterNot { (label, _) ->
+                    val labelLower = label.lowercase().trim()
+                    labelLower.startsWith("place1") || labelLower.contains("place 1") || labelLower == "word"
+                }
+            }
+
+            if (backPlacesList.isNotEmpty()) {
+                // Dynamically show columns present in the uploaded course excel file
+                backPlacesList.forEachIndexed { index, (label, value) ->
                     val isBengali = isBengaliText(value)
                     val font = selectFontForText(value)
                     val labelLower = label.lowercase().trim()
-                    val isPlace1 = labelLower.startsWith("place1") || labelLower.contains("place 1") || labelLower == "word"
-                    // Place 2 detection (Meaning / Bengali Definition / Place 2)
+                    // Place 2 detection (Meaning / Bengali Definition / Place 2 / or first item on back face)
                     val isPlace2 = labelLower.startsWith("place2") || labelLower.contains("place 2") ||
                             labelLower.contains("meaning") || labelLower.contains("definition") ||
                             labelLower.contains("translation") || index == 0
@@ -500,8 +526,8 @@ private fun BackFaceContent(
                             },
                             fontFamily = font,
                             fontSize = if (isPlace2) 21.sp else if (isBengali) 16.sp else 14.sp,
-                            fontWeight = if (isPlace2 || isPlace1) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isPlace1) wordColor else if (isPlace2) EmeraldSuccess else SlateText,
+                            fontWeight = if (isPlace2) FontWeight.ExtraBold else FontWeight.Medium,
+                            color = if (isPlace2) EmeraldSuccess else SlateText,
                             textAlign = TextAlign.Center,
                             lineHeight = if (isPlace2) 26.sp else 20.sp
                         )

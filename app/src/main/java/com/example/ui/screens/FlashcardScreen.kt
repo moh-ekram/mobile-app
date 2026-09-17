@@ -14,6 +14,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -31,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
@@ -40,6 +42,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.VocabularyWordEntity
 import com.example.ui.components.Flashcard
 import com.example.ui.theme.*
+import com.example.ui.util.HapticHelper
 import com.example.ui.util.TtsManager
 
 @Composable
@@ -53,6 +56,7 @@ fun FlashcardScreen(
     availableGroups: List<String> = emptyList(),
     isFocusMode: Boolean = false,
     isFlipAnimationEnabled: Boolean = true,
+    isHapticEnabled: Boolean = true,
     onToggleFocusMode: (Boolean) -> Unit = {},
     onToggleGroup: (String) -> Unit = {},
     onClearGroups: () -> Unit = {},
@@ -75,6 +79,7 @@ fun FlashcardScreen(
     val context = LocalContext.current
     val palette = LocalAppPalette.current
     val ttsManager = remember { TtsManager(context) }
+    val hapticHelper = remember { HapticHelper(context) }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -274,41 +279,70 @@ fun FlashcardScreen(
             }
         }
 
-        // Center: Flashcard with Smooth Animated Transitions
+        // Center: Flashcard with Smooth Animated Transitions & Horizontal Swipe Gestures
         if (words.isNotEmpty()) {
             val safeIndex = currentIndex.coerceIn(0, words.size - 1)
             val currentWord = words[safeIndex]
+            var dragAccumulator by remember { mutableFloatStateOf(0f) }
 
-            AnimatedContent(
-                targetState = currentWord,
-                transitionSpec = {
-                    (slideInHorizontally(
-                        initialOffsetX = { fullWidth -> (fullWidth * 0.4f).toInt() },
-                        animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing)
-                    ) + fadeIn(animationSpec = tween(280))).togetherWith(
-                        slideOutHorizontally(
-                            targetOffsetX = { fullWidth -> (-fullWidth * 0.4f).toInt() },
-                            animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing)
-                        ) + fadeOut(animationSpec = tween(220))
-                    )
-                },
-                label = "flashcard_slide_transition",
+            Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-            ) { targetWord ->
-                Flashcard(
-                    word = targetWord,
-                    status = targetWord.status,
-                    courseName = courseName,
-                    isFlipAnimationEnabled = isFlipAnimationEnabled,
-                    isFocusMode = isFocusMode,
-                    onRate = { newStatus -> onRate(targetWord.id, newStatus) },
-                    onNext = onNext,
-                    onSpeak = { text -> ttsManager.speak(text) },
-                    onReportClick = { wordToReport = targetWord },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                    .pointerInput(currentWord.id) {
+                        detectHorizontalDragGestures(
+                            onDragEnd = {
+                                if (dragAccumulator < -60f) {
+                                    if (isHapticEnabled) hapticHelper.cardSwipe()
+                                    onNext()
+                                } else if (dragAccumulator > 60f) {
+                                    if (isHapticEnabled) hapticHelper.cardSwipe()
+                                    onPrevious()
+                                }
+                                dragAccumulator = 0f
+                            },
+                            onHorizontalDrag = { _, dragAmount ->
+                                dragAccumulator += dragAmount
+                            }
+                        )
+                    }
+            ) {
+                AnimatedContent(
+                    targetState = currentWord,
+                    transitionSpec = {
+                        (slideInHorizontally(
+                            initialOffsetX = { fullWidth -> (fullWidth * 0.4f).toInt() },
+                            animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing)
+                        ) + fadeIn(animationSpec = tween(280))).togetherWith(
+                            slideOutHorizontally(
+                                targetOffsetX = { fullWidth -> (-fullWidth * 0.4f).toInt() },
+                                animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing)
+                            ) + fadeOut(animationSpec = tween(220))
+                        )
+                    },
+                    label = "flashcard_slide_transition",
+                    modifier = Modifier.fillMaxSize()
+                ) { targetWord ->
+                    Flashcard(
+                        word = targetWord,
+                        status = targetWord.status,
+                        courseName = courseName,
+                        isFlipAnimationEnabled = isFlipAnimationEnabled,
+                        isFocusMode = isFocusMode,
+                        isHapticEnabled = isHapticEnabled,
+                        onRate = { newStatus ->
+                            if (isHapticEnabled) hapticHelper.ratingSelected()
+                            onRate(targetWord.id, newStatus)
+                        },
+                        onNext = {
+                            if (isHapticEnabled) hapticHelper.cardSwipe()
+                            onNext()
+                        },
+                        onSpeak = { text -> ttsManager.speak(text) },
+                        onReportClick = { wordToReport = targetWord },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
         } else {
             Box(
@@ -363,7 +397,10 @@ fun FlashcardScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 FilledTonalIconButton(
-                    onClick = onPrevious,
+                    onClick = {
+                        if (isHapticEnabled) hapticHelper.cardSwipe()
+                        onPrevious()
+                    },
                     modifier = Modifier
                         .size(48.dp)
                         .testTag("prev_card_button"),
@@ -403,7 +440,10 @@ fun FlashcardScreen(
                 }
 
                 FilledTonalIconButton(
-                    onClick = onNext,
+                    onClick = {
+                        if (isHapticEnabled) hapticHelper.cardSwipe()
+                        onNext()
+                    },
                     modifier = Modifier
                         .size(48.dp)
                         .testTag("next_card_button"),

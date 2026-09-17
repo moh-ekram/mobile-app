@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -38,6 +39,7 @@ import com.example.data.model.CourseEntity
 import com.example.data.model.UserProgressEntity
 import com.example.data.model.UserSession
 import com.example.data.model.VocabularyWordEntity
+import com.example.notification.NotificationHelper
 import com.example.ui.theme.*
 import com.example.widget.DailyVocabWidgetProvider
 import java.text.SimpleDateFormat
@@ -56,9 +58,11 @@ fun ProfileScreen(
     isDarkTheme: Boolean = false,
     isFlipAnimationEnabled: Boolean = true,
     isFocusMode: Boolean = false,
+    isHapticEnabled: Boolean = true,
     onToggleDarkTheme: () -> Unit = {},
     onToggleFlipAnimation: (Boolean) -> Unit = {},
     onToggleFocusMode: (Boolean) -> Unit = {},
+    onToggleHaptic: (Boolean) -> Unit = {},
     onSetCustomBackupTreeUri: (Uri) -> Unit = {},
     onManualBackup: () -> Unit,
     onBackupToDriveDirect: () -> Unit = {},
@@ -139,6 +143,27 @@ fun ProfileScreen(
     }
     var showSyncCoachMark by remember {
         mutableStateOf(backupPrefs.getBoolean("show_sync_coach", true))
+    }
+
+    // Notification Control State
+    var notificationsEnabled by remember { mutableStateOf(NotificationHelper.isNotificationEnabled(context)) }
+    val initialTime = remember { NotificationHelper.getNotificationTime(context) }
+    var reminderHour by remember { mutableIntStateOf(initialTime.first) }
+    var reminderMinute by remember { mutableIntStateOf(initialTime.second) }
+    var streakAlertEnabled by remember {
+        mutableStateOf(
+            context.getSharedPreferences(NotificationHelper.PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(NotificationHelper.KEY_STREAK_ALERT, true)
+        )
+    }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            notificationsEnabled = true
+            NotificationHelper.scheduleDailyReminder(context, reminderHour, reminderMinute)
+        }
     }
 
     LazyColumn(
@@ -423,11 +448,302 @@ fun ProfileScreen(
                             )
                         )
                     }
+
+                    HorizontalDivider(color = palette.cardBorder)
+
+                    // Haptic Feedback Option
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                            modifier = Modifier.weight(1f).padding(end = 8.dp)
+                        ) {
+                            Text(
+                                text = "Haptic Feedback",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = palette.textPrimary
+                            )
+                            Text(
+                                text = "Subtle vibration on card swipes, flips & ratings",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 11.sp,
+                                color = palette.textMuted
+                            )
+                        }
+                        Switch(
+                            checked = isHapticEnabled,
+                            onCheckedChange = onToggleHaptic,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = IndigoPrimary,
+                                uncheckedThumbColor = Color.White,
+                                uncheckedTrackColor = Color(0xFFCBD5E1)
+                            )
+                        )
+                    }
                 }
             }
         }
 
-        // Google Drive Cloud Backup & Restore Card
+        // 1. Unified Minimal Backup & Restore Card (Google Drive & Local Storage in one container)
+        item {
+            var selectedBackupTab by remember { mutableIntStateOf(0) } // 0: Google Drive, 1: Local Device
+            val isDriveLinked = customBackupTreeUri != null && customBackupTreeUri.contains("com.google.android.apps.docs.storage", ignoreCase = true)
+
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = if (palette.isDark) palette.surface else Color.White),
+                border = CardDefaults.outlinedCardBorder().copy(
+                    brush = androidx.compose.ui.graphics.SolidColor(palette.cardBorder)
+                ),
+                modifier = Modifier.testTag("unified_backup_restore_card")
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // Header with minimal tabs
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(if (palette.isDark) Color(0xFF1E3A8A) else Color(0xFFE0F2FE)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CloudSync,
+                                    contentDescription = null,
+                                    tint = Color(0xFF0284C7),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "Backup & Restore",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = palette.textPrimary
+                                )
+                                Text(
+                                    text = "Cloud & Local Storage",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 11.sp,
+                                    color = palette.textSecondary
+                                )
+                            }
+                        }
+
+                        // Compact Segmented Switcher
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (palette.isDark) Color(0xFF334155) else Color(0xFFF1F5F9))
+                                .padding(2.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (selectedBackupTab == 0) (if (palette.isDark) Color(0xFF1E293B) else Color.White) else Color.Transparent)
+                                    .clickable { selectedBackupTab = 0 }
+                                    .padding(horizontal = 9.dp, vertical = 5.dp)
+                            ) {
+                                Text(
+                                    text = "Drive",
+                                    fontSize = 11.sp,
+                                    fontWeight = if (selectedBackupTab == 0) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (selectedBackupTab == 0) Color(0xFF0284C7) else palette.textSecondary
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (selectedBackupTab == 1) (if (palette.isDark) Color(0xFF1E293B) else Color.White) else Color.Transparent)
+                                    .clickable { selectedBackupTab = 1 }
+                                    .padding(horizontal = 9.dp, vertical = 5.dp)
+                            ) {
+                                Text(
+                                    text = "Device",
+                                    fontSize = 11.sp,
+                                    fontWeight = if (selectedBackupTab == 1) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (selectedBackupTab == 1) IndigoPrimary else palette.textSecondary
+                                )
+                            }
+                        }
+                    }
+
+                    if (selectedBackupTab == 0) {
+                        // Google Drive View
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF8FAFC))
+                                .border(1.dp, if (palette.isDark) Color(0xFF334155) else Color(0xFFE2E8F0), RoundedCornerShape(10.dp))
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Icon(
+                                    imageVector = if (isDriveLinked) Icons.Default.CheckCircle else Icons.Default.FolderOpen,
+                                    contentDescription = null,
+                                    tint = if (isDriveLinked) EmeraldSuccess else Color(0xFF0284C7),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = if (isDriveLinked) "Drive folder linked" else "No Drive folder set",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = palette.textPrimary
+                                )
+                            }
+                            Text(
+                                text = if (isDriveLinked) "Change" else "Link Folder",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0284C7),
+                                modifier = Modifier.clickable {
+                                    try {
+                                        folderPickerLauncher.launch(Uri.parse("content://com.google.android.apps.docs.storage/document/root"))
+                                    } catch (_: Exception) {
+                                        folderPickerLauncher.launch(null)
+                                    }
+                                }
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    if (customBackupTreeUri != null) {
+                                        onBackupToDriveDirect()
+                                    } else {
+                                        try {
+                                            folderPickerLauncher.launch(Uri.parse("content://com.google.android.apps.docs.storage/document/root"))
+                                        } catch (_: Exception) {
+                                            folderPickerLauncher.launch(null)
+                                        }
+                                    }
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(vertical = 10.dp)
+                            ) {
+                                Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Backup Drive", fontFamily = PoppinsFontFamily, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    if (customBackupTreeUri != null) {
+                                        onRestoreFromDriveDirect()
+                                    } else {
+                                        driveRestoreLauncher.launch(arrayOf("application/json", "text/*"))
+                                    }
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = EmeraldSuccess),
+                                border = BorderStroke(1.dp, EmeraldSuccess),
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(vertical = 10.dp)
+                            ) {
+                                Icon(Icons.Default.SettingsBackupRestore, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Restore Drive", fontFamily = PoppinsFontFamily, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    } else {
+                        // Local Device View
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF8FAFC))
+                                .border(1.dp, if (palette.isDark) Color(0xFF334155) else Color(0xFFE2E8F0), RoundedCornerShape(10.dp))
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Last: $lastBackupStr",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = palette.textPrimary
+                                )
+                                Text(
+                                    text = if (customBackupTreeUri != null) "Folder: ${Uri.decode(customBackupTreeUri).takeLast(25)}" else "Default Storage",
+                                    fontSize = 10.sp,
+                                    color = palette.textSecondary,
+                                    maxLines = 1
+                                )
+                            }
+                            Text(
+                                text = "Change",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = IndigoPrimary,
+                                modifier = Modifier.clickable { folderPickerLauncher.launch(null) }
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = onManualBackup,
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(vertical = 10.dp)
+                            ) {
+                                Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Backup Device", fontFamily = PoppinsFontFamily, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+
+                            OutlinedButton(
+                                onClick = { showRestoreDialog = true },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = EmeraldSuccess),
+                                border = BorderStroke(1.dp, EmeraldSuccess),
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(vertical = 10.dp)
+                            ) {
+                                Icon(Icons.Default.FileOpen, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Restore File", fontFamily = PoppinsFontFamily, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Notifications & Study Reminders Control Card
         item {
             Card(
                 shape = RoundedCornerShape(20.dp),
@@ -435,244 +751,174 @@ fun ProfileScreen(
                 border = CardDefaults.outlinedCardBorder().copy(
                     brush = androidx.compose.ui.graphics.SolidColor(palette.cardBorder)
                 ),
-                modifier = Modifier.testTag("google_drive_backup_card")
+                modifier = Modifier.testTag("notification_settings_card")
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(42.dp)
-                                .clip(CircleShape)
-                                .background(if (palette.isDark) Color(0xFF1E3A8A) else Color(0xFFE0F2FE)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CloudUpload,
-                                contentDescription = null,
-                                tint = Color(0xFF0284C7),
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-
-                        Text(
-                            text = "Google Drive Backup",
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = palette.textPrimary
-                        )
-                    }
-
-                    // Select or create Google Drive folder button
-                    OutlinedButton(
-                        onClick = {
-                            try {
-                                folderPickerLauncher.launch(Uri.parse("content://com.google.android.apps.docs.storage/document/root"))
-                            } catch (_: Exception) {
-                                folderPickerLauncher.launch(null)
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(Icons.Default.CreateNewFolder, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (customBackupTreeUri != null && customBackupTreeUri.contains("com.google.android.apps.docs.storage", ignoreCase = true)) 
-                                "Drive folder linked (Tap to change)" 
-                            else 
-                                "Select or create Drive folder",
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Button(
-                            onClick = {
-                                if (customBackupTreeUri != null) {
-                                    onBackupToDriveDirect()
-                                } else {
-                                    try {
-                                        folderPickerLauncher.launch(Uri.parse("content://com.google.android.apps.docs.storage/document/root"))
-                                    } catch (_: Exception) {
-                                        folderPickerLauncher.launch(null)
-                                    }
-                                }
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Backup to Drive", fontFamily = PoppinsFontFamily, fontSize = 12.sp)
-                        }
-
-                        Button(
-                            onClick = {
-                                if (customBackupTreeUri != null) {
-                                    onRestoreFromDriveDirect()
-                                } else {
-                                    driveRestoreLauncher.launch(arrayOf("application/json", "text/*"))
-                                }
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.SettingsBackupRestore, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Restore", fontFamily = PoppinsFontFamily, fontSize = 12.sp)
-                        }
-                    }
-                }
-            }
-        }
-
-        // Local Device Storage Backup Card
-        item {
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(SlateBorder)),
-                modifier = Modifier.testTag("device_backup_card")
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(IndigoLight),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Folder,
-                                contentDescription = null,
-                                tint = IndigoPrimary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-
-                        Text(
-                            text = "Local Device Backup",
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = SlateText
-                        )
-                    }
-
-                    // Directory Path Container
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Color(0xFFF1F5F9))
-                            .padding(12.dp)
-                    ) {
-                        Column {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = if (customBackupTreeUri != null) "Custom External Directory (SAF):" else "Standard Device Folder:",
-                                    fontFamily = PoppinsFontFamily,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (customBackupTreeUri != null) EmeraldSuccess else SlateLight
-                                )
-                                if (customBackupTreeUri != null) {
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(CircleShape)
-                                            .background(EmeraldLight)
-                                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                                    ) {
-                                        Text("CUSTOM FOLDER ACTIVE", fontSize = 8.sp, fontWeight = FontWeight.Bold, color = EmeraldSuccess)
-                                    }
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = if (customBackupTreeUri != null) Uri.decode(customBackupTreeUri) else backupDirectoryPath,
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 11.sp,
-                                color = SlateText,
-                                lineHeight = 15.sp
-                            )
-                        }
-                    }
-
-                    // Choose Custom Folder Button (SAF)
-                    OutlinedButton(
-                        onClick = { folderPickerLauncher.launch(null) },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(Icons.Default.CreateNewFolder, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (customBackupTreeUri != null) "Change Backup Folder" else "Choose Custom Device Folder",
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 11.sp
-                        )
-                    }
-
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(if (palette.isDark) Color(0xFF312E81) else IndigoLight),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.NotificationsActive,
+                                    contentDescription = null,
+                                    tint = IndigoPrimary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "Daily Reminders",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = palette.textPrimary
+                                )
+                                Text(
+                                    text = if (notificationsEnabled) "Active at ${String.format("%02d:%02d", reminderHour, reminderMinute)}" else "Disabled",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 11.sp,
+                                    color = if (notificationsEnabled) EmeraldSuccess else palette.textSecondary
+                                )
+                            }
+                        }
+
+                        Switch(
+                            checked = notificationsEnabled,
+                            onCheckedChange = { isChecked ->
+                                if (isChecked) {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                        notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                                    }
+                                    notificationsEnabled = true
+                                    NotificationHelper.scheduleDailyReminder(context, reminderHour, reminderMinute)
+                                } else {
+                                    notificationsEnabled = false
+                                    NotificationHelper.cancelDailyReminder(context)
+                                }
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = IndigoPrimary
+                            )
+                        )
+                    }
+
+                    if (notificationsEnabled) {
+                        // Time Presets
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(
-                                text = "Last Local Backup",
+                                text = "Reminder Time",
                                 fontFamily = PoppinsFontFamily,
                                 fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = SlateMuted
+                                fontWeight = FontWeight.SemiBold,
+                                color = palette.textSecondary
                             )
-                            Text(
-                                text = lastBackupStr,
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = SlateText
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                val presets = listOf(Pair(8, 0), Pair(13, 0), Pair(20, 0), Pair(22, 0))
+                                val labels = listOf("08:00 AM", "01:00 PM", "08:00 PM", "10:00 PM")
+                                presets.forEachIndexed { i, (h, m) ->
+                                    val isSelected = (reminderHour == h && reminderMinute == m)
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (isSelected) IndigoPrimary else (if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9)))
+                                            .clickable {
+                                                reminderHour = h
+                                                reminderMinute = m
+                                                NotificationHelper.scheduleDailyReminder(context, h, m)
+                                            }
+                                            .padding(vertical = 7.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = labels[i],
+                                            fontSize = 10.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isSelected) Color.White else palette.textPrimary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Streak Alert Safeguard
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.LocalFireDepartment,
+                                    contentDescription = null,
+                                    tint = Color(0xFFF97316),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "Streak Safeguard Alert",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 12.sp,
+                                    color = palette.textPrimary
+                                )
+                            }
+                            Switch(
+                                checked = streakAlertEnabled,
+                                onCheckedChange = {
+                                    streakAlertEnabled = it
+                                    context.getSharedPreferences(NotificationHelper.PREFS_NAME, Context.MODE_PRIVATE)
+                                        .edit().putBoolean(NotificationHelper.KEY_STREAK_ALERT, it).apply()
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = Color(0xFFF97316)
+                                )
                             )
                         }
 
-                        Button(
-                            onClick = onManualBackup,
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
-                            modifier = Modifier.testTag("manual_backup_button")
+                        // Test Notification Button
+                        OutlinedButton(
+                            onClick = {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                                }
+                                NotificationHelper.showNotification(
+                                    context = context,
+                                    title = "Daily Study Reminder 🎯",
+                                    message = "Keep your streak going! Practice your words and read articles today."
+                                )
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(vertical = 7.dp)
                         ) {
-                            Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Backup Now", fontFamily = PoppinsFontFamily, fontSize = 12.sp)
+                            Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Send Test Notification", fontFamily = PoppinsFontFamily, fontSize = 11.5.sp)
                         }
                     }
                 }
@@ -1095,60 +1341,7 @@ fun ProfileScreen(
             }
         }
 
-        // Restore & Import Backup Card
-        item {
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(SlateBorder))
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(EmeraldLight),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.SettingsBackupRestore,
-                                contentDescription = null,
-                                tint = EmeraldSuccess,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
 
-                        Text(
-                            text = "Restore Backup Data",
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = SlateText
-                        )
-                    }
-
-                    Button(
-                        onClick = { showRestoreDialog = true },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.FileOpen, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Restore from Backup File Content", fontFamily = PoppinsFontFamily, fontSize = 12.sp)
-                    }
-                }
-            }
-        }
 
         // Sign Out Button
         item {

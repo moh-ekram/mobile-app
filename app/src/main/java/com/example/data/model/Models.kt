@@ -32,6 +32,19 @@ data class DeletedArticleTitleEntity(
     val deletedAt: Long = System.currentTimeMillis()
 )
 
+/**
+ * Flashcard Room database entity storing word, definition, and mastery level.
+ */
+@Entity(tableName = "flashcards")
+data class Flashcard(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val word: String,
+    val definition: String,
+    val masteryLevel: Int = 0, // e.g. 0: New, 1: Learning, 2: Familiar, 3: Mastered
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
 @Entity(tableName = "vocabulary_words")
 data class VocabularyWordEntity(
     @PrimaryKey val id: String,

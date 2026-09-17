@@ -53,6 +53,10 @@ fun AdminPanelScreen(
     questions: List<QuestionBankEntity>,
     courses: List<CourseEntity> = emptyList(),
     activeCourseId: String = "",
+    selectedCourseIds: Set<String> = emptySet(),
+    onToggleCourseSelection: (String) -> Unit = {},
+    onSelectAllCourses: () -> Unit = {},
+    onDeselectAllCourses: () -> Unit = {},
     isSyncingDrive: Boolean = false,
     driveSyncUrl: String = "",
     driveSyncSummary: DriveSyncSummary? = null,
@@ -76,10 +80,15 @@ fun AdminPanelScreen(
     onImportGameItems: (List<GamePracticeEntity>) -> Unit = {},
     onImportQB: (String) -> Unit,
     onResetData: () -> Unit = {},
+    onSubPageChange: (String?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     var selectedSubPage by remember { mutableStateOf<String?>(null) } // null = Main Dashboard, "courses", "words", "games", "qb"
+
+    LaunchedEffect(selectedSubPage) {
+        onSubPageChange(selectedSubPage)
+    }
     var showCreateCourseDialog by remember { mutableStateOf(false) }
     var showAddWordDialog by remember { mutableStateOf(false) }
     var showUploadCourseDialog by remember { mutableStateOf(false) }
@@ -232,10 +241,11 @@ fun AdminPanelScreen(
                 // 1. Courses Tab
                 item {
                     val activeCourseTitle = courses.find { it.id == activeCourseId }?.title ?: "Default"
+                    val selCount = if (selectedCourseIds.isEmpty()) courses.size else selectedCourseIds.size
                     AdminCategoryListCard(
                         title = "Courses",
-                        subtitle = "${courses.size} courses • Active: $activeCourseTitle",
-                        badge = "${courses.size}",
+                        subtitle = "${courses.size} courses • $selCount selected for study & backup",
+                        badge = "$selCount/${courses.size}",
                         icon = Icons.Default.School,
                         iconBg = IndigoLight,
                         iconTint = IndigoPrimary,
@@ -325,6 +335,10 @@ fun AdminPanelScreen(
                     CoursesAdminView(
                         courses = courses,
                         activeCourseId = activeCourseId,
+                        selectedCourseIds = selectedCourseIds,
+                        onToggleCourseSelection = onToggleCourseSelection,
+                        onSelectAllCourses = onSelectAllCourses,
+                        onDeselectAllCourses = onDeselectAllCourses,
                         words = words,
                         onOpenDriveSync = { showDriveSyncDialog = true },
                         onBatchUpload = { batchFilePicker.launch("*/*") },
@@ -596,6 +610,10 @@ private fun AdminCategoryListCard(
 private fun CoursesAdminView(
     courses: List<CourseEntity>,
     activeCourseId: String,
+    selectedCourseIds: Set<String> = emptySet(),
+    onToggleCourseSelection: (String) -> Unit = {},
+    onSelectAllCourses: () -> Unit = {},
+    onDeselectAllCourses: () -> Unit = {},
     words: List<VocabularyWordEntity>,
     onOpenDriveSync: () -> Unit = {},
     onBatchUpload: () -> Unit = {},
@@ -641,7 +659,7 @@ private fun CoursesAdminView(
 
             Button(
                 onClick = onCreateCourseClick,
-                modifier = Modifier.weight(1.2f),
+                modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
             ) {
@@ -653,6 +671,61 @@ private fun CoursesAdminView(
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold
                 )
+            }
+        }
+
+        // Selection Control Bar: Controls which courses are used for Flashcards, Games, and Backup
+        if (courses.isNotEmpty()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9)),
+                border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Color(0xFFE2E8F0)))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = EmeraldSuccess, modifier = Modifier.size(15.dp))
+                            Text(
+                                text = "Study & Backup Selection",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = SlateText
+                            )
+                        }
+                        val selCount = if (selectedCourseIds.isEmpty()) courses.size else selectedCourseIds.size
+                        Text(
+                            text = "$selCount of ${courses.size} courses active in Flashcards, Games & Backup",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 10.5.sp,
+                            color = SlateMuted
+                        )
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(
+                            onClick = onSelectAllCourses,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            modifier = Modifier.height(28.dp)
+                        ) {
+                            Text("All", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndigoPrimary)
+                        }
+                        TextButton(
+                            onClick = onDeselectAllCourses,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            modifier = Modifier.height(28.dp)
+                        ) {
+                            Text("Clear", fontSize = 11.sp, fontWeight = FontWeight.Normal, color = SlateMuted)
+                        }
+                    }
+                }
             }
         }
 
@@ -695,17 +768,18 @@ private fun CoursesAdminView(
             ) {
                 items(courses, key = { it.id }) { course ->
                     val isActive = course.id == activeCourseId
+                    val isIncluded = selectedCourseIds.isEmpty() || selectedCourseIds.contains(course.id)
                     val courseWordCount = words.count { it.courseId == course.id }
 
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(14.dp),
                         colors = CardDefaults.cardColors(
-                            containerColor = if (isActive) Color(0xFFF0FDF4) else Color.White
+                            containerColor = if (isActive) Color(0xFFF0FDF4) else if (isIncluded) Color.White else Color(0xFFF8FAFC)
                         ),
                         border = CardDefaults.outlinedCardBorder().copy(
                             brush = androidx.compose.ui.graphics.SolidColor(
-                                if (isActive) EmeraldSuccess else SlateBorder
+                                if (isActive) EmeraldSuccess else if (isIncluded) Color(0xFFCBD5E1) else Color(0xFFE2E8F0)
                             )
                         )
                     ) {
@@ -729,7 +803,7 @@ private fun CoursesAdminView(
                                         fontFamily = PoppinsFontFamily,
                                         fontSize = 15.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (isActive) EmeraldSuccess else SlateText
+                                        color = if (isActive) EmeraldSuccess else if (isIncluded) SlateText else SlateMuted
                                     )
                                     if (isActive) {
                                         Box(
@@ -757,6 +831,35 @@ private fun CoursesAdminView(
                                         Icon(Icons.Default.Delete, contentDescription = "Delete Course", tint = RoseError, modifier = Modifier.size(16.dp))
                                     }
                                 }
+                            }
+
+                            // Course Selection Checkbox row for Study & Backup
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .padding(top = 4.dp, bottom = 4.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isIncluded) EmeraldLight.copy(alpha = 0.45f) else Color(0xFFF1F5F9))
+                                    .clickable { onToggleCourseSelection(course.id) }
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Checkbox(
+                                    checked = isIncluded,
+                                    onCheckedChange = { onToggleCourseSelection(course.id) },
+                                    colors = CheckboxDefaults.colors(
+                                        checkedColor = EmeraldSuccess,
+                                        uncheckedColor = SlateLight
+                                    ),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (isIncluded) "Included in Study & Backup" else "Excluded from Study & Backup",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isIncluded) FontWeight.SemiBold else FontWeight.Normal,
+                                    color = if (isIncluded) EmeraldSuccess else SlateMuted
+                                )
                             }
 
                             if (!course.description.isNullOrBlank()) {

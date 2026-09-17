@@ -258,3 +258,40 @@ interface UserProgressDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdate(progress: UserProgressEntity)
 }
+
+@Dao
+interface FlashcardDao {
+    @Query("SELECT * FROM flashcards ORDER BY id DESC")
+    fun getAllFlashcards(): Flow<List<Flashcard>>
+
+    @Query("SELECT * FROM flashcards ORDER BY id DESC")
+    suspend fun getAllFlashcardsList(): List<Flashcard>
+
+    @Query("SELECT * FROM flashcards WHERE id = :id LIMIT 1")
+    suspend fun getFlashcardById(id: Long): Flashcard?
+
+    @Query("SELECT * FROM flashcards WHERE masteryLevel = :level ORDER BY id DESC")
+    fun getFlashcardsByMasteryLevel(level: Int): Flow<List<Flashcard>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(flashcard: Flashcard): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(flashcards: List<Flashcard>)
+
+    @Update
+    suspend fun update(flashcard: Flashcard)
+
+    @Query("UPDATE flashcards SET masteryLevel = :level, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updateMasteryLevel(id: Long, level: Int, updatedAt: Long = System.currentTimeMillis())
+
+    @Delete
+    suspend fun delete(flashcard: Flashcard)
+
+    @Query("DELETE FROM flashcards WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
+    @Query("DELETE FROM flashcards")
+    suspend fun clearAll()
+}
+

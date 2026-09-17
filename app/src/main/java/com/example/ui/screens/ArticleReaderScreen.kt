@@ -11,6 +11,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -30,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.*
 import androidx.compose.ui.text.font.FontFamily
@@ -156,6 +158,7 @@ fun ArticleReaderScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ArticleReaderView(
     articles: List<ArticleEntity>,
@@ -199,9 +202,15 @@ fun ArticleReaderView(
     var readerFontSize by remember { mutableFloatStateOf(readerPrefs.getFloat("reader_font_size", 16f)) }
     var readerPaddingDp by remember { mutableIntStateOf(readerPrefs.getInt("reader_padding_dp", 8)) }
     var readerLineSpacing by remember { mutableFloatStateOf(readerPrefs.getFloat("reader_line_spacing", 1.6f)) }
-    var readerFontFamily by remember { mutableStateOf(readerPrefs.getString("reader_font_family", "default") ?: "default") }
+    var readerFontFamily by remember { mutableStateOf(readerPrefs.getString("reader_font_family", "serif") ?: "serif") }
     var readerHighlightBold by remember { mutableStateOf(readerPrefs.getString("reader_highlight_bold", "bold") ?: "bold") }
     var readerJustify by remember { mutableStateOf(readerPrefs.getBoolean("reader_justify", false)) }
+    var isReaderNightMode by remember { mutableStateOf(readerPrefs.getBoolean("reader_night_mode", false)) }
+    var isContinuousScroll by remember { mutableStateOf(readerPrefs.getBoolean("reader_continuous_scroll", true)) }
+    var isBookmarked by remember { mutableStateOf(false) }
+    var isSpeaking by remember { mutableStateOf(false) }
+    var showReadingControlsSheet by remember { mutableStateOf(false) }
+    var showChaptersDropdown by remember { mutableStateOf(false) }
 
     // TTS engine for audio pronunciation
     var tts: TextToSpeech? by remember { mutableStateOf(null) }
@@ -471,247 +480,327 @@ fun ArticleReaderView(
                         }
                     }
 
-                    items(articles, key = { it.id }) { art ->
-                        Card(
+                    item {
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { onSelectArticle(art) },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color.White),
-                            border = CardDefaults.outlinedCardBorder().copy(
-                                brush = androidx.compose.ui.graphics.SolidColor(SlateBorder)
-                            )
+                                .padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                            Text(
+                                text = "💡 Swipe right to edit  •  Swipe left to delete",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 11.5.sp,
+                                color = SlateMuted
+                            )
+                        }
+                    }
+
+                    items(articles, key = { it.id }) { art ->
+                        val dismissState = rememberSwipeToDismissBoxState(
+                            confirmValueChange = { value ->
+                                when (value) {
+                                    SwipeToDismissBoxValue.EndToStart -> {
+                                        onDeleteArticle(art.id)
+                                        true
+                                    }
+                                    SwipeToDismissBoxValue.StartToEnd -> {
+                                        onSelectArticle(art)
+                                        showEditDialog = true
+                                        false
+                                    }
+                                    SwipeToDismissBoxValue.Settled -> false
+                                }
+                            }
+                        )
+
+                        SwipeToDismissBox(
+                            state = dismissState,
+                            backgroundContent = {
+                                val isDelete = dismissState.targetValue == SwipeToDismissBoxValue.EndToStart || dismissState.dismissDirection == SwipeToDismissBoxValue.EndToStart
+                                val isEdit = dismissState.targetValue == SwipeToDismissBoxValue.StartToEnd || dismissState.dismissDirection == SwipeToDismissBoxValue.StartToEnd
+                                val bgColor = when {
+                                    isDelete -> RoseError
+                                    isEdit -> IndigoPrimary
+                                    else -> Color.Transparent
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(bgColor)
+                                        .padding(horizontal = 16.dp),
+                                    contentAlignment = if (isDelete) Alignment.CenterEnd else Alignment.CenterStart
                                 ) {
+                                    if (isDelete) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text("Delete", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Icon(Icons.Default.DeleteOutline, contentDescription = "Delete", tint = Color.White, modifier = Modifier.size(18.dp))
+                                        }
+                                    } else if (isEdit) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(Icons.Default.Edit, contentDescription = "Edit", tint = Color.White, modifier = Modifier.size(18.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Edit", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        ) {
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onSelectArticle(art) },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color.White),
+                                border = CardDefaults.outlinedCardBorder().copy(
+                                    brush = androidx.compose.ui.graphics.SolidColor(SlateBorder)
+                                )
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
                                     Text(
                                         text = art.title,
                                         fontFamily = PoppinsFontFamily,
                                         fontSize = 15.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = SlateText,
-                                        modifier = Modifier.weight(1f)
+                                        modifier = Modifier.fillMaxWidth()
                                     )
-                                    Row {
-                                        IconButton(onClick = {
-                                            onSelectArticle(art)
-                                            showEditDialog = true
-                                        }, modifier = Modifier.size(30.dp)) {
-                                            Icon(
-                                                Icons.Default.Edit,
-                                                contentDescription = "Edit",
-                                                tint = IndigoPrimary,
-                                                modifier = Modifier.size(15.dp)
-                                            )
-                                        }
-                                        IconButton(onClick = {
-                                            onDeleteArticle(art.id)
-                                        }, modifier = Modifier.size(30.dp)) {
-                                            Icon(
-                                                Icons.Default.DeleteOutline,
-                                                contentDescription = "Delete",
-                                                tint = RoseError,
-                                                modifier = Modifier.size(15.dp)
-                                            )
-                                        }
+
+                                    if (art.author.isNotBlank() && art.author != "Anonymous Author") {
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = "By ${art.author}",
+                                            fontFamily = PoppinsFontFamily,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = SlateMuted
+                                        )
                                     }
-                                }
 
-                                if (art.author.isNotBlank() && art.author != "Anonymous Author") {
+                                    Spacer(modifier = Modifier.height(4.dp))
                                     Text(
-                                        text = "By ${art.author}",
+                                        text = art.content.take(130).replace("\n", " ") + if (art.content.length > 130) "..." else "",
                                         fontFamily = PoppinsFontFamily,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = SlateMuted
+                                        fontSize = 12.5.sp,
+                                        lineHeight = 18.sp,
+                                        color = SlateText.copy(alpha = 0.8f),
+                                        maxLines = 2
                                     )
-                                    Spacer(modifier = Modifier.height(3.dp))
                                 }
-
-                                Text(
-                                    text = art.content.take(130).replace("\n", " ") + if (art.content.length > 130) "..." else "",
-                                    fontFamily = PoppinsFontFamily,
-                                    fontSize = 12.5.sp,
-                                    lineHeight = 18.sp,
-                                    color = SlateText.copy(alpha = 0.8f),
-                                    maxLines = 2
-                                )
                             }
                         }
                     }
                 }
             }
         } else {
-            // FULL SCREEN MODE: Ultra-slim navigation & action bar (No app icon/name, no bottom menu)
-            Row(
+            // Minimal, clean e-reader view matching design reference (No edit/delete icons)
+            val currentIndex = articles.indexOfFirst { it.id == currentArticle.id }.coerceAtLeast(0)
+            val pageBg = if (isReaderNightMode) Color(0xFF0F172A) else Color(0xFFF1F5F9)
+            val cardBg = if (isReaderNightMode) Color(0xFF1E293B) else Color(0xFFFCFAF7)
+            val textColor = if (isReaderNightMode) Color(0xFFE2E8F0) else Color(0xFF1E293B)
+            val subtleMuted = if (isReaderNightMode) Color(0xFF64748B) else Color(0xFF94A3B8)
+            val cardBorderColor = if (isReaderNightMode) Color(0xFF334155) else Color(0xFFCBD5E1)
+
+            var dragAccumulator by remember(currentArticle.id) { mutableFloatStateOf(0f) }
+
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.White)
-                    .padding(horizontal = 4.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = { onSelectArticle(null) }, modifier = Modifier.size(34.dp)) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back to Articles List",
-                        tint = SlateText,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-
-                Column(modifier = Modifier.weight(1f).padding(horizontal = 4.dp)) {
-                    Text(
-                        text = currentArticle.title,
-                        fontFamily = PoppinsFontFamily,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = SlateText,
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                    )
-                    if (currentArticle.author.isNotBlank() && currentArticle.author != "Anonymous Author") {
-                        Text(
-                            text = "By ${currentArticle.author}",
-                            fontSize = 9.5.sp,
-                            color = SlateMuted,
-                            maxLines = 1,
-                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                        )
-                    }
-                }
-
-                // Course Filter Button (Opens Equal Space Course Grid)
-                IconButton(
-                    onClick = { showCourseFilterDialog = true },
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    BadgedBox(
-                        badge = {
-                            if (selectedCourseIds.isNotEmpty()) {
-                                Badge(containerColor = IndigoPrimary) {
-                                    Text(selectedCourseIds.size.toString(), color = Color.White, fontSize = 9.sp)
+                    .fillMaxSize()
+                    .background(pageBg)
+                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                    .pointerInput(currentArticle.id) {
+                        detectHorizontalDragGestures(
+                            onDragEnd = {
+                                if (dragAccumulator < -60f && currentIndex < articles.size - 1) {
+                                    onSelectArticle(articles[currentIndex + 1])
+                                } else if (dragAccumulator > 60f && currentIndex > 0) {
+                                    onSelectArticle(articles[currentIndex - 1])
                                 }
+                                dragAccumulator = 0f
+                            },
+                            onHorizontalDrag = { _, dragAmount ->
+                                dragAccumulator += dragAmount
                             }
-                        }
-                    ) {
-                        Icon(
-                            Icons.Default.FilterList,
-                            contentDescription = "Filter Courses",
-                            tint = if (selectedCourseIds.isNotEmpty()) IndigoPrimary else SlateText,
-                            modifier = Modifier.size(18.dp)
                         )
                     }
-                }
-
-                IconButton(
-                    onClick = {
-                        tts?.speak(currentArticle.content, TextToSpeech.QUEUE_FLUSH, null, "article_tts")
-                    },
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        Icons.Default.VolumeUp,
-                        contentDescription = "Listen to Article",
-                        tint = IndigoPrimary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-
-                IconButton(onClick = { showEditDialog = true }, modifier = Modifier.size(32.dp)) {
-                    Icon(
-                        Icons.Default.Edit,
-                        contentDescription = "Edit Article",
-                        tint = IndigoPrimary,
-                        modifier = Modifier.size(15.dp)
-                    )
-                }
-
-                IconButton(
-                    onClick = { showLocalReaderSettings = true },
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        Icons.Default.Settings,
-                        contentDescription = "Reader Display Settings",
-                        tint = SlateText,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-
-                IconButton(onClick = {
-                    onDeleteArticle(currentArticle.id)
-                    onSelectArticle(null)
-                }, modifier = Modifier.size(32.dp)) {
-                    Icon(
-                        Icons.Default.DeleteOutline,
-                        contentDescription = "Delete Article",
-                        tint = RoseError,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            }
-
-            // Article Content Area - TAKES FULL WIDTH OF THE PHONE SCREEN
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .background(Color.White),
-                contentPadding = PaddingValues(top = 4.dp, bottom = 28.dp)
             ) {
-                item {
+                Card(
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(containerColor = cardBg),
+                    border = BorderStroke(1.5.dp, cardBorderColor),
+                    modifier = Modifier.fillMaxSize()
+                ) {
                     Column(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = readerPaddingDp.dp, vertical = 2.dp)
+                            .fillMaxSize()
+                            .padding(top = 10.dp, bottom = 12.dp, start = 14.dp, end = 14.dp)
                     ) {
+                        // Header: Minimal Back Button, Centered Chapter, Right Reader Controls icon
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            IconButton(
+                                onClick = { onSelectArticle(null) },
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back to list",
+                                    tint = subtleMuted,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            Text(
+                                text = "Chapter ${currentIndex + 1}",
+                                fontFamily = FontFamily.Serif,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Normal,
+                                color = subtleMuted,
+                                letterSpacing = 1.2.sp
+                            )
+
+                            IconButton(
+                                onClick = { showReadingControlsSheet = true },
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Tune,
+                                    contentDescription = "Reader Controls",
+                                    tint = subtleMuted,
+                                    modifier = Modifier.size(19.dp)
+                                )
+                            }
+                        }
+
+                        // Reading Content with Editorial Drop Cap & Interactive Words
                         val selectedFont = when (readerFontFamily) {
                             "serif" -> FontFamily.Serif
                             "monospace" -> FontFamily.Monospace
-                            else -> selectFontForText(currentArticle.content)
+                            "sans" -> FontFamily.SansSerif
+                            else -> FontFamily.Serif
                         }
                         val isExtraBold = (readerHighlightBold == "extra_bold")
 
-                        // Highlighted Interactive Text taking full width of phone screen with custom padding & font size
-                        val annotatedText = buildPlaceHighlightedAnnotatedString(
-                            content = currentArticle.content,
-                            place1Map = place1Map,
-                            place2Map = place2Map,
-                            isExtraBold = isExtraBold
-                        )
+                        val annotatedText = remember(currentArticle.content, place1Map, place2Map, isExtraBold, isReaderNightMode) {
+                            buildPlaceHighlightedAnnotatedString(
+                                content = currentArticle.content,
+                                place1Map = place1Map,
+                                place2Map = place2Map,
+                                isExtraBold = isExtraBold,
+                                isNightMode = isReaderNightMode
+                            )
+                        }
 
-                        ClickableText(
-                            text = annotatedText,
-                            style = TextStyle(
-                                fontSize = readerFontSize.sp,
-                                lineHeight = (readerFontSize * readerLineSpacing).sp,
-                                color = SlateText,
-                                fontFamily = selectedFont,
-                                textAlign = if (readerJustify) TextAlign.Justify else TextAlign.Start
-                            ),
-                            onClick = { offset ->
-                                annotatedText.getStringAnnotations(
-                                    tag = "VOCAB_MATCH",
-                                    start = offset,
-                                    end = offset
-                                ).firstOrNull()?.let { annotation ->
-                                    val key = annotation.item.lowercase(Locale.ROOT)
-                                    val matchedWord = place1Map[key] ?: place2Map[key]
-                                    if (matchedWord != null) {
-                                        selectedWordForDetails = matchedWord
+                        // Content LazyColumn
+                        LazyColumn(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .padding(horizontal = readerPaddingDp.dp.coerceAtLeast(6.dp)),
+                            contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp)
+                        ) {
+                            item {
+                                val trimmedText = currentArticle.content.trimStart()
+                                val firstLetter = trimmedText.firstOrNull()
+
+                                if (firstLetter != null && firstLetter.isLetter()) {
+                                    // Classic Editorial Drop Cap layout
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.Top
+                                    ) {
+                                        Text(
+                                            text = firstLetter.toString(),
+                                            fontFamily = FontFamily.Serif,
+                                            fontSize = (readerFontSize * 2.7f).sp,
+                                            fontWeight = FontWeight.Normal,
+                                            color = textColor,
+                                            lineHeight = (readerFontSize * 2.2f).sp,
+                                            modifier = Modifier.padding(end = 6.dp, top = 2.dp)
+                                        )
+
+                                        ClickableText(
+                                            text = annotatedText,
+                                            style = TextStyle(
+                                                fontSize = readerFontSize.sp,
+                                                lineHeight = (readerFontSize * readerLineSpacing).sp,
+                                                color = textColor,
+                                                fontFamily = selectedFont,
+                                                textAlign = if (readerJustify) TextAlign.Justify else TextAlign.Start
+                                            ),
+                                            onClick = { offset ->
+                                                annotatedText.getStringAnnotations(
+                                                    tag = "VOCAB_MATCH",
+                                                    start = offset,
+                                                    end = offset
+                                                ).firstOrNull()?.let { annotation ->
+                                                    val key = annotation.item.lowercase(Locale.ROOT)
+                                                    val matchedWord = place1Map[key] ?: place2Map[key]
+                                                    if (matchedWord != null) {
+                                                        selectedWordForDetails = matchedWord
+                                                    }
+                                                }
+                                            },
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
                                     }
+                                } else {
+                                    ClickableText(
+                                        text = annotatedText,
+                                        style = TextStyle(
+                                            fontSize = readerFontSize.sp,
+                                            lineHeight = (readerFontSize * readerLineSpacing).sp,
+                                            color = textColor,
+                                            fontFamily = selectedFont,
+                                            textAlign = if (readerJustify) TextAlign.Justify else TextAlign.Start
+                                        ),
+                                        onClick = { offset ->
+                                            annotatedText.getStringAnnotations(
+                                                tag = "VOCAB_MATCH",
+                                                start = offset,
+                                                end = offset
+                                            ).firstOrNull()?.let { annotation ->
+                                                val key = annotation.item.lowercase(Locale.ROOT)
+                                                val matchedWord = place1Map[key] ?: place2Map[key]
+                                                if (matchedWord != null) {
+                                                    selectedWordForDetails = matchedWord
+                                                }
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
                                 }
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                            }
+                        }
+
+                        // Footer: Subtle Centered Page Indicator
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showReadingControlsSheet = true }
+                                .padding(top = 4.dp, bottom = 2.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Page ${currentIndex + 1} of ${articles.size}",
+                                fontFamily = FontFamily.Serif,
+                                fontSize = 12.sp,
+                                color = subtleMuted,
+                                letterSpacing = 0.5.sp
+                            )
+                        }
                     }
                 }
             }
-            }
+        }
 
         // Word Detail Bottom Card / Popup
         AnimatedVisibility(visible = selectedWordForDetails != null) {
@@ -1143,6 +1232,320 @@ fun ArticleReaderView(
         )
     }
 
+    // Reader Controls Bottom Sheet (Matches the minimalist aesthetic in user reference)
+    if (showReadingControlsSheet && currentArticle != null) {
+        val currentIndex = articles.indexOfFirst { it.id == currentArticle.id }.coerceAtLeast(0)
+        ModalBottomSheet(
+            onDismissRequest = { showReadingControlsSheet = false },
+            containerColor = if (isReaderNightMode) Color(0xFF1E293B) else Color.White,
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+            dragHandle = {
+                Box(
+                    modifier = Modifier
+                        .padding(top = 10.dp, bottom = 8.dp)
+                        .width(40.dp)
+                        .height(4.dp)
+                        .clip(CircleShape)
+                        .background(if (isReaderNightMode) Color(0xFF475569) else Color(0xFFCBD5E1))
+                )
+            }
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 8.dp)
+                    .navigationBarsPadding(),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // 1. Top Circular/Pill Action Buttons (Headphones, Theme, Bookmark, Font)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Headphones (Audio Reading / TTS)
+                    IconButton(
+                        onClick = {
+                            if (isSpeaking) {
+                                tts?.stop()
+                                isSpeaking = false
+                            } else {
+                                tts?.speak(currentArticle.content, TextToSpeech.QUEUE_FLUSH, null, "article_tts")
+                                isSpeaking = true
+                            }
+                        },
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(CircleShape)
+                            .background(if (isSpeaking) IndigoPrimary else (if (isReaderNightMode) Color(0xFF334155) else Color(0xFFF1F5F9)))
+                    ) {
+                        Icon(
+                            Icons.Default.Headphones,
+                            contentDescription = "Audio Reading",
+                            tint = if (isSpeaking) Color.White else (if (isReaderNightMode) Color(0xFFE2E8F0) else Color(0xFF475569)),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    // Night / Paper Mode
+                    IconButton(
+                        onClick = {
+                            isReaderNightMode = !isReaderNightMode
+                            readerPrefs.edit().putBoolean("reader_night_mode", isReaderNightMode).apply()
+                        },
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(CircleShape)
+                            .background(if (isReaderNightMode) Color(0xFF312E81) else Color(0xFFF1F5F9))
+                    ) {
+                        Icon(
+                            if (isReaderNightMode) Icons.Default.WbSunny else Icons.Default.NightlightRound,
+                            contentDescription = "Toggle Theme",
+                            tint = if (isReaderNightMode) Color(0xFFFDE047) else Color(0xFF475569),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    // Bookmark
+                    IconButton(
+                        onClick = { isBookmarked = !isBookmarked },
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(CircleShape)
+                            .background(if (isBookmarked) Color(0xFFFEF3C7) else (if (isReaderNightMode) Color(0xFF334155) else Color(0xFFF1F5F9)))
+                    ) {
+                        Icon(
+                            if (isBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                            contentDescription = "Bookmark",
+                            tint = if (isBookmarked) Color(0xFFD97706) else (if (isReaderNightMode) Color(0xFFE2E8F0) else Color(0xFF475569)),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    // Font Style (Serif vs Sans)
+                    IconButton(
+                        onClick = {
+                            readerFontFamily = if (readerFontFamily == "serif") "sans" else "serif"
+                            readerPrefs.edit().putString("reader_font_family", readerFontFamily).apply()
+                        },
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(CircleShape)
+                            .background(if (readerFontFamily == "serif") IndigoLight else (if (isReaderNightMode) Color(0xFF334155) else Color(0xFFF1F5F9)))
+                    ) {
+                        Icon(
+                            Icons.Default.FontDownload,
+                            contentDescription = "Toggle Font",
+                            tint = if (readerFontFamily == "serif") IndigoPrimary else (if (isReaderNightMode) Color(0xFFE2E8F0) else Color(0xFF475569)),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
+
+                // 2. Chapters Section
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "Chapters",
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isReaderNightMode) Color(0xFFE2E8F0) else Color(0xFF0F172A)
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (isReaderNightMode) Color(0xFF334155) else Color(0xFFF8FAFC))
+                            .border(1.dp, if (isReaderNightMode) Color(0xFF475569) else Color(0xFFE2E8F0), RoundedCornerShape(12.dp))
+                            .clickable { showChaptersDropdown = true }
+                            .padding(horizontal = 14.dp, vertical = 10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "${currentIndex + 1}   ${currentArticle.title}",
+                                fontFamily = FontFamily.Serif,
+                                fontSize = 13.5.sp,
+                                color = if (isReaderNightMode) Color.White else Color(0xFF1E293B),
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Icon(
+                                Icons.Default.KeyboardArrowDown,
+                                contentDescription = null,
+                                tint = if (isReaderNightMode) Color(0xFF94A3B8) else Color(0xFF64748B)
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = showChaptersDropdown,
+                            onDismissRequest = { showChaptersDropdown = false },
+                            modifier = Modifier.widthIn(max = 320.dp)
+                        ) {
+                            articles.forEachIndexed { idx, art ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = "${idx + 1}. ${art.title}",
+                                            fontFamily = FontFamily.Serif,
+                                            fontSize = 13.sp,
+                                            fontWeight = if (idx == currentIndex) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (idx == currentIndex) IndigoPrimary else Color.Unspecified
+                                        )
+                                    },
+                                    onClick = {
+                                        onSelectArticle(art)
+                                        showChaptersDropdown = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 3. Text Size & Scrolling Section
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Left Column: Text Size
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "Text Size",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (isReaderNightMode) Color(0xFF94A3B8) else Color(0xFF64748B)
+                        )
+
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isReaderNightMode) Color(0xFF334155) else Color(0xFFF1F5F9))
+                                .padding(3.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            val sizes = listOf(14f, 17f, 21f)
+                            sizes.forEach { sz ->
+                                val isSelected = kotlin.math.abs(readerFontSize - sz) < 1.5f
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (isSelected) (if (isReaderNightMode) Color(0xFF1E293B) else Color.White) else Color.Transparent)
+                                        .clickable {
+                                            readerFontSize = sz
+                                            readerPrefs.edit().putFloat("reader_font_size", sz).apply()
+                                        }
+                                        .padding(vertical = 6.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "A",
+                                        fontFamily = FontFamily.Serif,
+                                        fontSize = (sz * 0.9f).sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSelected) IndigoPrimary else (if (isReaderNightMode) Color(0xFFCBD5E1) else Color(0xFF475569))
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(20.dp))
+
+                    // Right Column: Scrolling
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "Scrolling",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (isReaderNightMode) Color(0xFF94A3B8) else Color(0xFF64748B)
+                        )
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isReaderNightMode) Color(0xFF334155) else Color(0xFFF1F5F9))
+                                .padding(horizontal = 10.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (isContinuousScroll) "Continuous" else "Paged",
+                                fontSize = 11.5.sp,
+                                color = if (isReaderNightMode) Color(0xFFE2E8F0) else Color(0xFF334155)
+                            )
+                            Switch(
+                                checked = isContinuousScroll,
+                                onCheckedChange = {
+                                    isContinuousScroll = it
+                                    readerPrefs.edit().putBoolean("reader_continuous_scroll", it).apply()
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = IndigoPrimary
+                                )
+                            )
+                        }
+                    }
+                }
+
+                // 4. Fine-tuning Slider with Sun and Moon icons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Icon(
+                        Icons.Default.WbSunny,
+                        contentDescription = null,
+                        tint = if (isReaderNightMode) Color(0xFF94A3B8) else Color(0xFF64748B),
+                        modifier = Modifier.size(16.dp)
+                    )
+
+                    Slider(
+                        value = readerFontSize,
+                        onValueChange = {
+                            readerFontSize = it
+                            readerPrefs.edit().putFloat("reader_font_size", it).apply()
+                        },
+                        valueRange = 13f..26f,
+                        modifier = Modifier.weight(1f),
+                        colors = SliderDefaults.colors(
+                            thumbColor = IndigoPrimary,
+                            activeTrackColor = IndigoPrimary,
+                            inactiveTrackColor = if (isReaderNightMode) Color(0xFF334155) else Color(0xFFE2E8F0)
+                        )
+                    )
+
+                    Icon(
+                        Icons.Default.NightlightRound,
+                        contentDescription = null,
+                        tint = if (isReaderNightMode) Color(0xFF94A3B8) else Color(0xFF64748B),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+            }
+        }
+    }
+
     // Reader Display Settings Dialog (English, Minimalist layout, font size, padding, alignment)
     if (isReaderSettingsVisible) {
         ReaderSettingsDialog(
@@ -1185,13 +1588,16 @@ private fun buildPlaceHighlightedAnnotatedString(
     content: String,
     place1Map: Map<String, VocabularyWordEntity>,
     place2Map: Map<String, VocabularyWordEntity>,
-    isExtraBold: Boolean = false
+    isExtraBold: Boolean = false,
+    isNightMode: Boolean = false
 ): AnnotatedString {
     return buildAnnotatedString {
         val regex = Regex("""[\w\u0980-\u09FF]+|[^\w\s\u0980-\u09FF]+|\s+""")
         val matches = regex.findAll(content)
 
         val targetWeight = if (isExtraBold) FontWeight.Black else FontWeight.ExtraBold
+        val place1Color = if (isNightMode) Color(0xFF60A5FA) else Color(0xFF1D4ED8)
+        val place2Color = if (isNightMode) Color(0xFF34D399) else Color(0xFF047857)
 
         for (m in matches) {
             val token = m.value
@@ -1205,7 +1611,7 @@ private fun buildPlaceHighlightedAnnotatedString(
                 pushStringAnnotation(tag = "VOCAB_MATCH", annotation = cleanToken)
                 withStyle(
                     SpanStyle(
-                        color = Color(0xFF1D4ED8),
+                        color = place1Color,
                         fontWeight = targetWeight,
                         fontFamily = if (isBengali) KalpurushFontFamily else PoppinsFontFamily,
                         fontSynthesis = FontSynthesis.All
@@ -1220,7 +1626,7 @@ private fun buildPlaceHighlightedAnnotatedString(
                 pushStringAnnotation(tag = "VOCAB_MATCH", annotation = cleanToken)
                 withStyle(
                     SpanStyle(
-                        color = Color(0xFF047857),
+                        color = place2Color,
                         fontWeight = targetWeight,
                         fontFamily = if (isBengali) KalpurushFontFamily else PoppinsFontFamily,
                         fontSynthesis = FontSynthesis.All

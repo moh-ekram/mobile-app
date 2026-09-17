@@ -137,11 +137,13 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
     val isDarkTheme by viewModel.isDarkTheme.collectAsState()
     val isFocusMode by viewModel.isFocusMode.collectAsState()
     val isFlipAnimationEnabled by viewModel.isFlipAnimationEnabled.collectAsState()
+    val isHapticEnabled by viewModel.isHapticEnabled.collectAsState()
     val currentWidgetWord by viewModel.currentWidgetWord.collectAsState()
     val widgetCategory by viewModel.widgetCategory.collectAsState()
     val isSyncingDrive by viewModel.isSyncingDrive.collectAsState()
     val driveSyncUrl by viewModel.driveSyncUrl.collectAsState()
     val driveSyncSummary by viewModel.driveSyncSummary.collectAsState()
+    val selectedCourseIds by viewModel.selectedCourseIds.collectAsState()
     val palette = LocalAppPalette.current
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -178,16 +180,30 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
             onGoogleLogin = { viewModel.loginWithGoogle() }
         )
     } else {
+        var selectedGameSection by remember { mutableStateOf<String?>(null) }
+        var selectedAdminSubPage by remember { mutableStateOf<String?>(null) }
+
+        LaunchedEffect(currentRoute) {
+            if (currentRoute != "games") selectedGameSection = null
+            if (currentRoute != "admin") selectedAdminSubPage = null
+        }
+
         val isArticleReading = activeArticle != null
-        val hideTopBar = (currentRoute == "flashcard" && isFocusMode) || isArticleReading
-        val hideBottomBar = currentRoute == "flashcard" || isArticleReading
+        val hideTopBar = (currentRoute == "flashcard" && isFocusMode) ||
+                         currentRoute == "article_reader" ||
+                         (currentRoute == "games" && selectedGameSection != null) ||
+                         (currentRoute == "admin" && selectedAdminSubPage != null)
+        val hideBottomBar = currentRoute == "flashcard" ||
+                            isArticleReading ||
+                            (currentRoute == "games" && selectedGameSection != null) ||
+                            (currentRoute == "admin" && selectedAdminSubPage != null)
 
         Scaffold(
             topBar = {
                 if (!hideTopBar) {
                     TopAppBar(
                         navigationIcon = {
-                            if (currentRoute == "flashcard") {
+                            if (currentRoute != "home") {
                                 IconButton(onClick = { viewModel.setRoute("home") }) {
                                     Icon(
                                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -203,6 +219,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 if (currentRoute == "home") {
+                                    // [m] Memorizer icon is ONLY visible on the main Dashboard
                                     Box(
                                         modifier = Modifier
                                             .size(32.dp)
@@ -226,19 +243,19 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                                         color = palette.textPrimary
                                     )
                                 } else {
+                                    // On all other screens, the [m] Memorizer icon is EXPLICITLY HIDDEN
                                     val screenTitle = when (currentRoute) {
                                         "flashcard" -> "Flashcards"
-                                        "games" -> "Games"
+                                        "games" -> "Practice Games"
                                         "admin" -> "Control"
                                         "profile" -> "Profile"
-                                        "article_reader" -> "Articles"
                                         else -> currentRoute.replaceFirstChar { it.uppercase() }
                                     }
                                     Text(
                                         text = screenTitle,
                                         fontFamily = PoppinsFontFamily,
                                         fontSize = 20.sp,
-                                        fontWeight = FontWeight.ExtraBold,
+                                        fontWeight = FontWeight.Bold,
                                         color = palette.textPrimary
                                     )
                                 }
@@ -357,6 +374,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             availableGroups = distinctGroups,
                             isFocusMode = isFocusMode,
                             isFlipAnimationEnabled = isFlipAnimationEnabled,
+                            isHapticEnabled = isHapticEnabled,
                             onToggleFocusMode = { enable -> viewModel.setFocusMode(enable) },
                             onToggleGroup = { grp -> viewModel.toggleGroup(grp) },
                             onClearGroups = { viewModel.clearGroups() },
@@ -379,7 +397,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                         "games" -> GamePracticeScreen(
                             games = allGames,
                             questions = allQuestions,
-                            courses = allCourses,
+                            courses = allCourses.filter { selectedCourseIds.isEmpty() || it.id in selectedCourseIds },
                             activeCourseId = activeCourseId,
                             onCompleteQuiz = { score, total ->
                                 viewModel.recordQuizCompletion(score, total)
@@ -392,7 +410,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             },
                             articles = allArticles,
                             activeArticle = activeArticle,
-                            words = allWords,
+                            words = allWords.filter { selectedCourseIds.isEmpty() || it.courseId in selectedCourseIds },
                             onSelectArticle = { art -> viewModel.setActiveArticle(art) },
                             onSaveArticle = { title, content, author, id ->
                                 viewModel.saveArticle(title, content, author, id)
@@ -402,7 +420,8 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             },
                             onDeleteArticle = { id -> viewModel.deleteArticle(id) },
                             onRateWord = { id, st -> viewModel.rateWord(id, st) },
-                            onBack = { viewModel.navigateBack() }
+                            onBack = { viewModel.navigateBack() },
+                            onSectionChange = { selectedGameSection = it }
                         )
                         "article_reader" -> ArticleReaderScreen(
                             articles = allArticles,
@@ -430,6 +449,10 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             questions = allQuestions,
                             courses = allCourses,
                             activeCourseId = activeCourseId,
+                            selectedCourseIds = selectedCourseIds,
+                            onToggleCourseSelection = { cId -> viewModel.toggleCourseSelection(cId) },
+                            onSelectAllCourses = { viewModel.selectAllCourses() },
+                            onDeselectAllCourses = { viewModel.deselectAllCourses() },
                             isSyncingDrive = isSyncingDrive,
                             driveSyncUrl = driveSyncUrl,
                             driveSyncSummary = driveSyncSummary,
@@ -452,7 +475,8 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             onImportGame = { content, type -> viewModel.importGameFile(content, type) },
                             onImportGameItems = { items -> viewModel.importGameItems(items) },
                             onImportQB = { content -> viewModel.importQuestionBankFile(content) },
-                            onResetData = { viewModel.resetToSample() }
+                            onResetData = { viewModel.resetToSample() },
+                            onSubPageChange = { selectedAdminSubPage = it }
                         )
                         "profile" -> ProfileScreen(
                             user = currentUser,
@@ -465,9 +489,11 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             isDarkTheme = isDarkTheme,
                             isFlipAnimationEnabled = isFlipAnimationEnabled,
                             isFocusMode = isFocusMode,
+                            isHapticEnabled = isHapticEnabled,
                             onToggleDarkTheme = { viewModel.toggleDarkTheme() },
                             onToggleFlipAnimation = { enable -> viewModel.setFlipAnimationEnabled(enable) },
                             onToggleFocusMode = { enable -> viewModel.setFocusMode(enable) },
+                            onToggleHaptic = { enable -> viewModel.setHapticEnabled(enable) },
                             onSetCustomBackupTreeUri = { uri -> viewModel.setCustomBackupTreeUri(uri) },
                             onManualBackup = { viewModel.triggerManualBackup() },
                             onBackupToDriveDirect = { viewModel.backupDirectlyToLinkedFolder() },

@@ -58,12 +58,40 @@ class BackupManager(private val context: Context, private val database: AppDatab
     }
 
     /**
-     * Generates the complete JSON backup string containing courses, flashcards, articles, games, and questions.
+     * Retrieves the set of courses selected by user for study and backup.
      */
-    suspend fun generateBackupJsonString(userId: String = "1235"): String = withContext(Dispatchers.IO) {
-        val courses = database.courseDao().getAllCoursesList()
-        val words = database.vocabularyDao().getAllWordsList()
-        val articles = database.articleDao().getAllArticlesList()
+    fun getSelectedCourseIds(): Set<String>? {
+        val coursePrefs = context.getSharedPreferences("memorizer_course_prefs", Context.MODE_PRIVATE)
+        return coursePrefs.getStringSet("selected_course_ids", null)?.takeIf { it.isNotEmpty() }
+    }
+
+    /**
+     * Generates the complete JSON backup string containing courses, flashcards, articles, games, and questions.
+     * Only includes data belonging to selectedCourseIds if specified.
+     */
+    suspend fun generateBackupJsonString(userId: String = "1235", selectedCourseIds: Set<String>? = null): String = withContext(Dispatchers.IO) {
+        val targetCourseIds = selectedCourseIds ?: getSelectedCourseIds()
+        val allCourses = database.courseDao().getAllCoursesList()
+        val courses = if (targetCourseIds != null && targetCourseIds.isNotEmpty()) {
+            allCourses.filter { it.id in targetCourseIds }
+        } else {
+            allCourses
+        }
+
+        val allWords = database.vocabularyDao().getAllWordsList()
+        val words = if (targetCourseIds != null && targetCourseIds.isNotEmpty()) {
+            allWords.filter { it.courseId in targetCourseIds }
+        } else {
+            allWords
+        }
+
+        val allArticles = database.articleDao().getAllArticlesList()
+        val articles = if (targetCourseIds != null && targetCourseIds.isNotEmpty()) {
+            allArticles.filter { it.courseId == null || it.courseId in targetCourseIds }
+        } else {
+            allArticles
+        }
+
         val games = database.gamePracticeDao().getAllItemsList()
         val questions = database.questionBankDao().getAllQuestionsList()
         val progress = database.userProgressDao().getProgressOnce(userId)
@@ -224,9 +252,9 @@ class BackupManager(private val context: Context, private val database: AppDatab
     /**
      * Exports backup data directly to a user-chosen SAF file URI.
      */
-    suspend fun exportBackupToUri(uri: Uri, userId: String = "1235"): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun exportBackupToUri(uri: Uri, userId: String = "1235", selectedCourseIds: Set<String>? = null): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val jsonText = generateBackupJsonString(userId)
+            val jsonText = generateBackupJsonString(userId, selectedCourseIds)
             context.contentResolver.openOutputStream(uri)?.use { os ->
                 os.write(jsonText.toByteArray())
             } ?: return@withContext Result.failure(Exception("Failed to open output stream for selected file"))
@@ -241,13 +269,32 @@ class BackupManager(private val context: Context, private val database: AppDatab
     /**
      * Generates or updates both JSON and CSV files on the device automatically.
      * Writes to the public Documents/MemorizerBackup folder and also to custom SAF folder if granted.
-     * All courses, vocabulary words (course-separated), articles, games, and questions are backed up.
+     * Only courses, vocabulary words, and articles belonging to selectedCourseIds are included.
      */
-    suspend fun saveBackupFiles(userId: String = "1235"): Result<Pair<File, File>> = withContext(Dispatchers.IO) {
+    suspend fun saveBackupFiles(userId: String = "1235", selectedCourseIds: Set<String>? = null): Result<Pair<File, File>> = withContext(Dispatchers.IO) {
         try {
-            val courses = database.courseDao().getAllCoursesList()
-            val words = database.vocabularyDao().getAllWordsList()
-            val articles = database.articleDao().getAllArticlesList()
+            val targetCourseIds = selectedCourseIds ?: getSelectedCourseIds()
+            val allCourses = database.courseDao().getAllCoursesList()
+            val courses = if (targetCourseIds != null && targetCourseIds.isNotEmpty()) {
+                allCourses.filter { it.id in targetCourseIds }
+            } else {
+                allCourses
+            }
+
+            val allWords = database.vocabularyDao().getAllWordsList()
+            val words = if (targetCourseIds != null && targetCourseIds.isNotEmpty()) {
+                allWords.filter { it.courseId in targetCourseIds }
+            } else {
+                allWords
+            }
+
+            val allArticles = database.articleDao().getAllArticlesList()
+            val articles = if (targetCourseIds != null && targetCourseIds.isNotEmpty()) {
+                allArticles.filter { it.courseId == null || it.courseId in targetCourseIds }
+            } else {
+                allArticles
+            }
+
             val games = database.gamePracticeDao().getAllItemsList()
             val questions = database.questionBankDao().getAllQuestionsList()
             val progress = database.userProgressDao().getProgressOnce(userId)
@@ -485,8 +532,19 @@ class BackupManager(private val context: Context, private val database: AppDatab
             writeToSafTree(treeUri, "memorizer_backup.json", "application/json", jsonBytes)
             writeToSafTree(treeUri, "memorizer_progress.json", "application/json", jsonBytes)
 
-            val words = database.vocabularyDao().getAllWordsList()
-            val courses = database.courseDao().getAllCoursesList()
+            val targetCourseIds = getSelectedCourseIds()
+            val allCourses = database.courseDao().getAllCoursesList()
+            val courses = if (targetCourseIds != null && targetCourseIds.isNotEmpty()) {
+                allCourses.filter { it.id in targetCourseIds }
+            } else {
+                allCourses
+            }
+            val allWords = database.vocabularyDao().getAllWordsList()
+            val words = if (targetCourseIds != null && targetCourseIds.isNotEmpty()) {
+                allWords.filter { it.courseId in targetCourseIds }
+            } else {
+                allWords
+            }
             val courseMap = courses.associateBy { it.id }
             val csvSb = java.lang.StringBuilder()
             csvSb.append("id,courseId,courseTitle,group,Place1: Word,Place2: Meaning,Place3: Example,Place4: Synonyms,Place5: Extra,Place6: Mnemonic,status\n")

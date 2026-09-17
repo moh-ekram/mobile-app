@@ -89,6 +89,80 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
     private val coursePrefs = application.getSharedPreferences("memorizer_course_prefs", android.content.Context.MODE_PRIVATE)
     val activeCourseId = MutableStateFlow(coursePrefs.getString("saved_active_course_id", "") ?: "")
 
+    // Selected Courses State (Multi-Course Selection for Study & Backup)
+    private val _selectedCourseIds = MutableStateFlow<Set<String>>(
+        coursePrefs.getStringSet("selected_course_ids", null) ?: emptySet()
+    )
+    val selectedCourseIds: StateFlow<Set<String>> = _selectedCourseIds.asStateFlow()
+
+    fun toggleCourseSelection(courseId: String) {
+        val current = _selectedCourseIds.value.toMutableSet()
+        if (current.contains(courseId)) {
+            current.remove(courseId)
+        } else {
+            current.add(courseId)
+        }
+        _selectedCourseIds.value = current
+        coursePrefs.edit().putStringSet("selected_course_ids", current).apply()
+
+        // If current active course was deselected, switch to another selected course
+        if (activeCourseId.value.isNotBlank() && !current.contains(activeCourseId.value)) {
+            val fallback = current.firstOrNull() ?: ""
+            selectCourse(fallback)
+        } else if (activeCourseId.value.isBlank() && current.isNotEmpty()) {
+            selectCourse(current.first())
+        }
+
+        // Trigger backup refresh so only selected course data is backed up
+        viewModelScope.launch {
+            val uid = _currentUser.value?.userId ?: "1235"
+            repository.backupManager.saveBackupFiles(uid)
+        }
+    }
+
+    fun selectAllCourses() {
+        val allIds = allCourses.value.map { it.id }.toSet()
+        _selectedCourseIds.value = allIds
+        coursePrefs.edit().putStringSet("selected_course_ids", allIds).apply()
+        if (activeCourseId.value.isBlank() && allIds.isNotEmpty()) {
+            selectCourse(allIds.first())
+        }
+        viewModelScope.launch {
+            val uid = _currentUser.value?.userId ?: "1235"
+            repository.backupManager.saveBackupFiles(uid)
+        }
+    }
+
+    fun deselectAllCourses() {
+        _selectedCourseIds.value = emptySet()
+        coursePrefs.edit().putStringSet("selected_course_ids", emptySet()).apply()
+        viewModelScope.launch {
+            val uid = _currentUser.value?.userId ?: "1235"
+            repository.backupManager.saveBackupFiles(uid)
+        }
+    }
+
+    fun setCourseSelected(courseId: String, selected: Boolean) {
+        val current = _selectedCourseIds.value.toMutableSet()
+        if (selected) {
+            current.add(courseId)
+        } else {
+            current.remove(courseId)
+        }
+        _selectedCourseIds.value = current
+        coursePrefs.edit().putStringSet("selected_course_ids", current).apply()
+        if (activeCourseId.value.isNotBlank() && !current.contains(activeCourseId.value)) {
+            val fallback = current.firstOrNull() ?: ""
+            selectCourse(fallback)
+        } else if (activeCourseId.value.isBlank() && current.isNotEmpty()) {
+            selectCourse(current.first())
+        }
+        viewModelScope.launch {
+            val uid = _currentUser.value?.userId ?: "1235"
+            repository.backupManager.saveBackupFiles(uid)
+        }
+    }
+
     // Google Drive Sync State & Safe Progress Preservation
     private val _isSyncingDrive = MutableStateFlow(false)
     val isSyncingDrive: StateFlow<Boolean> = _isSyncingDrive.asStateFlow()
@@ -179,6 +253,11 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             val course = repository.createCourse(title, description)
             activeCourseId.value = course.id
+            val curSel = _selectedCourseIds.value.toMutableSet()
+            curSel.add(course.id)
+            _selectedCourseIds.value = curSel
+            coursePrefs.edit().putStringSet("selected_course_ids", curSel).apply()
+
             _statusMessage.value = "Course '${course.title}' created & selected!"
             if (!initialContent.isNullOrBlank()) {
                 val uid = _currentUser.value?.userId ?: "1235"
@@ -201,9 +280,14 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             val uid = _currentUser.value?.userId ?: "1235"
             repository.deleteCourse(courseId, uid)
+            val curSel = _selectedCourseIds.value.toMutableSet()
+            curSel.remove(courseId)
+            _selectedCourseIds.value = curSel
+            coursePrefs.edit().putStringSet("selected_course_ids", curSel).apply()
+
             if (activeCourseId.value == courseId) {
-                val remaining = allCourses.value.filter { it.id != courseId }
-                activeCourseId.value = remaining.firstOrNull()?.id ?: ""
+                val remaining = allCourses.value.filter { it.id != courseId && curSel.contains(it.id) }
+                activeCourseId.value = remaining.firstOrNull()?.id ?: curSel.firstOrNull() ?: ""
             }
             _statusMessage.value = "Course removed"
         }
@@ -237,6 +321,15 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         isFlipAnimationEnabled.value = enabled
         prefs.edit().putBoolean("is_flip_animation_enabled", enabled).apply()
         _statusMessage.value = if (enabled) "Card flip animation enabled" else "Card flip animation disabled"
+    }
+
+    // Flashcard Haptic Feedback Setting (Toggle in Profile: On/Off)
+    val isHapticEnabled = MutableStateFlow(prefs.getBoolean("is_haptic_enabled", true))
+
+    fun setHapticEnabled(enabled: Boolean) {
+        isHapticEnabled.value = enabled
+        prefs.edit().putBoolean("is_haptic_enabled", enabled).apply()
+        _statusMessage.value = if (enabled) "Haptic feedback enabled" else "Haptic feedback disabled"
     }
 
     // Flashcard Focus Mode (Hides bottom nav, enlarges card, positions tag buttons at bottom)
@@ -534,14 +627,22 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         },
         selectedStatuses,
         cardSortOrder,
-        randomOrderMap
-    ) { (words, courseId, groups), statuses, sortOrder, orderMap ->
-        if (courseId.isBlank()) {
-            // Without active course, show no flashcard data
+        randomOrderMap,
+        selectedCourseIds
+    ) { (words, courseId, groups), statuses, sortOrder, orderMap, selIds ->
+        val effectiveCourseId = if (courseId.isNotBlank() && (selIds.isEmpty() || selIds.contains(courseId))) {
+            courseId
+        } else {
+            selIds.firstOrNull() ?: ""
+        }
+
+        if (effectiveCourseId.isBlank() || (selIds.isNotEmpty() && !selIds.contains(effectiveCourseId))) {
+            // Without selected active course, show no flashcard data
             emptyList()
         } else {
             val filtered = words.filter { w ->
-                w.courseId == courseId &&
+                w.courseId == effectiveCourseId &&
+                (selIds.isEmpty() || selIds.contains(w.courseId)) &&
                 (groups.isEmpty() || groups.contains(w.group)) &&
                 (statuses.isEmpty() || statuses.contains(w.status))
             }
@@ -562,18 +663,32 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
             allCourses.collect { list ->
                 if (list.isEmpty()) {
                     activeCourseId.value = ""
+                    _selectedCourseIds.value = emptySet()
                     return@collect
                 }
+
+                // Synchronize selected courses
+                val savedSelected = coursePrefs.getStringSet("selected_course_ids", null)
+                if (savedSelected != null) {
+                    val valid = savedSelected.filter { id -> list.any { it.id == id } }.toSet()
+                    _selectedCourseIds.value = valid
+                } else {
+                    val allIds = list.map { it.id }.toSet()
+                    _selectedCourseIds.value = allIds
+                    coursePrefs.edit().putStringSet("selected_course_ids", allIds).apply()
+                }
+
+                val currentSelected = _selectedCourseIds.value
                 val savedId = coursePrefs.getString("saved_active_course_id", "") ?: ""
                 val current = activeCourseId.value
-                if (savedId.isNotBlank() && list.any { it.id == savedId }) {
+                if (savedId.isNotBlank() && list.any { it.id == savedId } && (currentSelected.isEmpty() || currentSelected.contains(savedId))) {
                     if (current != savedId) {
                         activeCourseId.value = savedId
                     }
-                } else if (current.isNotBlank() && list.any { it.id == current }) {
+                } else if (current.isNotBlank() && list.any { it.id == current } && (currentSelected.isEmpty() || currentSelected.contains(current))) {
                     coursePrefs.edit().putString("saved_active_course_id", current).apply()
                 } else {
-                    val fallbackId = list.first().id
+                    val fallbackId = currentSelected.firstOrNull() ?: list.first().id
                     activeCourseId.value = fallbackId
                     coursePrefs.edit().putString("saved_active_course_id", fallbackId).apply()
                 }

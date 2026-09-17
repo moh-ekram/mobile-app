@@ -23,7 +23,9 @@ data class AppPalette(
     val textMuted: Color,
     val border: Color,
     val cardBorder: Color
-)
+) {
+    val textSecondary: Color get() = textMuted
+}
 
 val LocalAppPalette = staticCompositionLocalOf {
     AppPalette(

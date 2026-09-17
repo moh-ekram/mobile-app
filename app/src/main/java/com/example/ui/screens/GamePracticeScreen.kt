@@ -2,21 +2,28 @@ package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.AllInclusive
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Checklist
@@ -24,6 +31,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CompareArrows
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.FolderOpen
@@ -36,8 +44,10 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Quiz
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Tune
+import kotlinx.coroutines.delay
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -202,6 +212,7 @@ fun GamePracticeScreen(
     onDeleteArticle: (String) -> Unit = {},
     onRateWord: (wordId: String, status: String) -> Unit = { _, _ -> },
     onBack: () -> Unit = {},
+    onSectionChange: (String?) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -210,6 +221,10 @@ fun GamePracticeScreen(
 
     // Top Section: null means list menu of categories; non-null opens dedicated section
     var selectedSection by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(selectedSection) {
+        onSectionChange(selectedSection)
+    }
 
     // Active Quiz State (Vertical Single-Page Quiz List)
     var activeQuestions by remember { mutableStateOf<List<QuizQuestionItem>>(emptyList()) }
@@ -243,42 +258,108 @@ fun GamePracticeScreen(
     var qbFilters3 by remember { mutableStateOf<Set<String>>(emptySet()) }
     var qbQuestionCount by remember { mutableIntStateOf(5) }
 
-    fun getPlace1(w: VocabularyWordEntity): String {
+    fun getPlaceValueAndLabel(w: VocabularyWordEntity, placeNumber: Int): Pair<String, String> {
+        // First check customPlacesJson
         if (!w.customPlacesJson.isNullOrBlank()) {
             try {
                 val json = JSONObject(w.customPlacesJson)
+                val entries = mutableListOf<Pair<String, String>>()
                 val keys = json.keys()
                 while (keys.hasNext()) {
                     val k = keys.next()
-                    val kClean = k.lowercase().replace("_", "").replace(" ", "").replace("-", "")
-                    if (kClean == "place1" || kClean.startsWith("place1") || kClean == "word") {
-                        val v = json.optString(k, "").trim()
-                        if (v.isNotBlank()) return v
+                    val v = json.optString(k, "").trim()
+                    if (v.isNotBlank()) {
+                        entries.add(k to v)
                     }
+                }
+                // 1. Explicit key match for "place$placeNumber" or "place $placeNumber"
+                for ((k, v) in entries) {
+                    val kClean = k.lowercase().replace("_", "").replace(" ", "").replace("-", "")
+                    if (kClean == "place$placeNumber" || kClean.startsWith("place$placeNumber")) {
+                        return k to v
+                    }
+                }
+                // 2. Semantic key match based on standard place semantic conventions
+                for ((k, v) in entries) {
+                    val kLower = k.lowercase()
+                    when (placeNumber) {
+                        2 -> if (kLower.contains("meaning") || kLower.contains("definition") || kLower.contains("translation")) return k to v
+                        3 -> if (kLower.contains("example") || kLower.contains("sentence") || kLower.contains("synonym")) return k to v
+                        4 -> if (kLower.contains("synonym") || kLower.contains("example") || kLower.contains("sentence")) return k to v
+                        5 -> if (kLower.contains("form") || kLower.contains("derivative") || kLower.contains("extra") || kLower.contains("mnemonic") || kLower.contains("trick")) return k to v
+                    }
+                }
+                // 3. Positional fallback from parsed custom columns (1-indexed)
+                if (placeNumber - 1 in entries.indices) {
+                    val entry = entries[placeNumber - 1]
+                    return entry.first to entry.second
                 }
             } catch (_: Exception) {}
         }
-        return w.word.trim()
+
+        // Entity fields fallback
+        return when (placeNumber) {
+            1 -> "Word" to w.word.trim()
+            2 -> "Meaning" to w.meaning.trim()
+            3 -> {
+                val value = (w.synonyms ?: w.example ?: w.extraMeaning ?: "").trim()
+                val lbl = if (!w.synonyms.isNullOrBlank()) "Synonyms" else if (!w.example.isNullOrBlank()) "Example" else "Place 3"
+                lbl to value
+            }
+            4 -> {
+                val value = (w.example ?: w.synonyms ?: "").trim()
+                val lbl = if (!w.example.isNullOrBlank()) "Example Sentence" else if (!w.synonyms.isNullOrBlank()) "Synonyms" else "Place 4"
+                lbl to value
+            }
+            5 -> {
+                val value = (w.extraWord ?: w.mnemonic ?: "").trim()
+                val lbl = if (!w.extraWord.isNullOrBlank()) "Forms / Derivative" else if (!w.mnemonic.isNullOrBlank()) "Mnemonic" else "Place 5"
+                lbl to value
+            }
+            else -> "Place $placeNumber" to ""
+        }
     }
 
-    fun getPlace2(w: VocabularyWordEntity): String {
-        if (!w.customPlacesJson.isNullOrBlank()) {
-            try {
-                val json = JSONObject(w.customPlacesJson)
-                val keys = json.keys()
-                while (keys.hasNext()) {
-                    val k = keys.next()
-                    val kClean = k.lowercase().replace("_", "").replace(" ", "").replace("-", "")
-                    if (kClean == "place2" || kClean.startsWith("place2") ||
-                        kClean == "meaning" || kClean.contains("meaning") || kClean.contains("definition") || kClean.contains("translation")
-                    ) {
-                        val v = json.optString(k, "").trim()
-                        if (v.isNotBlank()) return v
-                    }
-                }
-            } catch (_: Exception) {}
+    fun getPlace(w: VocabularyWordEntity, placeNumber: Int): String {
+        return getPlaceValueAndLabel(w, placeNumber).second
+    }
+
+    fun getPlace1(w: VocabularyWordEntity): String = getPlace(w, 1)
+    fun getPlace2(w: VocabularyWordEntity): String = getPlace(w, 2)
+
+    fun getExplanationForWord(w: VocabularyWordEntity): String {
+        val (p4Label, p4Val) = getPlaceValueAndLabel(w, 4)
+        val (p5Label, p5Val) = getPlaceValueAndLabel(w, 5)
+
+        val hasP4 = p4Val.isNotBlank()
+        val hasP5 = p5Val.isNotBlank()
+
+        if (hasP4 || hasP5) {
+            val parts = mutableListOf<String>()
+            if (hasP4) {
+                val prefix = if (p4Label.isNotBlank() && !p4Val.startsWith(p4Label, ignoreCase = true)) "[$p4Label]\n" else ""
+                parts.add("$prefix$p4Val")
+            }
+            if (hasP5) {
+                val prefix = if (p5Label.isNotBlank() && !p5Val.startsWith(p5Label, ignoreCase = true)) "[$p5Label]\n" else ""
+                parts.add("$prefix$p5Val")
+            }
+            return parts.joinToString("\n\n")
         }
-        return w.meaning.trim()
+
+        // Fallback: If neither place4 nor place5 has data, provide place2 & place3!
+        val (p2Label, p2Val) = getPlaceValueAndLabel(w, 2)
+        val (p3Label, p3Val) = getPlaceValueAndLabel(w, 3)
+        val fallbackParts = mutableListOf<String>()
+        if (p2Val.isNotBlank()) {
+            val prefix = if (p2Label.isNotBlank() && !p2Val.startsWith(p2Label, ignoreCase = true)) "[$p2Label]\n" else ""
+            fallbackParts.add("$prefix$p2Val")
+        }
+        if (p3Val.isNotBlank()) {
+            val prefix = if (p3Label.isNotBlank() && !p3Val.startsWith(p3Label, ignoreCase = true)) "[$p3Label]\n" else ""
+            fallbackParts.add("$prefix$p3Val")
+        }
+        return fallbackParts.joinToString("\n\n")
     }
 
     // Intercept back button: 
@@ -370,23 +451,10 @@ fun GamePracticeScreen(
                         opt3 = opt3,
                         opt4 = opt4,
                         answer = p2,
-                        explanation = (if (word.meaning.isNotBlank()) "Meaning: ${word.meaning}" else "") +
-                                (if (!word.example.isNullOrBlank()) "\nExample: ${word.example}" else ""),
+                        explanation = getExplanationForWord(word),
                         lastAttemptStatus = word.lastQuizStatus
                     )
                 }
-            }
-            "odd_one_out", "analogy", "practice" -> {
-                val base = games.filter { it.sheetType == section }
-                val filtered = when (statusFilter) {
-                    "correct" -> base.filter { it.lastAttemptStatus == "correct" }
-                    "incorrect" -> base.filter { it.lastAttemptStatus == "incorrect" }
-                    "not_studied" -> base.filter { it.lastAttemptStatus == null || it.lastAttemptStatus == "not_studied" }
-                    else -> base
-                }
-                val count = maxCount ?: gameQuestionCount
-                (if (count > 0 && count < filtered.size) filtered.shuffled().take(count) else filtered.shuffled())
-                    .map { it.toQuizItem() }
             }
             "question_bank" -> {
                 val filtered = questions.filter { q ->
@@ -464,91 +532,7 @@ fun GamePracticeScreen(
                     )
                 }
 
-                // 1. Odd One Out
-                item {
-                    val oooItems = games.filter { it.sheetType == "odd_one_out" }
-                    val oooCorrect = oooItems.count { it.lastAttemptStatus == "correct" }
-                    val oooIncorrect = oooItems.count { it.lastAttemptStatus == "incorrect" }
-                    val oooNotStudied = oooItems.count { it.lastAttemptStatus == null || it.lastAttemptStatus == "not_studied" }
-                    val oooAttempted = oooCorrect + oooIncorrect
-                    val oooRatio = if (oooAttempted > 0) (oooCorrect * 100 / oooAttempted) else 0
-
-                    GameCategoryCard(
-                        title = "Odd One Out",
-                        description = null,
-                        count = oooItems.size,
-                        icon = Icons.Default.FilterAlt,
-                        badgeColor = Color(0xFF8B5CF6),
-                        correctCount = oooCorrect,
-                        incorrectCount = oooIncorrect,
-                        notStudiedCount = oooNotStudied,
-                        accuracyPercent = oooRatio,
-                        onClick = {
-                            selectedSection = "odd_one_out"
-                            activeQuestions = emptyList()
-                            isQuizCompleted = false
-                            gameStatusFilter = "all"
-                        }
-                    )
-                }
-
-                // 2. Analogy Practice
-                item {
-                    val analogyItems = games.filter { it.sheetType == "analogy" }
-                    val analogyCorrect = analogyItems.count { it.lastAttemptStatus == "correct" }
-                    val analogyIncorrect = analogyItems.count { it.lastAttemptStatus == "incorrect" }
-                    val analogyNotStudied = analogyItems.count { it.lastAttemptStatus == null || it.lastAttemptStatus == "not_studied" }
-                    val analogyAttempted = analogyCorrect + analogyIncorrect
-                    val analogyRatio = if (analogyAttempted > 0) (analogyCorrect * 100 / analogyAttempted) else 0
-
-                    GameCategoryCard(
-                        title = "Analogy Practice",
-                        description = null,
-                        count = analogyItems.size,
-                        icon = Icons.Default.CompareArrows,
-                        badgeColor = Color(0xFF0284C7),
-                        correctCount = analogyCorrect,
-                        incorrectCount = analogyIncorrect,
-                        notStudiedCount = analogyNotStudied,
-                        accuracyPercent = analogyRatio,
-                        onClick = {
-                            selectedSection = "analogy"
-                            activeQuestions = emptyList()
-                            isQuizCompleted = false
-                            gameStatusFilter = "all"
-                        }
-                    )
-                }
-
-                // 3. Practice Quiz
-                item {
-                    val practiceItems = games.filter { it.sheetType == "practice" }
-                    val practiceCorrect = practiceItems.count { it.lastAttemptStatus == "correct" }
-                    val practiceIncorrect = practiceItems.count { it.lastAttemptStatus == "incorrect" }
-                    val practiceNotStudied = practiceItems.count { it.lastAttemptStatus == null || it.lastAttemptStatus == "not_studied" }
-                    val practiceAttempted = practiceCorrect + practiceIncorrect
-                    val practiceRatio = if (practiceAttempted > 0) (practiceCorrect * 100 / practiceAttempted) else 0
-
-                    GameCategoryCard(
-                        title = "Practice Quiz",
-                        description = null,
-                        count = practiceItems.size,
-                        icon = Icons.Default.Quiz,
-                        badgeColor = EmeraldSuccess,
-                        correctCount = practiceCorrect,
-                        incorrectCount = practiceIncorrect,
-                        notStudiedCount = practiceNotStudied,
-                        accuracyPercent = practiceRatio,
-                        onClick = {
-                            selectedSection = "practice"
-                            activeQuestions = emptyList()
-                            isQuizCompleted = false
-                            gameStatusFilter = "all"
-                        }
-                    )
-                }
-
-                // 4. Question Bank
+                // Question Bank
                 item {
                     GameCategoryCard(
                         title = "Question Bank (QB)",
@@ -564,7 +548,7 @@ fun GamePracticeScreen(
                     )
                 }
 
-                // 5. Read Article
+                // Read Article
                 item {
                     GameCategoryCard(
                         title = "Read Article",
@@ -606,9 +590,6 @@ fun GamePracticeScreen(
                     Text(
                         text = when (selectedSection) {
                             "course_quiz" -> "Quiz test"
-                            "odd_one_out" -> "Odd One Out"
-                            "analogy" -> "Analogy Practice"
-                            "practice" -> "Practice Quiz"
                             "question_bank" -> "Question Bank (QB)"
                             "read_article" -> "Read Article"
                             else -> "Practice"
@@ -661,23 +642,6 @@ fun GamePracticeScreen(
                     getPlace1 = ::getPlace1,
                     getPlace2 = ::getPlace2,
                     onStart = { startQuizForCategory("course_quiz") }
-                )
-            } else if (selectedSection in listOf("odd_one_out", "analogy", "practice") && activeQuestions.isEmpty() && !isQuizCompleted) {
-                val secTitle = when (selectedSection) {
-                    "odd_one_out" -> "Odd One Out"
-                    "analogy" -> "Analogy Practice"
-                    "practice" -> "Practice Quiz"
-                    else -> "Practice"
-                }
-                GameModeConfigView(
-                    section = selectedSection ?: "odd_one_out",
-                    title = secTitle,
-                    games = games,
-                    selectedStatus = gameStatusFilter,
-                    onStatusChange = { gameStatusFilter = it },
-                    questionCount = gameQuestionCount,
-                    onCountChange = { gameQuestionCount = it },
-                    onStart = { startQuizForCategory(selectedSection ?: "odd_one_out", gameStatusFilter, gameQuestionCount) }
                 )
             } else if (selectedSection == "question_bank" && activeQuestions.isEmpty() && !isQuizCompleted) {
                 QuestionBankConfigView(
@@ -1019,302 +983,6 @@ fun GamePracticeScreen(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun GameModeConfigView(
-    section: String,
-    title: String,
-    games: List<GamePracticeEntity>,
-    selectedStatus: String,
-    onStatusChange: (String) -> Unit,
-    questionCount: Int,
-    onCountChange: (Int) -> Unit,
-    onStart: () -> Unit
-) {
-    val sectionItems = games.filter { it.sheetType == section }
-    val correctItems = sectionItems.filter { it.lastAttemptStatus == "correct" }
-    val incorrectItems = sectionItems.filter { it.lastAttemptStatus == "incorrect" }
-    val notStudiedItems = sectionItems.filter { it.lastAttemptStatus == null || it.lastAttemptStatus == "not_studied" }
-    val attemptedCount = correctItems.size + incorrectItems.size
-    val accuracyPercent = if (attemptedCount > 0) (correctItems.size * 100 / attemptedCount) else 0
-
-    val filteredCount = when (selectedStatus) {
-        "correct" -> correctItems.size
-        "incorrect" -> incorrectItems.size
-        "not_studied" -> notStudiedItems.size
-        else -> sectionItems.size
-    }
-
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        item {
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(SlateBorder))
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    Text(
-                        text = title,
-                        fontFamily = PoppinsFontFamily,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = SlateText
-                    )
-                    // Sub-heading and description removed as requested
-
-                    // Accuracy & Ratio Card
-                    Card(
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
-                        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(SlateBorder)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.TrendingUp,
-                                        contentDescription = null,
-                                        tint = if (attemptedCount > 0) Color(0xFF15803D) else SlateMuted,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Text(
-                                        text = "Accuracy Rate",
-                                        fontFamily = PoppinsFontFamily,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = SlateText
-                                    )
-                                }
-
-                                Text(
-                                    text = if (attemptedCount > 0) "$accuracyPercent%" else "N/A",
-                                    fontFamily = PoppinsFontFamily,
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = if (accuracyPercent >= 70) Color(0xFF15803D) else if (attemptedCount > 0) RoseError else SlateMuted
-                                )
-                            }
-
-                            Text(
-                                text = if (attemptedCount > 0)
-                                    "${correctItems.size} of $attemptedCount attempted questions answered correctly"
-                                else
-                                    "No questions attempted yet for this mode",
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 11.sp,
-                                color = SlateMuted
-                            )
-
-                            // Status breakdown chips
-                            FlowRow(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(Color(0xFFDCFCE7))
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        text = "✓ ${correctItems.size} Correct",
-                                        fontFamily = PoppinsFontFamily,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color(0xFF15803D)
-                                    )
-                                }
-
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(Color(0xFFFFE4E6))
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        text = "✗ ${incorrectItems.size} Incorrect",
-                                        fontFamily = PoppinsFontFamily,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = RoseError
-                                    )
-                                }
-
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(Color(0xFFF1F5F9))
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        text = "○ ${notStudiedItems.size} Not Studied",
-                                        fontFamily = PoppinsFontFamily,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = SlateMuted
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Status Filter Section
-                    Text(
-                        text = "Filter by History",
-                        fontFamily = PoppinsFontFamily,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = SlateText
-                    )
-
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        FilterChip(
-                            selected = selectedStatus == "all",
-                            onClick = { onStatusChange("all") },
-                            label = { Text("All (${sectionItems.size})") },
-                            shape = CircleShape,
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = IndigoPrimary,
-                                selectedLabelColor = Color.White
-                            )
-                        )
-
-                        FilterChip(
-                            selected = selectedStatus == "correct",
-                            onClick = { onStatusChange("correct") },
-                            label = { Text("Previous Correct (${correctItems.size})") },
-                            shape = CircleShape,
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Color(0xFF15803D),
-                                selectedLabelColor = Color.White
-                            )
-                        )
-
-                        FilterChip(
-                            selected = selectedStatus == "incorrect",
-                            onClick = { onStatusChange("incorrect") },
-                            label = { Text("Previous Incorrect (${incorrectItems.size})") },
-                            shape = CircleShape,
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = RoseError,
-                                selectedLabelColor = Color.White
-                            )
-                        )
-
-                        FilterChip(
-                            selected = selectedStatus == "not_studied",
-                            onClick = { onStatusChange("not_studied") },
-                            label = { Text("Not Studied (${notStudiedItems.size})") },
-                            shape = CircleShape,
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = IndigoPrimary,
-                                selectedLabelColor = Color.White
-                            )
-                        )
-                    }
-
-                    // Question Count Selector
-                    Text(
-                        text = "Number of Questions",
-                        fontFamily = PoppinsFontFamily,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = SlateText
-                    )
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(5, 10, 15, 20).forEach { cnt ->
-                            FilterChip(
-                                selected = questionCount == cnt,
-                                onClick = { onCountChange(cnt) },
-                                label = { Text("$cnt Qs") },
-                                shape = CircleShape,
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = IndigoPrimary,
-                                    selectedLabelColor = Color.White
-                                )
-                            )
-                        }
-                    }
-
-                    // Match summary
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = IndigoLight.copy(alpha = 0.5f)),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(Icons.Default.FilterList, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(18.dp))
-                            Text(
-                                text = "$filteredCount questions available for this filter",
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = IndigoPrimary
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    Button(
-                        onClick = onStart,
-                        enabled = filteredCount > 0,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(50.dp)
-                            .testTag("start_game_practice_button"),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null)
-                            Text(
-                                text = if (filteredCount > 0)
-                                    "Start Practice (${minOf(questionCount, filteredCount)} Questions)"
-                                else
-                                    "No Questions Match Filter",
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
 private fun QuestionBankConfigView(
     questions: List<QuestionBankEntity>,
     selectedFilters1: Set<String>,
@@ -1361,9 +1029,9 @@ private fun QuestionBankConfigView(
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     Text(
-                        text = "Question Bank Test",
+                        text = "Filter & Category Selection",
                         fontFamily = PoppinsFontFamily,
-                        fontSize = 17.sp,
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = SlateText
                     )
@@ -1786,49 +1454,53 @@ private fun GameCategoryCard(
                 }
 
                 if (accuracyPercent != null && count > 0) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        val hasAttempts = ((correctCount ?: 0) + (incorrectCount ?: 0)) > 0
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(if (hasAttempts) Color(0xFFDCFCE7) else Color(0xFFF1F5F9))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                    val hasAttempts = ((correctCount ?: 0) + (incorrectCount ?: 0)) > 0
+                    if (hasAttempts || (correctCount ?: 0) > 0 || (incorrectCount ?: 0) > 0 || (notStudiedCount ?: 0) > 0) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = if (hasAttempts) (if (isPooled) "$accuracyPercent% Pooled" else "$accuracyPercent% Accuracy") else "Not Started",
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (hasAttempts) Color(0xFF15803D) else SlateMuted
-                            )
-                        }
+                            if (hasAttempts) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(Color(0xFFDCFCE7))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = if (isPooled) "$accuracyPercent% Pooled" else "$accuracyPercent% Accuracy",
+                                        fontFamily = PoppinsFontFamily,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF15803D)
+                                    )
+                                }
+                            }
 
-                        if ((correctCount ?: 0) > 0) {
-                            Text(
-                                text = "✓ $correctCount",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF16A34A)
-                            )
-                        }
-                        if ((incorrectCount ?: 0) > 0) {
-                            Text(
-                                text = "✗ $incorrectCount",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = RoseError
-                            )
-                        }
-                        if ((notStudiedCount ?: 0) > 0) {
-                            Text(
-                                text = "○ $notStudiedCount new",
-                                fontSize = 10.sp,
-                                color = SlateMuted
-                            )
+                            if ((correctCount ?: 0) > 0) {
+                                Text(
+                                    text = "✓ $correctCount",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF16A34A)
+                                )
+                            }
+                            if ((incorrectCount ?: 0) > 0) {
+                                Text(
+                                    text = "✗ $incorrectCount",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = RoseError
+                                )
+                            }
+                            if ((notStudiedCount ?: 0) > 0) {
+                                Text(
+                                    text = "○ $notStudiedCount new",
+                                    fontSize = 10.sp,
+                                    color = SlateMuted
+                                )
+                            }
                         }
                     }
                 }
@@ -1983,8 +1655,9 @@ private fun CourseQuizConfigView(
         verticalArrangement = Arrangement.spacedBy(16.dp),
         contentPadding = PaddingValues(bottom = 28.dp)
     ) {
-        // 1. Quiz Test Header Card (Strictly without sub heading or description)
+        // 1. Statistics Header Card with Graphical Rate and Ratio Visualizers
         item {
+            val pooledIncorrect = (pooledTotal - pooledCorrect).coerceAtLeast(0)
             Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
@@ -1994,95 +1667,202 @@ private fun CourseQuizConfigView(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    // Header Row: Title & Optional Accuracy Tag
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "Quiz test",
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = SlateText
-                        )
-
-                        // Pooled Accuracy Ratio Badge
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(IndigoLight)
-                                .border(1.dp, Color(0xFFC7D2FE), RoundedCornerShape(12.dp))
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(CircleShape)
+                                    .background(IndigoLight),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.TrendingUp,
+                                    contentDescription = null,
+                                    tint = IndigoPrimary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                             Text(
-                                text = if (pooledTotal > 0) "$pooledAccuracy% Pooled Accuracy" else "Not Started",
+                                text = "Statistics",
                                 fontFamily = PoppinsFontFamily,
-                                fontSize = 12.sp,
+                                fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = IndigoPrimary
+                                color = SlateText
                             )
+                        }
+
+                        if (pooledTotal > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(IndigoLight)
+                                    .border(1.dp, Color(0xFFC7D2FE), RoundedCornerShape(12.dp))
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                            ) {
+                                Text(
+                                    text = "$pooledAccuracy% Accuracy",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = IndigoPrimary
+                                )
+                            }
                         }
                     }
 
-                    // Pooled Accuracy Metrics
+                    // Graphical Rate (Circle Percentage) & Ratio (Segmented Bar)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
+                        // 1. Circular Percentage Progress Gauge
                         Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFFDCFCE7))
-                                .padding(vertical = 8.dp),
+                            modifier = Modifier.size(74.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(
-                                text = "✓ $pooledCorrect Correct",
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF15803D)
-                            )
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                val strokeWidth = 7.dp.toPx()
+                                val radius = (size.minDimension - strokeWidth) / 2
+                                // Background circular track
+                                drawCircle(
+                                    color = Color(0xFFE2E8F0),
+                                    radius = radius,
+                                    style = Stroke(width = strokeWidth)
+                                )
+                                // Foreground circular progress arc
+                                val sweepAngle = (pooledAccuracy.coerceIn(0, 100) / 100f) * 360f
+                                if (sweepAngle > 0f) {
+                                    drawArc(
+                                        color = if (pooledAccuracy >= 70) Color(0xFF10B981) else if (pooledAccuracy >= 40) Color(0xFF6366F1) else Color(0xFFF59E0B),
+                                        startAngle = -90f,
+                                        sweepAngle = sweepAngle,
+                                        useCenter = false,
+                                        style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+                                    )
+                                }
+                            }
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "$pooledAccuracy%",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = SlateText
+                                )
+                                Text(
+                                    text = "Rate",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = SlateMuted
+                                )
+                            }
                         }
 
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFFFEE2E2))
-                                .padding(vertical = 8.dp),
-                            contentAlignment = Alignment.Center
+                        // 2. Graphic Ratio Bar & Ratio Information
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text(
-                                text = "✕ ${(pooledTotal - pooledCorrect).coerceAtLeast(0)} Incorrect",
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFFB91C1C)
-                            )
-                        }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Accuracy Ratio",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = SlateText
+                                )
+                                Text(
+                                    text = if (pooledTotal > 0) "$pooledCorrect : $pooledIncorrect" else "0 : 0",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = IndigoPrimary
+                                )
+                            }
 
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFFF1F5F9))
-                                .padding(vertical = 8.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "📝 $attempts Attempts",
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF475569)
-                            )
+                            // Graphical Segmented Ratio Bar
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(10.dp)
+                                    .clip(RoundedCornerShape(5.dp))
+                                    .background(Color(0xFFF1F5F9))
+                            ) {
+                                if (pooledTotal > 0) {
+                                    if (pooledCorrect > 0 && pooledIncorrect > 0) {
+                                        Row(modifier = Modifier.fillMaxSize()) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .weight(pooledCorrect.toFloat())
+                                                    .fillMaxHeight()
+                                                    .background(Color(0xFF22C55E))
+                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .weight(pooledIncorrect.toFloat())
+                                                    .fillMaxHeight()
+                                                    .background(Color(0xFFEF4444))
+                                            )
+                                        }
+                                    } else if (pooledCorrect > 0) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(Color(0xFF22C55E))
+                                        )
+                                    } else if (pooledIncorrect > 0) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(Color(0xFFEF4444))
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Ratio Breakdown Percentages
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "✓ $pooledCorrect (${if (pooledTotal > 0) pooledAccuracy else 0}%)",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF15803D)
+                                )
+                                Text(
+                                    text = "✕ $pooledIncorrect (${if (pooledTotal > 0) (100 - pooledAccuracy) else 0}%)",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFFB91C1C)
+                                )
+                            }
                         }
                     }
+
+
                 }
             }
         }
@@ -2129,48 +1909,21 @@ private fun CourseQuizConfigView(
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
-                            Column {
-                                Text(
-                                    text = "Filter Options",
-                                    fontFamily = PoppinsFontFamily,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = SlateText
-                                )
-                                Text(
-                                    text = if (isFilterGridOpen) "Tap to close filter grid" else "Tap to open filter grid (Quiz, Group, Status)",
-                                    fontFamily = PoppinsFontFamily,
-                                    fontSize = 11.sp,
-                                    color = SlateMuted
-                                )
-                            }
-                        }
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isFilterGridOpen) IndigoPrimary.copy(alpha = 0.15f) else Color(0xFFF1F5F9))
-                                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                            ) {
-                                Text(
-                                    text = if (isFilterGridOpen) "Grid Open" else "Grid Hidden",
-                                    fontFamily = PoppinsFontFamily,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isFilterGridOpen) IndigoPrimary else SlateMuted
-                                )
-                            }
-                            Icon(
-                                imageVector = if (isFilterGridOpen) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                                contentDescription = if (isFilterGridOpen) "Collapse Filter Grid" else "Expand Filter Grid",
-                                tint = SlateMuted,
-                                modifier = Modifier.size(22.dp)
+                            Text(
+                                text = "Filter Options",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = SlateText
                             )
                         }
+
+                        Icon(
+                            imageVector = if (isFilterGridOpen) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                            contentDescription = if (isFilterGridOpen) "Collapse Filter Grid" else "Expand Filter Grid",
+                            tint = SlateMuted,
+                            modifier = Modifier.size(22.dp)
+                        )
                     }
 
                     // Active Filters Summary Badges
@@ -2257,7 +2010,7 @@ private fun CourseQuizConfigView(
                             ) {
                                 Icon(Icons.Default.Tune, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(18.dp))
                                 Text(
-                                    text = "Filter Grid (Multiple Select)",
+                                    text = "Filter Options",
                                     fontFamily = PoppinsFontFamily,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
@@ -2265,7 +2018,7 @@ private fun CourseQuizConfigView(
                                 )
                             }
                             Text(
-                                text = "Multi-Select Enabled",
+                                text = "Multi-Select",
                                 fontFamily = PoppinsFontFamily,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold,
