@@ -76,6 +76,7 @@ dependencies {
   implementation(libs.coil.compose)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.okhttp)
+  implementation(libs.jsoup)
   debugImplementation(libs.androidx.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
 }

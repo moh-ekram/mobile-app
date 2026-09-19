@@ -816,12 +816,15 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         _statusMessage.value = "Signed out"
     }
 
-    // Flashcard Actions: Smooth transition without double-skipping
+    // Flashcard & Word Actions: Persist status across all screens (Reader, Flashcards, Quiz)
     fun rateWord(wordId: String, status: String) {
         viewModelScope.launch {
             val uid = _currentUser.value?.userId ?: "1235"
+            // Always persist status to database immediately
+            repository.updateWordStatus(wordId, status, uid)
+
             val currentList = filteredWords.value
-            if (currentList.isEmpty()) return@launch
+            if (currentList.isEmpty() || !currentList.any { it.id == wordId }) return@launch
 
             val currentIndex = currentWordIndex.value.coerceIn(0, currentList.size - 1)
 
@@ -835,9 +838,6 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
                     currentList[0].id // wrap around to first card
                 }
             } else null
-
-            // Update status in repository
-            repository.updateWordStatus(wordId, status, uid)
 
             if (!hasUserExplicitlySetStatus.value) {
                 val updatedWords = allWords.value.map { if (it.id == wordId) it.copy(status = status) else it }

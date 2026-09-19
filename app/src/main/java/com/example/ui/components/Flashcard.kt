@@ -461,10 +461,61 @@ private fun BackFaceContent(
             verticalArrangement = Arrangement.SpaceEvenly
         ) {
             // Filter out place1 because place1 (the word) is exclusively shown on the front face
-            val backPlacesList = remember(customPlacesList) {
-                customPlacesList.filterNot { (label, _) ->
+            val backPlacesList = remember(customPlacesList, word.word) {
+                customPlacesList.filterNot { (label, value) ->
                     val labelLower = label.lowercase().trim()
-                    labelLower.startsWith("place1") || labelLower.contains("place 1") || labelLower == "word"
+                    val labelClean = labelLower.replace("_", "").replace(" ", "").replace("-", "")
+                    val valTrimmed = value.trim()
+                    val wordTrimmed = word.word.trim()
+
+                    // 1. Value matches front-face word directly (case-insensitive or alphanumeric match)
+                    val isValueMatch = valTrimmed.equals(wordTrimmed, ignoreCase = true) ||
+                            (valTrimmed.isNotBlank() && wordTrimmed.isNotBlank() &&
+                                valTrimmed.filter { it.isLetterOrDigit() }.equals(wordTrimmed.filter { it.isLetterOrDigit() }, ignoreCase = true))
+
+                    // 2. Explicit Place 1 label match
+                    val isPlace1Label = labelClean.startsWith("place1") ||
+                            labelLower.contains("place 1") ||
+                            labelLower.contains("place1") ||
+                            labelLower.contains("place_1") ||
+                            labelLower.contains("place-1") ||
+                            labelLower.contains("(place 1)") ||
+                            labelLower.contains("(place1)")
+
+                    // 3. Semantic label match for primary word/headword/term/vocabulary
+                    val isSemanticWordLabel = labelLower == "word" ||
+                            labelLower == "headword" ||
+                            labelLower == "vocabulary" ||
+                            labelLower == "term" ||
+                            labelLower == "target word" ||
+                            labelLower == "main word" ||
+                            labelLower == "english" ||
+                            labelLower == "english word" ||
+                            labelLower.startsWith("word ") ||
+                            labelLower.endsWith(" word")
+
+                    isValueMatch || isPlace1Label || isSemanticWordLabel
+                }
+            }
+
+            // Check if there is an explicit Place 2 item in backPlacesList
+            val hasExplicitPlace2 = remember(backPlacesList, word.meaning) {
+                backPlacesList.any { (label, value) ->
+                    val labelLower = label.lowercase().trim()
+                    val labelClean = labelLower.replace("_", "").replace(" ", "").replace("-", "")
+                    val isMeaningVal = word.meaning.isNotBlank() && value.trim().equals(word.meaning.trim(), ignoreCase = true)
+                    val isPlace2Label = labelClean.startsWith("place2") ||
+                            labelLower.contains("place 2") ||
+                            labelLower.contains("place2") ||
+                            labelLower.contains("place_2") ||
+                            labelLower.contains("place-2") ||
+                            labelLower.contains("meaning") ||
+                            labelLower.contains("definition") ||
+                            labelLower.contains("translation") ||
+                            labelLower.contains("bangla") ||
+                            labelLower.contains("bengali") ||
+                            labelLower.contains("অর্থ")
+                    isMeaningVal || isPlace2Label
                 }
             }
 
@@ -474,10 +525,24 @@ private fun BackFaceContent(
                     val isBengali = isBengaliText(value)
                     val font = selectFontForText(value)
                     val labelLower = label.lowercase().trim()
-                    // Place 2 detection (Meaning / Bengali Definition / Place 2 / or first item on back face)
-                    val isPlace2 = labelLower.startsWith("place2") || labelLower.contains("place 2") ||
-                            labelLower.contains("meaning") || labelLower.contains("definition") ||
-                            labelLower.contains("translation") || index == 0
+                    val labelClean = labelLower.replace("_", "").replace(" ", "").replace("-", "")
+                    
+                    val isMeaningVal = word.meaning.isNotBlank() && value.trim().equals(word.meaning.trim(), ignoreCase = true)
+                    val isPlace2Explicit = labelClean.startsWith("place2") ||
+                            labelLower.contains("place 2") ||
+                            labelLower.contains("place2") ||
+                            labelLower.contains("place_2") ||
+                            labelLower.contains("place-2") ||
+                            labelLower.contains("meaning") ||
+                            labelLower.contains("definition") ||
+                            labelLower.contains("translation") ||
+                            labelLower.contains("bangla") ||
+                            labelLower.contains("bengali") ||
+                            labelLower.contains("অর্থ")
+
+                    // If an explicit Place 2 exists, match it; otherwise since Place 1 is strictly excluded, the first item is Place 2
+                    val isPlace2 = if (hasExplicitPlace2) (isMeaningVal || isPlace2Explicit) else (index == 0)
+
                     // Place 4 or Place 5 detection (Forms, Synonyms, Derivatives, Sentences, etc.)
                     val isPlace4or5 = labelLower.startsWith("place4") || labelLower.contains("place 4") ||
                             labelLower.startsWith("place5") || labelLower.contains("place 5") ||
@@ -490,8 +555,9 @@ private fun BackFaceContent(
                         if (cleaned.contains(":")) cleaned = cleaned.substringAfter(":").trim()
                         cleaned = cleaned.replace(Regex("""(?i)^place\s*\d+\s*[-_:]?\s*"""), "").trim()
                         cleaned = cleaned.replace(Regex("""(?i)\s*\(place\s*\d+\)"""), "").trim()
-                        if (cleaned.isBlank()) {
+                        if (cleaned.isBlank() || (isPlace2 && cleaned.equals("word", ignoreCase = true))) {
                             when {
+                                isPlace2 -> "Meaning"
                                 labelLower.contains("1") -> "Word"
                                 labelLower.contains("2") -> "Meaning"
                                 labelLower.contains("3") -> "Example"

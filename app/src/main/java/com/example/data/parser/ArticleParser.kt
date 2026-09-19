@@ -4,6 +4,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.jsoup.Jsoup
+import java.net.URI
 import java.util.concurrent.TimeUnit
 
 data class ParsedArticleItem(
@@ -184,6 +186,99 @@ object ArticleParser {
             }
         } catch (e: Exception) {
             Result.failure(Exception(e.message ?: "Failed to connect to Google Doc"))
+        }
+    }
+
+    /**
+     * Extracts article title, author, and readable paragraphs from any web article link or Google Doc URL.
+     */
+    suspend fun fetchWebArticle(urlInput: String): Result<ParsedArticleItem> = withContext(Dispatchers.IO) {
+        try {
+            var url = urlInput.trim()
+            if (!url.startsWith("http://", ignoreCase = true) && !url.startsWith("https://", ignoreCase = true)) {
+                url = "https://$url"
+            }
+
+            // Route Google Docs links to Google Docs plain-text handler
+            if (url.contains("docs.google.com/document", ignoreCase = true)) {
+                val docResult = fetchGoogleDocText(url)
+                return@withContext docResult.mapCatching { docText ->
+                    val parsed = parseArticles(docText)
+                    if (parsed.isNotEmpty()) parsed.first()
+                    else throw Exception("No article content found in Google Doc.")
+                }
+            }
+
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                .header("Accept-Language", "en-US,en;q=0.9")
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            if (!response.isSuccessful) {
+                return@withContext Result.failure(Exception("HTTP Error ${response.code}: Could not load article."))
+            }
+
+            val html = response.body?.string() ?: ""
+            if (html.isBlank()) {
+                return@withContext Result.failure(Exception("The webpage is empty."))
+            }
+
+            val doc = Jsoup.parse(html, url)
+
+            // Strip out navigation, scripts, ads, footers, etc.
+            doc.select("script, style, noscript, nav, header, footer, aside, form, svg, iframe, .ad, .ads, .advertisement, .cookie, .banner, .social-share, .comments, #comments, .menu, .sidebar, .author-bio, [role=navigation], [role=banner]").remove()
+
+            // 1. Extract Title
+            val rawTitle = doc.select("meta[property=og:title]").attr("content").ifBlank {
+                doc.select("h1").firstOrNull()?.text()?.ifBlank { null } ?: doc.title()
+            }
+            val cleanTitle = rawTitle.replace(Regex("""\s*[-|–—•]\s*[^|–—•]+$"""), "").trim().ifBlank { "Imported Article" }
+
+            // 2. Extract Author
+            val rawAuthor = doc.select("meta[name=author]").attr("content").ifBlank {
+                doc.select("meta[property=article:author]").attr("content").ifBlank {
+                    doc.select("meta[name=twitter:creator]").attr("content").ifBlank {
+                        doc.select("[rel=author], .author, .byline, .author-name").firstOrNull()?.text()
+                    }
+                }
+            }
+            val hostName = try {
+                URI(url).host?.removePrefix("www.") ?: "Web Source"
+            } catch (_: Exception) {
+                "Web Source"
+            }
+            val cleanAuthor = rawAuthor?.trim()?.takeIf { it.isNotBlank() && it.length < 50 } ?: hostName
+
+            // 3. Extract Main Content
+            val wikiContent = doc.select(".mw-parser-output").firstOrNull()
+            val container = wikiContent ?: doc.select("article, [role=main], main, .article-body, .post-content, .entry-content, .story-body, #content, .content").firstOrNull() ?: doc.body()
+
+            val paragraphs = container.select("p, h2, h3, blockquote")
+                .map { it.text().trim() }
+                .filter { it.length >= 25 }
+
+            val content = if (paragraphs.isNotEmpty()) {
+                paragraphs.joinToString("\n\n")
+            } else {
+                container.text().trim()
+            }
+
+            if (content.length < 60) {
+                return@withContext Result.failure(Exception("Could not extract readable article text from this page."))
+            }
+
+            Result.success(
+                ParsedArticleItem(
+                    title = cleanTitle,
+                    author = cleanAuthor,
+                    content = content
+                )
+            )
+        } catch (e: Exception) {
+            Result.failure(Exception(e.message ?: "Failed to extract article from link."))
         }
     }
 }
