@@ -62,12 +62,51 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
         const val ACTION_NEXT_WORD = "com.example.widget.ACTION_NEXT_WORD"
         const val PREFS_NAME = "widget_prefs"
         const val KEY_WIDGET_COURSE_ID = "widget_course_id"
+        const val KEY_WIDGET_COURSE_IDS = "widget_course_ids"
         const val KEY_WIDGET_TAG_FILTER = "widget_tag_filter"
         const val KEY_WIDGET_SIZE = "widget_size"
         const val KEY_WIDGET_FONT_SIZE = "widget_font_size"
         const val KEY_ROTATE_10S = "widget_rotate_10s"
         const val KEY_ROTATE_ON_HOME_RETURN = "widget_rotate_on_home_return"
         const val KEY_LAST_SHOWN_WORD_ID = "last_widget_word_id"
+
+        fun getSelectedCourseIds(context: Context): Set<String> {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val raw = prefs.getString(KEY_WIDGET_COURSE_IDS, null)
+            return when {
+                raw != null -> {
+                    if (raw.isBlank() || raw == "all") emptySet()
+                    else raw.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+                }
+                else -> {
+                    val legacy = prefs.getString(KEY_WIDGET_COURSE_ID, "all") ?: "all"
+                    if (legacy == "all" || legacy.isBlank()) emptySet() else setOf(legacy)
+                }
+            }
+        }
+
+        fun saveSelectedCourseIds(context: Context, courseIds: Set<String>) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val joined = if (courseIds.isEmpty()) "all" else courseIds.joinToString(",")
+            val single = if (courseIds.size == 1) courseIds.first() else if (courseIds.isEmpty()) "all" else courseIds.first()
+            prefs.edit()
+                .putString(KEY_WIDGET_COURSE_IDS, joined)
+                .putString(KEY_WIDGET_COURSE_ID, single)
+                .apply()
+        }
+
+        fun getSelectedTagFilters(context: Context): Set<String> {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val raw = prefs.getString(KEY_WIDGET_TAG_FILTER, "all") ?: "all"
+            if (raw == "all" || raw.isBlank()) return emptySet()
+            return raw.split(",").map { it.trim().lowercase() }.filter { it.isNotEmpty() }.toSet()
+        }
+
+        fun saveSelectedTagFilters(context: Context, tags: Set<String>) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val value = if (tags.isEmpty()) "all" else tags.joinToString(",")
+            prefs.edit().putString(KEY_WIDGET_TAG_FILTER, value).apply()
+        }
 
         private var tickerJob: Job? = null
 
@@ -96,11 +135,15 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
         }
 
         fun updateAllWidgets(context: Context) {
-            val appWidgetManager = AppWidgetManager.getInstance(context)
-            val thisWidget = ComponentName(context, DailyVocabWidgetProvider::class.java)
-            val allWidgetIds = appWidgetManager.getAppWidgetIds(thisWidget)
-            for (widgetId in allWidgetIds) {
-                updateAppWidget(context, appWidgetManager, widgetId)
+            try {
+                val appWidgetManager = AppWidgetManager.getInstance(context) ?: return
+                val thisWidget = ComponentName(context, DailyVocabWidgetProvider::class.java)
+                val allWidgetIds = appWidgetManager.getAppWidgetIds(thisWidget) ?: return
+                for (widgetId in allWidgetIds) {
+                    updateAppWidget(context, appWidgetManager, widgetId)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("DailyVocabWidget", "Error updating all widgets", e)
             }
         }
 
@@ -317,25 +360,32 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
 
                 try {
                     val db = AppDatabase.getDatabase(context)
-                    val prefCourseId = prefs.getString(KEY_WIDGET_COURSE_ID, "all") ?: "all"
-                    val prefTagFilter = prefs.getString(KEY_WIDGET_TAG_FILTER, "all") ?: "all"
+                    val selectedCourseIds = getSelectedCourseIds(context)
+                    val selectedTags = getSelectedTagFilters(context)
                     val lastShownWordId = prefs.getString(KEY_LAST_SHOWN_WORD_ID, null)
 
                     val allCourses = db.courseDao().getAllCoursesList()
                     val courseMap = allCourses.associateBy { it.id }
                     val allWords = db.vocabularyDao().getAllWordsList()
 
-                    // Robust Filtering: ensure only populated categories and courses are used, preventing empty data views
-                    val courseWords = if (prefCourseId != "all" && prefCourseId.isNotBlank()) {
-                        val filtered = allWords.filter { it.courseId == prefCourseId }
+                    // Robust Multi-Course Filtering: filter words belonging to any of the selected courses
+                    val courseWords = if (selectedCourseIds.isNotEmpty()) {
+                        val filtered = allWords.filter { it.courseId in selectedCourseIds }
                         if (filtered.isNotEmpty()) filtered else allWords
                     } else {
                         allWords
                     }
 
-                    // Filter by tag/category only if that category is actually populated in the course
-                    val filteredByTag = if (prefTagFilter != "all" && prefTagFilter.isNotBlank()) {
-                        courseWords.filter { it.status.equals(prefTagFilter, ignoreCase = true) }
+                    // Filter by multi-status tags (know, confusion, dont_know, unrated, flagged)
+                    val filteredByTag = if (selectedTags.isNotEmpty()) {
+                        courseWords.filter { word ->
+                            selectedTags.any { tag ->
+                                when (tag) {
+                                    "flagged" -> word.isReported
+                                    else -> word.status.equals(tag, ignoreCase = true)
+                                }
+                            }
+                        }
                     } else {
                         courseWords
                     }

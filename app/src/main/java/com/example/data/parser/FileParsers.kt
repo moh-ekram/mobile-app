@@ -68,6 +68,8 @@ object FileParsers {
         var courseIdIndex = -1
         var courseTitleIndex = -1
         var statusIndex = -1
+        var isReportedIndex = -1
+        var reportReasonIndex = -1
         var wordIndex = -1
         var meaningIndex = -1
         var exampleIndex = -1
@@ -99,6 +101,8 @@ object FileParsers {
                 lower == "courseid" || lower == "course_id" -> courseIdIndex = index
                 lower == "coursetitle" || lower == "course_title" || lower == "coursename" -> courseTitleIndex = index
                 lower == "status" -> statusIndex = index
+                lower in listOf("isreported", "is_reported", "flagged", "isflagged", "is_flagged") -> isReportedIndex = index
+                lower in listOf("reportreason", "report_reason", "flagreason", "flag_reason") -> reportReasonIndex = index
                 lower.startsWith("place1") || (wordIndex == -1 && (lower.contains("word") || lower == "term" || lower == "vocabulary")) -> {
                     wordIndex = index
                     customPlacesMap[index] = cleanLabel
@@ -170,6 +174,10 @@ object FileParsers {
             val extraWord = if (extraIndex in values.indices && values[extraIndex].isNotBlank()) values[extraIndex].trim() else null
             val mnemonic = if (mnemonicIndex in values.indices && values[mnemonicIndex].isNotBlank()) values[mnemonicIndex].trim() else null
             val status = if (statusIndex in values.indices && values[statusIndex].isNotBlank()) values[statusIndex].trim() else "unrated"
+            val isReported = if (isReportedIndex in values.indices) {
+                values[isReportedIndex].trim().equals("true", ignoreCase = true) || values[isReportedIndex].trim() == "1"
+            } else false
+            val reportReason = if (reportReasonIndex in values.indices && values[reportReasonIndex].isNotBlank()) values[reportReasonIndex].trim() else null
 
             // Record custom places exactly as present in this row
             val placeJsonObj = JSONObject()
@@ -191,7 +199,9 @@ object FileParsers {
                     mnemonic = mnemonic,
                     status = status,
                     customPlacesJson = if (placeJsonObj.length() > 0) placeJsonObj.toString() else null,
-                    courseId = rowCourseId
+                    courseId = rowCourseId,
+                    isReported = isReported,
+                    reportReason = reportReason
                 )
             )
         }

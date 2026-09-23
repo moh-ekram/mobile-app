@@ -37,6 +37,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.VocabularyWordEntity
@@ -54,6 +55,10 @@ fun FlashcardScreen(
     selectedStatuses: Set<String> = emptySet(),
     sortOrder: String = "default",
     availableGroups: List<String> = emptyList(),
+    showOnlyFlagged: Boolean = false,
+    totalFlaggedCount: Int = 0,
+    showFilterDialog: Boolean = false,
+    onDismissFilterDialog: () -> Unit = {},
     isFocusMode: Boolean = false,
     isFlipAnimationEnabled: Boolean = true,
     isHapticEnabled: Boolean = true,
@@ -62,6 +67,7 @@ fun FlashcardScreen(
     onClearGroups: () -> Unit = {},
     onToggleStatus: (String) -> Unit = {},
     onClearStatuses: () -> Unit = {},
+    onToggleShowOnlyFlagged: () -> Unit = {},
     onSetSortOrder: (String) -> Unit = {},
     onReshuffle: () -> Unit = {},
     onResetAllFilters: () -> Unit = {},
@@ -87,25 +93,32 @@ fun FlashcardScreen(
         }
     }
 
-    var showFilterDialog by remember { mutableStateOf(false) }
+    var internalShowFilterDialog by remember { mutableStateOf(false) }
+    val isFilterDialogVisible = showFilterDialog || internalShowFilterDialog
     var wordToReport by remember { mutableStateOf<VocabularyWordEntity?>(null) }
 
-    val hasActiveFilters = selectedGroups.isNotEmpty() || selectedStatuses.isNotEmpty() || sortOrder != "default"
+    val hasActiveFilters = selectedGroups.isNotEmpty() || selectedStatuses.isNotEmpty() || sortOrder != "default" || showOnlyFlagged
 
-    if (showFilterDialog) {
+    if (isFilterDialogVisible) {
         FlashcardFilterDialog(
             selectedGroups = selectedGroups,
             selectedStatuses = selectedStatuses,
             sortOrder = sortOrder,
             availableGroups = availableGroups,
+            showOnlyFlagged = showOnlyFlagged,
+            totalFlaggedCount = totalFlaggedCount,
             onToggleGroup = onToggleGroup,
             onClearGroups = onClearGroups,
             onToggleStatus = onToggleStatus,
             onClearStatuses = onClearStatuses,
+            onToggleShowOnlyFlagged = onToggleShowOnlyFlagged,
             onSetSortOrder = onSetSortOrder,
             onReshuffle = onReshuffle,
             onResetAllFilters = onResetAllFilters,
-            onDismiss = { showFilterDialog = false }
+            onDismiss = {
+                internalShowFilterDialog = false
+                onDismissFilterDialog()
+            }
         )
     }
 
@@ -167,113 +180,23 @@ fun FlashcardScreen(
                         )
                     }
                 }
-            } else {
-                // Normal Mode: Clean header with Filter button, Reset (if active), and Fullscreen button
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val activeCount = selectedGroups.size + selectedStatuses.size + (if (sortOrder != "default") 1 else 0)
-                    Surface(
-                        onClick = { showFilterDialog = true },
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (hasActiveFilters) (if (palette.isDark) Color(0xFF312E81) else IndigoLight) else palette.surface,
-                        border = BorderStroke(
-                            1.dp,
-                            if (hasActiveFilters) (if (palette.isDark) Color(0xFF4338CA) else IndigoPrimary) else palette.cardBorder
-                        ),
-                        modifier = Modifier.height(38.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Tune,
-                                contentDescription = "Open Filter Categories",
-                                tint = if (hasActiveFilters) (if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary) else palette.textMuted,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Text(
-                                text = if (hasActiveFilters) "Filters ($activeCount active)" else "Filter Categories",
-                                fontSize = 12.sp,
-                                fontWeight = if (hasActiveFilters) FontWeight.Bold else FontWeight.Medium,
-                                color = if (hasActiveFilters) (if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary) else palette.textPrimary
-                            )
-                        }
-                    }
-
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Reset button if filters applied
-                        if (hasActiveFilters) {
-                            IconButton(
-                                onClick = onResetAllFilters,
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(palette.surface)
-                                    .border(1.dp, palette.cardBorder, CircleShape)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Reset Filters",
-                                    tint = RoseError,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-
-                        // Full Screen / Focus Mode Toggle Button
-                        IconButton(
-                            onClick = { onToggleFocusMode(true) },
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(palette.surface)
-                                .border(1.dp, palette.cardBorder, CircleShape)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Fullscreen,
-                                contentDescription = "Full Screen Focus Mode",
-                                tint = if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-                }
             }
 
-            // Card Counter & Progress
+            // Card Counter
             if (words.isNotEmpty()) {
                 val safeIndex = currentIndex.coerceIn(0, words.size - 1)
-                Row(
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                    contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "Card ${safeIndex + 1} of ${words.size}",
                         fontFamily = PoppinsFontFamily,
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.SemiBold,
                         color = SlateMuted
-                    )
-
-                    LinearProgressIndicator(
-                        progress = { (safeIndex + 1).toFloat() / words.size },
-                        modifier = Modifier
-                            .width(110.dp)
-                            .height(5.dp)
-                            .clip(CircleShape),
-                        color = IndigoPrimary,
-                        trackColor = Color(0xFFE2E8F0)
                     )
                 }
             }
@@ -362,25 +285,35 @@ fun FlashcardScreen(
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Text(
-                            text = "No Words in this Filter",
+                            text = if (showOnlyFlagged) "No Flagged Words" else "No Words in this Filter",
                             fontFamily = PoppinsFontFamily,
                             fontSize = 17.sp,
                             fontWeight = FontWeight.Bold,
                             color = palette.textPrimary
                         )
                         Text(
-                            text = "Clear filters to view cards",
+                            text = if (showOnlyFlagged)
+                                "You don't have any flagged words in this selection. Flag words with the flag icon during study to review them here."
+                            else
+                                "Clear filters to view cards",
                             fontFamily = PoppinsFontFamily,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Normal,
-                            color = palette.textMuted
+                            color = palette.textMuted,
+                            textAlign = TextAlign.Center
                         )
                         Button(
-                            onClick = onResetAllFilters,
+                            onClick = {
+                                if (showOnlyFlagged) onToggleShowOnlyFlagged() else onResetAllFilters()
+                            },
                             shape = CircleShape,
                             colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
                         ) {
-                            Text("Reset All Filters", fontFamily = PoppinsFontFamily, color = Color.White)
+                            Text(
+                                if (showOnlyFlagged) "View All Cards" else "Reset All Filters",
+                                fontFamily = PoppinsFontFamily,
+                                color = Color.White
+                            )
                         }
                     }
                 }
@@ -413,32 +346,6 @@ fun FlashcardScreen(
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Previous Card")
                 }
 
-                // Quick Status Indicator
-                if (words.isNotEmpty()) {
-                    val safeIndex = currentIndex.coerceIn(0, words.size - 1)
-                    val st = words[safeIndex].status
-                    val statusLabel = when (st) {
-                        "know" -> "Learned"
-                        "confusion" -> "Confused"
-                        "dont_know" -> "Needs Review"
-                        else -> "Not Rated"
-                    }
-                    val badgeColor = when (st) {
-                        "know" -> EmeraldSuccess
-                        "confusion" -> AmberWarning
-                        "dont_know" -> RoseError
-                        else -> palette.textMuted
-                    }
-
-                    Text(
-                        text = statusLabel,
-                        fontFamily = PoppinsFontFamily,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = badgeColor
-                    )
-                }
-
                 FilledTonalIconButton(
                     onClick = {
                         if (isHapticEnabled) hapticHelper.cardSwipe()
@@ -466,10 +373,13 @@ private fun FlashcardFilterDialog(
     selectedStatuses: Set<String>,
     sortOrder: String,
     availableGroups: List<String>,
+    showOnlyFlagged: Boolean = false,
+    totalFlaggedCount: Int = 0,
     onToggleGroup: (String) -> Unit,
     onClearGroups: () -> Unit,
     onToggleStatus: (String) -> Unit,
     onClearStatuses: () -> Unit,
+    onToggleShowOnlyFlagged: () -> Unit = {},
     onSetSortOrder: (String) -> Unit,
     onReshuffle: () -> Unit,
     onResetAllFilters: () -> Unit,
@@ -539,85 +449,49 @@ private fun FlashcardFilterDialog(
                         }
                     }
 
-                    // All Statuses Box
-                    val isAllStatus = selectedStatuses.isEmpty()
-                    Surface(
-                        onClick = { onClearStatuses() },
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (isAllStatus) (if (palette.isDark) Color(0xFF312E81) else IndigoLight) else palette.surface,
-                        border = BorderStroke(if (isAllStatus) 1.5.dp else 1.dp, if (isAllStatus) IndigoPrimary else palette.cardBorder),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(38.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text(
-                                text = "All Statuses (Show All)",
-                                fontSize = 12.sp,
-                                fontWeight = if (isAllStatus) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isAllStatus) IndigoPrimary else palette.textPrimary
-                            )
-                        }
-                    }
-
-                    // Status 2x2 Grid of Boxes
-                    val statusList = listOf(
-                        Triple("know", "Know", EmeraldSuccess to EmeraldLight),
-                        Triple("confusion", "Confusion", AmberWarning to AmberLight),
-                        Triple("dont_know", "Don't Know", RoseError to RoseLight),
-                        Triple("unrated", "Unrated", SlateText to Color(0xFFF1F5F9))
+                    // Word Status Filter with Icons Only (No text, No flagged option)
+                    val statusFilterIcons = listOf(
+                        Triple("all", Icons.Default.DoneAll, IndigoPrimary),
+                        Triple("know", Icons.Default.CheckCircle, EmeraldSuccess),
+                        Triple("confusion", Icons.Default.Psychology, AmberWarning),
+                        Triple("dont_know", Icons.Default.Cancel, RoseError),
+                        Triple("unrated", Icons.Default.HelpOutline, SlateText)
                     )
 
-                    statusList.chunked(2).forEach { rowPair ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            rowPair.forEach { (stKey, label, colorPair) ->
-                                val (brandColor, bgTint) = colorPair
-                                val isSelected = selectedStatuses.contains(stKey)
-                                Surface(
-                                    onClick = { onToggleStatus(stKey) },
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = if (isSelected) bgTint else palette.surface,
-                                    border = BorderStroke(
-                                        if (isSelected) 1.5.dp else 1.dp,
-                                        if (isSelected) brandColor else palette.cardBorder
-                                    ),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(44.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .padding(horizontal = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.Center
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(8.dp)
-                                                .clip(CircleShape)
-                                                .background(brandColor)
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(
-                                            text = label,
-                                            fontSize = 12.sp,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                            color = if (isSelected) brandColor else palette.textPrimary
-                                        )
-                                        if (isSelected) {
-                                            Spacer(modifier = Modifier.width(4.dp))
-                                            Icon(
-                                                imageVector = Icons.Default.Check,
-                                                contentDescription = null,
-                                                tint = brandColor,
-                                                modifier = Modifier.size(14.dp)
-                                            )
-                                        }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        statusFilterIcons.forEach { (stKey, icon, brandColor) ->
+                            val isSelected = if (stKey == "all") selectedStatuses.isEmpty() else selectedStatuses.contains(stKey)
+                            Surface(
+                                onClick = {
+                                    if (stKey == "all") {
+                                        onClearStatuses()
+                                    } else {
+                                        onToggleStatus(stKey)
                                     }
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isSelected) brandColor else palette.surface,
+                                border = BorderStroke(
+                                    if (isSelected) 1.5.dp else 1.dp,
+                                    if (isSelected) brandColor else palette.cardBorder
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp)
+                            ) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+                                    Icon(
+                                        imageVector = icon,
+                                        contentDescription = stKey,
+                                        modifier = Modifier.size(20.dp),
+                                        tint = if (isSelected) Color.White else brandColor
+                                    )
                                 }
                             }
                         }
@@ -754,7 +628,12 @@ private fun FlashcardFilterDialog(
                             rowSorts.forEach { (orderKey, label, icon) ->
                                 val isSelected = sortOrder == orderKey
                                 Surface(
-                                    onClick = { onSetSortOrder(orderKey) },
+                                    onClick = {
+                                        onSetSortOrder(orderKey)
+                                        if (orderKey == "random") {
+                                            onReshuffle()
+                                        }
+                                    },
                                     shape = RoundedCornerShape(12.dp),
                                     color = if (isSelected) (if (palette.isDark) Color(0xFF312E81) else IndigoLight) else palette.surface,
                                     border = BorderStroke(

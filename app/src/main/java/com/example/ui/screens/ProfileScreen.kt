@@ -1051,7 +1051,8 @@ fun ProfileScreen(
                                 palette = palette,
                                 onSelect = {
                                     selectedWidgetCourseId = it
-                                    widgetPrefs.edit().putString(DailyVocabWidgetProvider.KEY_WIDGET_COURSE_ID, it).apply()
+                                    val set = if (it == "all") emptySet() else setOf(it)
+                                    DailyVocabWidgetProvider.saveSelectedCourseIds(context, set)
                                     DailyVocabWidgetProvider.updateAllWidgets(context)
                                 },
                                 modifier = Modifier.weight(1f)

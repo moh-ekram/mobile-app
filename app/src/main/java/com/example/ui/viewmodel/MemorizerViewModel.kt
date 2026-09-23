@@ -11,8 +11,9 @@ import kotlinx.coroutines.launch
 
 class MemorizerViewModel(application: Application) : AndroidViewModel(application) {
 
-    val repository = MemorizerRepository(application)
+    private val prefs = application.getSharedPreferences("memorizer_prefs", android.content.Context.MODE_PRIVATE)
     private val profilePrefs = application.getSharedPreferences("memorizer_user_profile", android.content.Context.MODE_PRIVATE)
+    val repository = MemorizerRepository(application)
 
     // Auth State
     private val _currentUser = MutableStateFlow<UserSession?>(loadSavedUserSession())
@@ -89,11 +90,66 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
     private val coursePrefs = application.getSharedPreferences("memorizer_course_prefs", android.content.Context.MODE_PRIVATE)
     val activeCourseId = MutableStateFlow(coursePrefs.getString("saved_active_course_id", "") ?: "")
 
+    private fun loadSavedSelectedCourseIds(): Set<String>? {
+        val csv = coursePrefs.getString("selected_course_ids_csv", null)
+        if (csv != null) {
+            return if (csv.isBlank()) emptySet() else csv.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+        }
+        val set = coursePrefs.getStringSet("selected_course_ids", null)
+        return set?.toSet()
+    }
+
+    private fun saveSelectedCoursesToPrefs(ids: Set<String>) {
+        coursePrefs.edit()
+            .putString("selected_course_ids_csv", ids.joinToString(","))
+            .putStringSet("selected_course_ids", HashSet(ids))
+            .putBoolean("has_configured_course_selection", true)
+            .commit()
+    }
+
     // Selected Courses State (Multi-Course Selection for Study & Backup)
     private val _selectedCourseIds = MutableStateFlow<Set<String>>(
-        coursePrefs.getStringSet("selected_course_ids", null) ?: emptySet()
+        loadSavedSelectedCourseIds() ?: emptySet()
     )
     val selectedCourseIds: StateFlow<Set<String>> = _selectedCourseIds.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            allCourses.collect { courses ->
+                if (courses.isNotEmpty()) {
+                    val hasConfigured = coursePrefs.getBoolean("has_configured_course_selection", false)
+                    if (!hasConfigured) {
+                        // First run initialization: select all available courses by default
+                        val allIds = courses.map { it.id }.toSet()
+                        _selectedCourseIds.value = allIds
+                        saveSelectedCoursesToPrefs(allIds)
+                        com.example.widget.DailyVocabWidgetProvider.saveSelectedCourseIds(getApplication(), allIds)
+                    } else {
+                        // Restore previously saved user selection
+                        val saved = loadSavedSelectedCourseIds()
+                        if (saved != null) {
+                            _selectedCourseIds.value = saved
+                        }
+                    }
+
+                    // Active course validation: keep user's saved course if present
+                    val savedActive = coursePrefs.getString("saved_active_course_id", "") ?: ""
+                    if (savedActive.isNotBlank() && courses.any { it.id == savedActive }) {
+                        if (activeCourseId.value != savedActive) {
+                            activeCourseId.value = savedActive
+                        }
+                    } else if (activeCourseId.value.isNotBlank() && courses.any { it.id == activeCourseId.value }) {
+                        coursePrefs.edit().putString("saved_active_course_id", activeCourseId.value).commit()
+                    } else {
+                        val fallback = _selectedCourseIds.value.firstOrNull { selId -> courses.any { it.id == selId } }
+                            ?: courses.first().id
+                        activeCourseId.value = fallback
+                        coursePrefs.edit().putString("saved_active_course_id", fallback).commit()
+                    }
+                }
+            }
+        }
+    }
 
     fun toggleCourseSelection(courseId: String) {
         val current = _selectedCourseIds.value.toMutableSet()
@@ -103,7 +159,11 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
             current.add(courseId)
         }
         _selectedCourseIds.value = current
-        coursePrefs.edit().putStringSet("selected_course_ids", current).apply()
+        saveSelectedCoursesToPrefs(current)
+
+        // Sync with widget preferences & update widgets immediately
+        com.example.widget.DailyVocabWidgetProvider.saveSelectedCourseIds(getApplication(), current)
+        com.example.widget.DailyVocabWidgetProvider.updateAllWidgets(getApplication())
 
         // If current active course was deselected, switch to another selected course
         if (activeCourseId.value.isNotBlank() && !current.contains(activeCourseId.value)) {
@@ -123,7 +183,11 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
     fun selectAllCourses() {
         val allIds = allCourses.value.map { it.id }.toSet()
         _selectedCourseIds.value = allIds
-        coursePrefs.edit().putStringSet("selected_course_ids", allIds).apply()
+        saveSelectedCoursesToPrefs(allIds)
+
+        com.example.widget.DailyVocabWidgetProvider.saveSelectedCourseIds(getApplication(), allIds)
+        com.example.widget.DailyVocabWidgetProvider.updateAllWidgets(getApplication())
+
         if (activeCourseId.value.isBlank() && allIds.isNotEmpty()) {
             selectCourse(allIds.first())
         }
@@ -135,7 +199,14 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun deselectAllCourses() {
         _selectedCourseIds.value = emptySet()
-        coursePrefs.edit().putStringSet("selected_course_ids", emptySet()).apply()
+        saveSelectedCoursesToPrefs(emptySet())
+
+        com.example.widget.DailyVocabWidgetProvider.saveSelectedCourseIds(getApplication(), emptySet())
+        com.example.widget.DailyVocabWidgetProvider.updateAllWidgets(getApplication())
+
+        activeCourseId.value = ""
+        coursePrefs.edit().putString("saved_active_course_id", "").apply()
+
         viewModelScope.launch {
             val uid = _currentUser.value?.userId ?: "1235"
             repository.backupManager.saveBackupFiles(uid)
@@ -150,7 +221,11 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
             current.remove(courseId)
         }
         _selectedCourseIds.value = current
-        coursePrefs.edit().putStringSet("selected_course_ids", current).apply()
+        saveSelectedCoursesToPrefs(current)
+
+        com.example.widget.DailyVocabWidgetProvider.saveSelectedCourseIds(getApplication(), current)
+        com.example.widget.DailyVocabWidgetProvider.updateAllWidgets(getApplication())
+
         if (activeCourseId.value.isNotBlank() && !current.contains(activeCourseId.value)) {
             val fallback = current.firstOrNull() ?: ""
             selectCourse(fallback)
@@ -243,7 +318,13 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun selectCourse(id: String) {
         if (id.isNotBlank()) {
-            coursePrefs.edit().putString("saved_active_course_id", id).apply()
+            coursePrefs.edit().putString("saved_active_course_id", id).commit()
+            val curSel = _selectedCourseIds.value.toMutableSet()
+            if (!curSel.contains(id)) {
+                curSel.add(id)
+                _selectedCourseIds.value = curSel
+                saveSelectedCoursesToPrefs(curSel)
+            }
         }
         activeCourseId.value = id
         currentWordIndex.value = 0
@@ -303,15 +384,36 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         activeArticle.value = article
     }
 
-    private val prefs = application.getSharedPreferences("memorizer_prefs", android.content.Context.MODE_PRIVATE)
+    fun addSampleData(force: Boolean = true) {
+        viewModelScope.launch {
+            _statusMessage.value = "Adding sample courses & articles..."
+            repository.seedSampleData(force)
+            val courses = repository.allCourses.firstOrNull() ?: emptyList()
+            if (courses.isNotEmpty()) {
+                val curSel = _selectedCourseIds.value.toMutableSet()
+                if (curSel.isEmpty()) {
+                    val allIds = courses.map { it.id }.toSet()
+                    _selectedCourseIds.value = allIds
+                    coursePrefs.edit().putStringSet("selected_course_ids", allIds).apply()
+                }
+                if (activeCourseId.value.isBlank() || courses.none { it.id == activeCourseId.value }) {
+                    selectCourse(courses.first().id)
+                }
+            }
+            _statusMessage.value = "Sample courses & articles added successfully!"
+        }
+    }
 
     // Dark / Night Theme State
     val isDarkTheme = MutableStateFlow(prefs.getBoolean("is_dark_theme", false))
 
+    fun setDarkTheme(enabled: Boolean) {
+        isDarkTheme.value = enabled
+        prefs.edit().putBoolean("is_dark_theme", enabled).commit()
+    }
+
     fun toggleDarkTheme() {
-        val next = !isDarkTheme.value
-        isDarkTheme.value = next
-        prefs.edit().putBoolean("is_dark_theme", next).apply()
+        setDarkTheme(!isDarkTheme.value)
     }
 
     // Flashcard Flip Animation Setting (Toggle in Profile: On/Off)
@@ -319,7 +421,7 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun setFlipAnimationEnabled(enabled: Boolean) {
         isFlipAnimationEnabled.value = enabled
-        prefs.edit().putBoolean("is_flip_animation_enabled", enabled).apply()
+        prefs.edit().putBoolean("is_flip_animation_enabled", enabled).commit()
         _statusMessage.value = if (enabled) "Card flip animation enabled" else "Card flip animation disabled"
     }
 
@@ -328,19 +430,20 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun setHapticEnabled(enabled: Boolean) {
         isHapticEnabled.value = enabled
-        prefs.edit().putBoolean("is_haptic_enabled", enabled).apply()
+        prefs.edit().putBoolean("is_haptic_enabled", enabled).commit()
         _statusMessage.value = if (enabled) "Haptic feedback enabled" else "Haptic feedback disabled"
     }
 
     // Flashcard Focus Mode (Hides bottom nav, enlarges card, positions tag buttons at bottom)
-    val isFocusMode = MutableStateFlow(false)
+    val isFocusMode = MutableStateFlow(prefs.getBoolean("is_focus_mode", false))
 
     fun toggleFocusMode() {
-        isFocusMode.value = !isFocusMode.value
+        setFocusMode(!isFocusMode.value)
     }
 
     fun setFocusMode(enabled: Boolean) {
         isFocusMode.value = enabled
+        prefs.edit().putBoolean("is_focus_mode", enabled).commit()
     }
 
     // Home Widget State
@@ -415,6 +518,17 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
     val isSyncingArticles = MutableStateFlow(false)
     val articleSyncUrl = MutableStateFlow(repository.getArticleSyncUrl())
 
+    val pendingSharedTextOrUrl = MutableStateFlow<String?>(null)
+
+    fun setPendingSharedTextOrUrl(textOrUrl: String) {
+        pendingSharedTextOrUrl.value = textOrUrl
+        setRoute("article_reader")
+    }
+
+    fun clearPendingSharedTextOrUrl() {
+        pendingSharedTextOrUrl.value = null
+    }
+
     fun setArticleSyncUrl(url: String) {
         articleSyncUrl.value = url
         repository.setArticleSyncUrl(url)
@@ -460,19 +574,141 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
     fun setActiveCourse(id: String) = selectCourse(id)
     fun setActiveArticle(article: ArticleEntity?) = selectArticle(article)
 
+    // Scraped Flashcard Generation States
+    val isScrapingFlashcards = MutableStateFlow(false)
+    val lastGeneratedCardsCount = MutableStateFlow<Int?>(null)
+
+    // Sitemap XML Extraction & Batch Processing States
+    val isFetchingSitemap = MutableStateFlow(false)
+    val sitemapResult = MutableStateFlow<com.example.data.service.SitemapFetchResult?>(null)
+    val isBatchProcessingSitemap = MutableStateFlow(false)
+    val sitemapBatchProgress = MutableStateFlow<Pair<Int, Int>?>(null)
+    val sitemapCurrentProcessingTitle = MutableStateFlow("")
+
+    fun fetchWebsiteSitemap(
+        urlOrDomain: String,
+        onComplete: (Result<com.example.data.service.SitemapFetchResult>) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            isFetchingSitemap.value = true
+            val result = repository.fetchWebsiteSitemap(urlOrDomain)
+            isFetchingSitemap.value = false
+            result.onSuccess {
+                sitemapResult.value = it
+                _statusMessage.value = "Found ${it.articles.size} article URLs in sitemap!"
+            }.onFailure {
+                _statusMessage.value = "Sitemap error: ${it.message}"
+            }
+            onComplete(result)
+        }
+    }
+
+    fun batchImportSitemapArticles(
+        selectedArticles: List<com.example.data.service.SitemapArticleItem>,
+        courseId: String = "course_default",
+        onComplete: (Int, String?) -> Unit = { _, _ -> }
+    ) {
+        viewModelScope.launch {
+            isBatchProcessingSitemap.value = true
+            sitemapBatchProgress.value = 0 to selectedArticles.size
+            val result = repository.batchImportSitemapArticles(
+                selectedArticles = selectedArticles,
+                courseId = courseId,
+                onProgress = { cur, tot, currentTitle ->
+                    sitemapBatchProgress.value = cur to tot
+                    sitemapCurrentProcessingTitle.value = currentTitle
+                }
+            )
+            isBatchProcessingSitemap.value = false
+            sitemapBatchProgress.value = null
+            sitemapCurrentProcessingTitle.value = ""
+
+            result.fold(
+                onSuccess = { saved ->
+                    _statusMessage.value = "Imported ${saved.size} articles to library!"
+                    onComplete(saved.size, null)
+                },
+                onFailure = { error ->
+                    _statusMessage.value = "Import error: ${error.message}"
+                    onComplete(0, error.message ?: "Failed to import articles")
+                }
+            )
+        }
+    }
+
+    fun batchGenerateSitemapFlashcards(
+        selectedArticles: List<com.example.data.service.SitemapArticleItem>,
+        onComplete: (Int, String?) -> Unit = { _, _ -> }
+    ) {
+        viewModelScope.launch {
+            isBatchProcessingSitemap.value = true
+            sitemapBatchProgress.value = 0 to selectedArticles.size
+            val result = repository.batchGenerateSitemapFlashcards(
+                selectedArticles = selectedArticles,
+                onProgress = { cur, tot, currentTitle ->
+                    sitemapBatchProgress.value = cur to tot
+                    sitemapCurrentProcessingTitle.value = currentTitle
+                }
+            )
+            isBatchProcessingSitemap.value = false
+            sitemapBatchProgress.value = null
+            sitemapCurrentProcessingTitle.value = ""
+
+            result.fold(
+                onSuccess = { count ->
+                    _statusMessage.value = "Generated and saved $count flashcards!"
+                    onComplete(count, null)
+                },
+                onFailure = { error ->
+                    _statusMessage.value = "Flashcard error: ${error.message}"
+                    onComplete(0, error.message ?: "Failed to generate flashcards")
+                }
+            )
+        }
+    }
+
+    fun scrapeAndGenerateFlashcardsFromUrls(
+        urls: List<String>,
+        onComplete: (Int, String?) -> Unit = { _, _ -> }
+    ) {
+        viewModelScope.launch {
+            isScrapingFlashcards.value = true
+            val result = repository.scrapeAndGenerateFlashcards(urls, saveToDb = true)
+            isScrapingFlashcards.value = false
+            result.fold(
+                onSuccess = { cards ->
+                    lastGeneratedCardsCount.value = cards.size
+                    _statusMessage.value = "Generated and saved ${cards.size} flashcards!"
+                    onComplete(cards.size, null)
+                },
+                onFailure = { error ->
+                    _statusMessage.value = "Flashcard generation error: ${error.message}"
+                    onComplete(0, error.message ?: "Failed to scrape and generate flashcards")
+                }
+            )
+        }
+    }
+
+    suspend fun extractMainBodyText(url: String): Result<String> {
+        return repository.scrapeArticleAndExtractBody(url)
+    }
+
     // Vocabulary State
     val allWords: StateFlow<List<VocabularyWordEntity>> = repository.allWords
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    val distinctGroups: StateFlow<List<String>> = activeCourseId.flatMapLatest { cId ->
-        if (cId.isBlank()) kotlinx.coroutines.flow.flowOf(emptyList())
-        else repository.getDistinctGroupsForCourse(cId)
+    val distinctGroups: StateFlow<List<String>> = combine(allWords, activeCourseId) { words, actId ->
+        val relevantWords = if (actId.isNotBlank()) words.filter { it.courseId == actId } else words
+        relevantWords.mapNotNull { it.group?.takeIf { g -> g.isNotBlank() } }.distinct().sorted()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Flashcard Screen Filters, Sorting & Navigation (Persisted across sessions)
-    private val savedGroups = prefs.getStringSet("selected_card_groups", emptySet()) ?: emptySet()
-    private val savedStatuses = prefs.getStringSet("selected_card_statuses", emptySet()) ?: emptySet()
+    private val savedGroups: Set<String> = prefs.getString("selected_card_groups_csv", null)?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet()
+        ?: prefs.getStringSet("selected_card_groups", emptySet())?.toSet()
+        ?: emptySet()
+    private val savedStatuses: Set<String> = prefs.getString("selected_card_statuses_csv", null)?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet()
+        ?: prefs.getStringSet("selected_card_statuses", emptySet())?.toSet()
+        ?: emptySet()
     private val savedSortOrder = prefs.getString("card_sort_order", "default") ?: "default"
     val hasUserExplicitlySetStatus = MutableStateFlow(prefs.getBoolean("has_user_set_status", false))
 
@@ -528,11 +764,13 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
 
     private fun persistFilters() {
         prefs.edit()
-            .putStringSet("selected_card_groups", selectedGroups.value)
-            .putStringSet("selected_card_statuses", selectedStatuses.value)
+            .putString("selected_card_groups_csv", selectedGroups.value.joinToString(","))
+            .putString("selected_card_statuses_csv", selectedStatuses.value.joinToString(","))
+            .putStringSet("selected_card_groups", HashSet(selectedGroups.value))
+            .putStringSet("selected_card_statuses", HashSet(selectedStatuses.value))
             .putString("card_sort_order", cardSortOrder.value)
             .putBoolean("has_user_set_status", hasUserExplicitlySetStatus.value)
-            .apply()
+            .commit()
     }
 
     fun toggleGroup(group: String) {
@@ -593,12 +831,12 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
 
     private fun regenerateRandomOrder() {
         val words = allWords.value
-        val shuffledIds = words.map { it.id }.shuffled()
+        val shuffledIds = words.map { it.id }.shuffled(kotlin.random.Random(System.currentTimeMillis()))
         randomOrderMap.value = shuffledIds.mapIndexed { index, id -> id to index }.toMap()
     }
 
     fun setCardSortOrder(order: String) {
-        if (order == "random" && randomOrderMap.value.isEmpty()) {
+        if (order == "random") {
             regenerateRandomOrder()
         }
         cardSortOrder.value = order
@@ -611,11 +849,24 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         currentWordIndex.value = 0
     }
 
+    val showOnlyFlagged = MutableStateFlow(false)
+
+    fun toggleShowOnlyFlagged() {
+        showOnlyFlagged.value = !showOnlyFlagged.value
+        currentWordIndex.value = 0
+    }
+
+    fun setShowOnlyFlagged(enabled: Boolean) {
+        showOnlyFlagged.value = enabled
+        currentWordIndex.value = 0
+    }
+
     fun resetAllCardFilters() {
         hasUserExplicitlySetStatus.value = false
         selectedGroups.value = emptySet()
         selectedGroup.value = null
         cardSortOrder.value = "default"
+        showOnlyFlagged.value = false
         selectedStatuses.value = computeDefaultStatuses(allWords.value, activeCourseId.value, emptySet())
         currentWordIndex.value = 0
         persistFilters()
@@ -626,23 +877,16 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
             Triple(words, courseId, groups)
         },
         selectedStatuses,
+        showOnlyFlagged,
         cardSortOrder,
-        randomOrderMap,
-        selectedCourseIds
-    ) { (words, courseId, groups), statuses, sortOrder, orderMap, selIds ->
-        val effectiveCourseId = if (courseId.isNotBlank() && (selIds.isEmpty() || selIds.contains(courseId))) {
-            courseId
-        } else {
-            selIds.firstOrNull() ?: ""
-        }
-
-        if (effectiveCourseId.isBlank() || (selIds.isNotEmpty() && !selIds.contains(effectiveCourseId))) {
-            // Without selected active course, show no flashcard data
+        randomOrderMap
+    ) { (words, courseId, groups), statuses, onlyFlagged, sortOrder, orderMap ->
+        if (courseId.isBlank() && words.isNotEmpty()) {
             emptyList()
         } else {
             val filtered = words.filter { w ->
-                w.courseId == effectiveCourseId &&
-                (selIds.isEmpty() || selIds.contains(w.courseId)) &&
+                (courseId.isBlank() || w.courseId == courseId) &&
+                (!onlyFlagged || w.isReported) &&
                 (groups.isEmpty() || groups.contains(w.group)) &&
                 (statuses.isEmpty() || statuses.contains(w.status))
             }
@@ -658,42 +902,34 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    init {
-        viewModelScope.launch {
-            allCourses.collect { list ->
-                if (list.isEmpty()) {
-                    activeCourseId.value = ""
-                    _selectedCourseIds.value = emptySet()
-                    return@collect
-                }
+    fun reloadAllPreferences() {
+        isDarkTheme.value = prefs.getBoolean("is_dark_theme", false)
+        isFlipAnimationEnabled.value = prefs.getBoolean("is_flip_animation_enabled", true)
+        isFocusMode.value = prefs.getBoolean("is_focus_mode", false)
+        isHapticEnabled.value = prefs.getBoolean("is_haptic_enabled", true)
+        cardSortOrder.value = prefs.getString("card_sort_order", "default") ?: "default"
 
-                // Synchronize selected courses
-                val savedSelected = coursePrefs.getStringSet("selected_course_ids", null)
-                if (savedSelected != null) {
-                    val valid = savedSelected.filter { id -> list.any { it.id == id } }.toSet()
-                    _selectedCourseIds.value = valid
-                } else {
-                    val allIds = list.map { it.id }.toSet()
-                    _selectedCourseIds.value = allIds
-                    coursePrefs.edit().putStringSet("selected_course_ids", allIds).apply()
-                }
+        val savedG = prefs.getString("selected_card_groups_csv", null)?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet()
+            ?: prefs.getStringSet("selected_card_groups", emptySet())?.toSet()
+            ?: emptySet()
+        selectedGroups.value = savedG
 
-                val currentSelected = _selectedCourseIds.value
-                val savedId = coursePrefs.getString("saved_active_course_id", "") ?: ""
-                val current = activeCourseId.value
-                if (savedId.isNotBlank() && list.any { it.id == savedId } && (currentSelected.isEmpty() || currentSelected.contains(savedId))) {
-                    if (current != savedId) {
-                        activeCourseId.value = savedId
-                    }
-                } else if (current.isNotBlank() && list.any { it.id == current } && (currentSelected.isEmpty() || currentSelected.contains(current))) {
-                    coursePrefs.edit().putString("saved_active_course_id", current).apply()
-                } else {
-                    val fallbackId = currentSelected.firstOrNull() ?: list.first().id
-                    activeCourseId.value = fallbackId
-                    coursePrefs.edit().putString("saved_active_course_id", fallbackId).apply()
-                }
-            }
+        val savedS = prefs.getString("selected_card_statuses_csv", null)?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet()
+            ?: prefs.getStringSet("selected_card_statuses", emptySet())?.toSet()
+            ?: emptySet()
+        selectedStatuses.value = savedS
+
+        val savedCourses = loadSavedSelectedCourseIds()
+        if (savedCourses != null) {
+            _selectedCourseIds.value = savedCourses
         }
+        val savedActive = coursePrefs.getString("saved_active_course_id", "") ?: ""
+        if (savedActive.isNotBlank()) {
+            activeCourseId.value = savedActive
+        }
+    }
+
+    init {
         viewModelScope.launch {
             filteredWords.collect { list ->
                 if (list.isEmpty()) {
@@ -714,6 +950,9 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
                         if (selectedStatuses.value != computed) {
                             selectedStatuses.value = computed
                         }
+                    }
+                    if (cardSortOrder.value == "random" && randomOrderMap.value.isEmpty()) {
+                        regenerateRandomOrder()
                     }
                 }
             }
@@ -950,6 +1189,7 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
             val result = repository.backupManager.restoreDirectlyFromLinkedFolder(uid)
             result.onSuccess { count ->
                 reloadProfileFromStorage()
+                reloadAllPreferences()
                 _statusMessage.value = "Successfully restored $count items from linked Drive folder!"
                 repository.refreshProgressAndSync(uid)
                 val courses = repository.allCourses.firstOrNull() ?: emptyList()
@@ -994,6 +1234,7 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
             val result = repository.backupManager.restoreFromUri(uri, uid)
             result.onSuccess { count ->
                 reloadProfileFromStorage()
+                reloadAllPreferences()
                 _statusMessage.value = "Successfully restored $count items from Google Drive / Storage!"
                 repository.refreshProgressAndSync(uid)
                 val courses = repository.allCourses.firstOrNull() ?: emptyList()
@@ -1033,6 +1274,7 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
             val result = repository.backupManager.restoreFromFileContent(content, isJson, uid)
             result.onSuccess { count ->
                 reloadProfileFromStorage()
+                reloadAllPreferences()
                 _statusMessage.value = "Successfully restored $count vocabulary words across courses!"
                 repository.refreshProgressAndSync(uid)
                 val courses = repository.allCourses.firstOrNull() ?: emptyList()

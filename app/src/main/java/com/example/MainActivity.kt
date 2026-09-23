@@ -38,15 +38,21 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
+    private var isScreenReceiverRegistered = false
+
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val action = intent?.action
             if (action == Intent.ACTION_SCREEN_ON || action == Intent.ACTION_USER_PRESENT) {
                 context?.let { ctx ->
-                    val prefs = ctx.getSharedPreferences(DailyVocabWidgetProvider.PREFS_NAME, Context.MODE_PRIVATE)
-                    val onHomeReturn = prefs.getBoolean(DailyVocabWidgetProvider.KEY_ROTATE_ON_HOME_RETURN, true)
-                    if (onHomeReturn) {
-                        DailyVocabWidgetProvider.updateAllWidgets(ctx)
+                    try {
+                        val prefs = ctx.getSharedPreferences(DailyVocabWidgetProvider.PREFS_NAME, Context.MODE_PRIVATE)
+                        val onHomeReturn = prefs.getBoolean(DailyVocabWidgetProvider.KEY_ROTATE_ON_HOME_RETURN, true)
+                        if (onHomeReturn) {
+                            DailyVocabWidgetProvider.updateAllWidgets(ctx)
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("MainActivity", "Error updating widgets on screen wake", e)
                     }
                 }
             }
@@ -57,18 +63,46 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Start frequent 10-second background ticker
-        DailyVocabWidgetProvider.startFrequentTicker(this)
-
-        // Register screen wake / unlock receiver for instant widget updates
-        val filter = IntentFilter().apply {
-            addAction(Intent.ACTION_SCREEN_ON)
-            addAction(Intent.ACTION_USER_PRESENT)
+        try {
+            // Start frequent 10-second background ticker
+            DailyVocabWidgetProvider.startFrequentTicker(this)
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error starting frequent ticker", e)
         }
-        registerReceiver(screenReceiver, filter)
+
+        try {
+            // Initialize notification channel and schedule reminder if enabled
+            com.example.notification.NotificationHelper.createNotificationChannel(this)
+            if (com.example.notification.NotificationHelper.isNotificationEnabled(this)) {
+                com.example.notification.NotificationHelper.rescheduleNext(this)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error in notification setup", e)
+        }
+
+        // Register screen wake / unlock receiver for instant widget updates with Android 14+ export flag
+        try {
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_USER_PRESENT)
+            }
+            androidx.core.content.ContextCompat.registerReceiver(
+                this,
+                screenReceiver,
+                filter,
+                androidx.core.content.ContextCompat.RECEIVER_EXPORTED
+            )
+            isScreenReceiverRegistered = true
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error registering screenReceiver", e)
+        }
 
         setContent {
             val viewModel: MemorizerViewModel = viewModel()
+            memorizerViewModel = viewModel
+            LaunchedEffect(intent) {
+                handleIncomingSendIntent(intent, viewModel)
+            }
             val isDarkTheme by viewModel.isDarkTheme.collectAsState()
             MyApplicationTheme(darkTheme = isDarkTheme) {
                 MemorizerApp(viewModel = viewModel)
@@ -76,9 +110,40 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private var memorizerViewModel: MemorizerViewModel? = null
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingSendIntent(intent, memorizerViewModel)
+    }
+
+    private fun handleIncomingSendIntent(incomingIntent: Intent?, vm: MemorizerViewModel? = memorizerViewModel) {
+        try {
+            if (incomingIntent?.action == Intent.ACTION_SEND) {
+                val clipText = try {
+                    val clip = incomingIntent.clipData
+                    if (clip != null && clip.itemCount > 0) {
+                        clip.getItemAt(0)?.text?.toString()
+                    } else null
+                } catch (_: Exception) { null }
+                val text = incomingIntent.getStringExtra(Intent.EXTRA_TEXT) ?: clipText
+                if (!text.isNullOrBlank()) {
+                    vm?.setPendingSharedTextOrUrl(text.trim())
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error handling incoming send intent", e)
+        }
+    }
+
     override fun onResume() {
         super.onResume()
-        DailyVocabWidgetProvider.startFrequentTicker(this)
+        try {
+            DailyVocabWidgetProvider.startFrequentTicker(this)
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error starting ticker in onResume", e)
+        }
     }
 
     override fun onUserLeaveHint() {
@@ -94,17 +159,35 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun triggerHomeReturnUpdate() {
-        val prefs = getSharedPreferences(DailyVocabWidgetProvider.PREFS_NAME, Context.MODE_PRIVATE)
-        val onHomeReturn = prefs.getBoolean(DailyVocabWidgetProvider.KEY_ROTATE_ON_HOME_RETURN, true)
-        if (onHomeReturn) {
-            DailyVocabWidgetProvider.updateAllWidgets(applicationContext)
+        try {
+            val prefs = getSharedPreferences(DailyVocabWidgetProvider.PREFS_NAME, Context.MODE_PRIVATE)
+            val onHomeReturn = prefs.getBoolean(DailyVocabWidgetProvider.KEY_ROTATE_ON_HOME_RETURN, true)
+            if (onHomeReturn) {
+                DailyVocabWidgetProvider.updateAllWidgets(applicationContext)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error in triggerHomeReturnUpdate", e)
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        try {
+            if (requestCode == 101 && grantResults.isNotEmpty() && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                com.example.notification.NotificationHelper.rescheduleNext(this)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error in onRequestPermissionsResult", e)
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
         try {
-            unregisterReceiver(screenReceiver)
+            if (isScreenReceiverRegistered) {
+                unregisterReceiver(screenReceiver)
+                isScreenReceiverRegistered = false
+            }
         } catch (_: Exception) {}
     }
 }
@@ -144,6 +227,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
     val driveSyncUrl by viewModel.driveSyncUrl.collectAsState()
     val driveSyncSummary by viewModel.driveSyncSummary.collectAsState()
     val selectedCourseIds by viewModel.selectedCourseIds.collectAsState()
+    val showOnlyFlagged by viewModel.showOnlyFlagged.collectAsState()
     val palette = LocalAppPalette.current
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -181,22 +265,19 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
         )
     } else {
         var selectedGameSection by remember { mutableStateOf<String?>(null) }
-        var selectedAdminSubPage by remember { mutableStateOf<String?>(null) }
+        var showFlashcardFilterDialog by remember { mutableStateOf(false) }
 
         LaunchedEffect(currentRoute) {
             if (currentRoute != "games") selectedGameSection = null
-            if (currentRoute != "admin") selectedAdminSubPage = null
         }
 
         val isArticleReading = activeArticle != null
         val hideTopBar = (currentRoute == "flashcard" && isFocusMode) ||
                          currentRoute == "article_reader" ||
-                         (currentRoute == "games" && selectedGameSection != null) ||
-                         (currentRoute == "admin" && selectedAdminSubPage != null)
+                         (currentRoute == "games" && selectedGameSection != null)
         val hideBottomBar = currentRoute == "flashcard" ||
                             isArticleReading ||
-                            (currentRoute == "games" && selectedGameSection != null) ||
-                            (currentRoute == "admin" && selectedAdminSubPage != null)
+                            (currentRoute == "games" && selectedGameSection != null)
 
         Scaffold(
             topBar = {
@@ -247,8 +328,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                                     val screenTitle = when (currentRoute) {
                                         "flashcard" -> "Flashcards"
                                         "games" -> "Practice Games"
-                                        "admin" -> "Control"
-                                        "profile" -> "Profile"
+                                        "settings", "admin", "profile" -> "Settings"
                                         else -> currentRoute.replaceFirstChar { it.uppercase() }
                                     }
                                     Text(
@@ -262,20 +342,50 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             }
                         },
                         actions = {
-                            Box(
-                                modifier = Modifier
-                                    .padding(end = 12.dp)
-                                    .clip(CircleShape)
-                                    .background(if (palette.isDark) Color(0xFF312E81) else IndigoLight)
-                                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                            ) {
-                                Text(
-                                    text = currentUser?.displayName ?: "User #1235",
-                                    fontFamily = PoppinsFontFamily,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary
-                                )
+                            if (currentRoute == "flashcard") {
+                                val hasActiveFilters = selectedGroups.isNotEmpty() || selectedStatuses.isNotEmpty() || cardSortOrder != "default" || showOnlyFlagged
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(end = 4.dp)
+                                ) {
+                                    IconButton(
+                                        onClick = { showFlashcardFilterDialog = true },
+                                        modifier = Modifier.testTag("flashcard_filter_icon_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Style,
+                                            contentDescription = "Flashcard Filters",
+                                            tint = if (hasActiveFilters) (if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary) else palette.textPrimary
+                                        )
+                                    }
+
+                                    IconButton(
+                                        onClick = { viewModel.setFocusMode(true) },
+                                        modifier = Modifier.testTag("flashcard_fullscreen_icon_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Fullscreen,
+                                            contentDescription = "Full Screen Focus Mode",
+                                            tint = palette.textPrimary
+                                        )
+                                    }
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .padding(end = 12.dp)
+                                        .clip(CircleShape)
+                                        .background(if (palette.isDark) Color(0xFF312E81) else IndigoLight)
+                                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = currentUser?.displayName ?: "User #1235",
+                                        fontFamily = PoppinsFontFamily,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary
+                                    )
+                                }
                             }
                         },
                         colors = TopAppBarDefaults.topAppBarColors(
@@ -296,12 +406,11 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             NavigationItem("home", "Home", Icons.Default.Home),
                             NavigationItem("flashcard", "Flashcard", Icons.Default.Style),
                             NavigationItem("games", "Games", Icons.Default.SportsEsports),
-                            NavigationItem("admin", "Control", Icons.Default.AdminPanelSettings),
-                            NavigationItem("profile", "Profile", Icons.Default.Person)
+                            NavigationItem("settings", "Settings", Icons.Default.Settings)
                         )
 
                         navItems.forEach { item ->
-                            val selected = currentRoute == item.route
+                            val selected = currentRoute == item.route || (item.route == "settings" && (currentRoute == "admin" || currentRoute == "profile"))
                             NavigationBarItem(
                                 selected = selected,
                                 onClick = { viewModel.setRoute(item.route) },
@@ -350,11 +459,15 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             courses = allCourses,
                             activeCourseId = activeCourseId,
                             onSelectCourse = { cId -> viewModel.setActiveCourse(cId) },
-                            onCreateCourseClick = { viewModel.setRoute("admin") },
+                            onCreateCourseClick = { viewModel.setRoute("settings") },
                             onNavigate = { target -> viewModel.setRoute(target) },
                             onSelectGroup = { grp -> viewModel.selectGroup(grp) },
                             onSelectStatus = { status ->
                                 viewModel.selectStatusFilter(status)
+                                viewModel.setRoute("flashcard")
+                            },
+                            onSelectFlagged = {
+                                viewModel.setShowOnlyFlagged(true)
                                 viewModel.setRoute("flashcard")
                             },
                             widgetWord = currentWidgetWord,
@@ -364,40 +477,47 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             onRateWidgetWord = { id, st -> viewModel.rateWord(id, st) },
                             onRefreshWidget = { viewModel.cycleNextWidgetWord() }
                         )
-                        "flashcard" -> FlashcardScreen(
-                            words = filteredWords,
-                            currentIndex = currentWordIdx,
-                            courseName = allCourses.find { it.id == activeCourseId }?.title ?: "Vocabulary",
-                            selectedGroups = selectedGroups,
-                            selectedStatuses = selectedStatuses,
-                            sortOrder = cardSortOrder,
-                            availableGroups = distinctGroups,
-                            isFocusMode = isFocusMode,
-                            isFlipAnimationEnabled = isFlipAnimationEnabled,
-                            isHapticEnabled = isHapticEnabled,
-                            onToggleFocusMode = { enable -> viewModel.setFocusMode(enable) },
-                            onToggleGroup = { grp -> viewModel.toggleGroup(grp) },
-                            onClearGroups = { viewModel.clearGroups() },
-                            onToggleStatus = { st -> viewModel.toggleStatus(st) },
-                            onClearStatuses = { viewModel.clearStatuses() },
-                            onSetSortOrder = { ord -> viewModel.setCardSortOrder(ord) },
-                            onReshuffle = { viewModel.reshuffleCards() },
-                            onResetAllFilters = { viewModel.resetAllCardFilters() },
-                            onRate = { id, st -> viewModel.rateWord(id, st) },
-                            onReportWord = { id, isReported, reason -> viewModel.reportWord(id, isReported, reason) },
-                            onNext = { viewModel.nextWord() },
-                            onPrevious = { viewModel.previousWord() },
-                            onBack = {
-                                if (isFocusMode) {
-                                    viewModel.setFocusMode(false)
-                                }
-                                viewModel.setRoute("home")
+                        "flashcard" -> {
+                            val totalFlaggedCount = remember(allWords, activeCourseId) {
+                                allWords.count { (activeCourseId == null || it.courseId == activeCourseId) && it.isReported }
                             }
-                        )
+                            FlashcardScreen(
+                                words = filteredWords,
+                                currentIndex = currentWordIdx,
+                                courseName = allCourses.find { it.id == activeCourseId }?.title ?: "Vocabulary",
+                                selectedGroups = selectedGroups,
+                                selectedStatuses = selectedStatuses,
+                                sortOrder = cardSortOrder,
+                                availableGroups = distinctGroups,
+                                isFocusMode = isFocusMode,
+                                isFlipAnimationEnabled = isFlipAnimationEnabled,
+                                isHapticEnabled = isHapticEnabled,
+                                showOnlyFlagged = showOnlyFlagged,
+                                totalFlaggedCount = totalFlaggedCount,
+                                showFilterDialog = showFlashcardFilterDialog,
+                                onDismissFilterDialog = { showFlashcardFilterDialog = false },
+                                onToggleShowOnlyFlagged = { viewModel.toggleShowOnlyFlagged() },
+                                onToggleFocusMode = { enable -> viewModel.setFocusMode(enable) },
+                                onToggleGroup = { grp -> viewModel.toggleGroup(grp) },
+                                onClearGroups = { viewModel.clearGroups() },
+                                onToggleStatus = { st -> viewModel.toggleStatus(st) },
+                                onClearStatuses = { viewModel.clearStatuses() },
+                                onSetSortOrder = { ord -> viewModel.setCardSortOrder(ord) },
+                                onReshuffle = { viewModel.reshuffleCards() },
+                                onResetAllFilters = { viewModel.resetAllCardFilters() },
+                                onRate = { id, st -> viewModel.rateWord(id, st) },
+                                onReportWord = { id, isReported, reason -> viewModel.reportWord(id, isReported, reason) },
+                                onNext = { viewModel.nextWord() },
+                                onPrevious = { viewModel.previousWord() },
+                                onBack = {
+                                    viewModel.setRoute("home")
+                                }
+                            )
+                        }
                         "games" -> GamePracticeScreen(
                             games = allGames,
                             questions = allQuestions,
-                            courses = allCourses.filter { selectedCourseIds.isEmpty() || it.id in selectedCourseIds },
+                            courses = allCourses,
                             activeCourseId = activeCourseId,
                             onCompleteQuiz = { score, total ->
                                 viewModel.recordQuizCompletion(score, total)
@@ -410,7 +530,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             },
                             articles = allArticles,
                             activeArticle = activeArticle,
-                            words = allWords.filter { selectedCourseIds.isEmpty() || it.courseId in selectedCourseIds },
+                            words = allWords,
                             onSelectArticle = { art -> viewModel.setActiveArticle(art) },
                             onSaveArticle = { title, content, author, id ->
                                 viewModel.saveArticle(title, content, author, id)
@@ -423,74 +543,52 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             onBack = { viewModel.navigateBack() },
                             onSectionChange = { selectedGameSection = it }
                         )
-                        "article_reader" -> ArticleReaderScreen(
-                            articles = allArticles,
-                            activeArticle = activeArticle,
-                            words = allWords,
-                            courses = allCourses,
-                            isSyncing = isSyncingArticles,
-                            syncUrl = articleSyncUrl,
-                            onSync = { source -> viewModel.syncArticles(source) },
-                            onSetSyncUrl = { url -> viewModel.setArticleSyncUrl(url) },
-                            onSelectArticle = { art -> viewModel.setActiveArticle(art) },
-                            onSaveArticle = { title, content, author, id ->
-                                viewModel.saveArticle(title, content, author, id)
-                            },
-                            onSaveArticlesBatch = { batch ->
-                                viewModel.saveArticlesBatch(batch)
-                            },
-                            onDeleteArticle = { id -> viewModel.deleteArticle(id) },
-                            onRateWord = { id, st -> viewModel.rateWord(id, st) },
-                            onBack = { viewModel.navigateBack() }
-                        )
-                        "admin" -> AdminPanelScreen(
+                        "article_reader" -> {
+                            val pendingShared by viewModel.pendingSharedTextOrUrl.collectAsState()
+                            ArticleReaderScreen(
+                                articles = allArticles,
+                                activeArticle = activeArticle,
+                                words = allWords,
+                                courses = allCourses,
+                                isSyncing = isSyncingArticles,
+                                syncUrl = articleSyncUrl,
+                                pendingSharedTextOrUrl = pendingShared,
+                                onClearPendingShared = { viewModel.clearPendingSharedTextOrUrl() },
+                                onSync = { source -> viewModel.syncArticles(source) },
+                                onSetSyncUrl = { url -> viewModel.setArticleSyncUrl(url) },
+                                onSelectArticle = { art -> viewModel.setActiveArticle(art) },
+                                onSaveArticle = { title, content, author, id ->
+                                    viewModel.saveArticle(title, content, author, id)
+                                },
+                                onSaveArticlesBatch = { batch ->
+                                    viewModel.saveArticlesBatch(batch)
+                                },
+                                onDeleteArticle = { id -> viewModel.deleteArticle(id) },
+                                onRateWord = { id, st -> viewModel.rateWord(id, st) },
+                                onAddSampleData = { viewModel.addSampleData(force = true) },
+                                onBack = { viewModel.navigateBack() }
+                            )
+                        }
+                        "settings", "admin", "profile" -> SettingsScreen(
+                            user = currentUser,
+                            progress = userProgress,
+                            backupDirectoryPath = viewModel.repository.backupManager.getBackupPathString(),
+                            customBackupTreeUri = customBackupTreeUri,
                             words = allWords,
                             games = allGames,
                             questions = allQuestions,
                             courses = allCourses,
                             activeCourseId = activeCourseId,
                             selectedCourseIds = selectedCourseIds,
-                            onToggleCourseSelection = { cId -> viewModel.toggleCourseSelection(cId) },
-                            onSelectAllCourses = { viewModel.selectAllCourses() },
-                            onDeselectAllCourses = { viewModel.deselectAllCourses() },
-                            isSyncingDrive = isSyncingDrive,
-                            driveSyncUrl = driveSyncUrl,
-                            driveSyncSummary = driveSyncSummary,
-                            onSyncFromDrive = { url, preserve -> viewModel.syncCoursesFromDrive(url, preserve) },
-                            onBatchImportFiles = { files, preserve -> viewModel.importMultipleCourseFiles(files, preserve) },
-                            onClearDriveSummary = { viewModel.clearDriveSyncSummary() },
-                            onCreateCourse = { title, desc, fileContent, isJson -> viewModel.createCourse(title, desc, fileContent, isJson) },
-                            onSelectCourse = { cId -> viewModel.setActiveCourse(cId) },
-                            onDeleteCourse = { cId -> viewModel.deleteCourse(cId) },
-                            onAddWord = { word -> viewModel.addCustomWord(word) },
-                            onUpdateWord = { word -> viewModel.updateWord(word) },
-                            onUpdateCourse = { cId, title, desc -> viewModel.updateCourse(cId, title, desc) },
-                            onDeleteWord = { id -> viewModel.deleteWord(id) },
-                            onDeleteGame = { id -> viewModel.deleteGameItem(id) },
-                            onDeleteGamesBySection = { sec -> viewModel.deleteGamesBySection(sec) },
-                            onClearAllGames = { viewModel.clearAllGames() },
-                            onDeleteQuestion = { id -> viewModel.deleteQuestionBankItem(id) },
-                            onClearAllQB = { viewModel.clearAllQuestionBank() },
-                            onImportCourse = { content, isJson, cId, title -> viewModel.importCourseFile(content, isJson, cId, title) },
-                            onImportGame = { content, type -> viewModel.importGameFile(content, type) },
-                            onImportGameItems = { items -> viewModel.importGameItems(items) },
-                            onImportQB = { content -> viewModel.importQuestionBankFile(content) },
-                            onResetData = { viewModel.resetToSample() },
-                            onSubPageChange = { selectedAdminSubPage = it }
-                        )
-                        "profile" -> ProfileScreen(
-                            user = currentUser,
-                            progress = userProgress,
-                            backupDirectoryPath = viewModel.repository.backupManager.getBackupPathString(),
-                            customBackupTreeUri = customBackupTreeUri,
-                            courses = allCourses,
-                            words = allWords,
-                            activeCourseId = activeCourseId,
                             isDarkTheme = isDarkTheme,
                             isFlipAnimationEnabled = isFlipAnimationEnabled,
                             isFocusMode = isFocusMode,
                             isHapticEnabled = isHapticEnabled,
-                            onToggleDarkTheme = { viewModel.toggleDarkTheme() },
+                            isSyncingDrive = isSyncingDrive,
+                            driveSyncUrl = driveSyncUrl,
+                            driveSyncSummary = driveSyncSummary,
+                            initialTab = if (currentRoute == "admin") 1 else 0,
+                            onToggleDarkTheme = { enable -> viewModel.setDarkTheme(enable) },
                             onToggleFlipAnimation = { enable -> viewModel.setFlipAnimationEnabled(enable) },
                             onToggleFocusMode = { enable -> viewModel.setFocusMode(enable) },
                             onToggleHaptic = { enable -> viewModel.setHapticEnabled(enable) },
@@ -506,7 +604,31 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             onUpdateProfile = { name, avatar, targetExam, goal, bio ->
                                 viewModel.updateProfile(name, avatar, targetExam, goal, bio)
                             },
-                            onLogout = { viewModel.logout() }
+                            onLogout = { viewModel.logout() },
+                            onToggleCourseSelection = { cId -> viewModel.toggleCourseSelection(cId) },
+                            onSelectAllCourses = { viewModel.selectAllCourses() },
+                            onDeselectAllCourses = { viewModel.deselectAllCourses() },
+                            onSyncFromDrive = { url, preserve -> viewModel.syncCoursesFromDrive(url, preserve) },
+                            onBatchImportFiles = { files, preserve -> viewModel.importMultipleCourseFiles(files, preserve) },
+                            onClearDriveSummary = { viewModel.clearDriveSyncSummary() },
+                            onCreateCourse = { title, desc, fileContent, isJson -> viewModel.createCourse(title, desc, fileContent, isJson) },
+                            onSelectCourse = { cId -> viewModel.setActiveCourse(cId) },
+                            onDeleteCourse = { cId -> viewModel.deleteCourse(cId) },
+                            onAddWord = { word -> viewModel.addCustomWord(word) },
+                            onUpdateWord = { word -> viewModel.updateWord(word) },
+                            onUpdateCourse = { cId, title, desc -> viewModel.updateCourse(cId, title, desc) },
+                            onDeleteWord = { id -> viewModel.deleteWord(id) },
+                            onReportWord = { id, isReported, reason -> viewModel.reportWord(id, isReported, reason) },
+                            onDeleteGame = { id -> viewModel.deleteGameItem(id) },
+                            onDeleteGamesBySection = { sec -> viewModel.deleteGamesBySection(sec) },
+                            onClearAllGames = { viewModel.clearAllGames() },
+                            onDeleteQuestion = { id -> viewModel.deleteQuestionBankItem(id) },
+                            onClearAllQB = { viewModel.clearAllQuestionBank() },
+                            onImportCourse = { content, isJson, cId, title -> viewModel.importCourseFile(content, isJson, cId, title) },
+                            onImportGame = { content, type -> viewModel.importGameFile(content, type) },
+                            onImportGameItems = { items -> viewModel.importGameItems(items) },
+                            onImportQB = { content -> viewModel.importQuestionBankFile(content) },
+                            onResetData = { viewModel.resetToSample() }
                         )
                     }
                 }

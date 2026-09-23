@@ -4,71 +4,35 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Stylized Head with Open Book Adaptive Icon (Safe zone strictly within 21..87) -->
 
-    <!-- 1. HEAD SILHOUETTE (Peach Tone, Profile Facing Right) -->
+    <!-- Back Card L-Bracket (White Stroke, Round Caps, Strictly within Safe Zone 21..87) -->
     <path
-        android:fillColor="#F8D8C5"
-        android:pathData="M42,51.5 
-            L64.5,51.5 
-            C66.5,54 69.5,59 70,62 
-            L75.5,68.5 
-            L69.5,68.5 
-            L69.5,78 
-            L62.5,78 
-            L62.5,86 
-            L42,86 
-            L42,75 
-            C38,71 37.5,62 40,55.5 
-            Z" />
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M 33.5,43.0 L 33.5,70.9 A 3.6,3.6 0 0,0 37.1,74.5 L 65.2,74.5" />
 
-    <!-- Head Neck Lower Highlight Bar -->
+    <!-- Front Card Outline (White Stroke, Rounded Corners) -->
     <path
-        android:fillColor="#EBBCA5"
-        android:pathData="M45,81 L58,81 A1.5,1.5 0 0,1 58,84 L45,84 A1.5,1.5 0 0,1 45,81 Z" />
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4.6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M 46.5,31.2 L 70.8,31.2 A 6.0,6.0 0 0,1 76.8,37.2 L 76.8,61.5 A 6.0,6.0 0 0,1 70.8,67.5 L 46.5,67.5 A 6.0,6.0 0 0,1 40.5,61.5 L 40.5,37.2 A 6.0,6.0 0 0,1 46.5,31.2 Z" />
 
-    <!-- Ear Capsule Detail -->
+    <!-- Top Text Line (Filled White Pill) -->
     <path
-        android:fillColor="#EBBCA5"
-        android:pathData="M41,56 L43.5,56 A2,2 0 0,1 43.5,64 L41,64 A2,2 0 0,1 41,56 Z" />
+        android:fillColor="#FFFFFF"
+        android:pathData="M 51.7,40.5 L 65.4,40.5 A 2.1,2.1 0 0,1 67.5,42.6 A 2.1,2.1 0 0,1 65.4,44.7 L 51.7,44.7 A 2.1,2.1 0 0,1 49.6,42.6 A 2.1,2.1 0 0,1 51.7,40.5 Z" />
 
-    <!-- Internal Bookmark L-Hook Ribbon Accent inside Head -->
+    <!-- Middle Text Line (Filled White Pill) -->
     <path
-        android:fillColor="#C04153"
-        android:pathData="M49.5,53.5 L52.5,53.5 L52.5,64.5 L49.5,64.5 Z" />
-    <path
-        android:fillColor="#C04153"
-        android:pathData="M53.5,53.5 L56.5,53.5 L56.5,59.5 L62.5,59.5 L62.5,63.5 L53.5,63.5 Z" />
+        android:fillColor="#FFFFFF"
+        android:pathData="M 51.7,47.3 L 65.4,47.3 A 2.1,2.1 0 0,1 67.5,49.4 A 2.1,2.1 0 0,1 65.4,51.5 L 51.7,51.5 A 2.1,2.1 0 0,1 49.6,49.4 A 2.1,2.1 0 0,1 51.7,47.3 Z" />
 
-    <!-- 2. OPEN BOOK ON TOP OF HEAD -->
-
-    <!-- Left Book Cover / Outer Spine (Crimson / Burgundy) -->
+    <!-- Bottom Short Text Line (Filled White Pill) -->
     <path
-        android:fillColor="#C04153"
-        android:pathData="M24,24.5 L53,24.5 L53,50 L24,50 Z" />
-
-    <!-- Left Open Page (Coral Pink) -->
-    <path
-        android:fillColor="#F38A96"
-        android:pathData="M26.5,26 L52.5,26 L52.5,47.5 L26.5,47.5 Z" />
-
-    <!-- Left Page Oblong Highlight Capsule -->
-    <path
-        android:fillColor="#F8B8C1"
-        android:pathData="M33,28 L36,28 A2,2 0 0,1 36,41 L33,41 A2,2 0 0,1 33,28 Z" />
-
-    <!-- Right Book Cover / Outer Spine (Crimson / Burgundy) -->
-    <path
-        android:fillColor="#C04153"
-        android:pathData="M55,24.5 L84,24.5 L84,50 L55,50 Z" />
-
-    <!-- Right Open Page (Coral Pink) -->
-    <path
-        android:fillColor="#F38A96"
-        android:pathData="M55.5,26 L81.5,26 L81.5,47.5 L55.5,47.5 Z" />
-
-    <!-- Center Bookmark Spine Ribbon (Deep Burgundy) -->
-    <path
-        android:fillColor="#782531"
-        android:pathData="M52.5,24 L55.5,24 L55.5,58 L52.5,58 Z" />
+        android:fillColor="#FFFFFF"
+        android:pathData="M 51.7,54.0 L 56.4,54.0 A 2.1,2.1 0 0,1 58.5,56.1 A 2.1,2.1 0 0,1 56.4,58.2 L 51.7,58.2 A 2.1,2.1 0 0,1 49.6,56.1 A 2.1,2.1 0 0,1 51.7,54.0 Z" />
 </vector>

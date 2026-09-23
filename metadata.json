@@ -1,6 +1,6 @@
 {
-  "name": "Article Reader",
-  "description": "Minimalist modern article reader with Google Doc link sync, custom syntax parser, and course-word color detection.",
+  "name": "Memorizer",
+  "description": "Smart vocabulary memorizer, article reader, spaced repetition flashcards, and interactive language games.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

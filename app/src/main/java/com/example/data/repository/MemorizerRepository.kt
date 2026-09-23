@@ -73,23 +73,46 @@ class MemorizerRepository(
         database.userProgressDao().getProgress(userId)
 
     init {
-        // As requested by user: NO sample data anywhere. Clean up any leftover sample courses from previous runs.
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                database.courseDao().deleteCourseById("course_default")
-                database.vocabularyDao().deleteWordsByCourse("course_default")
-                val existing = database.courseDao().getAllCoursesList()
-                existing.filter { it.title.contains("Barron", ignoreCase = true) }.forEach {
-                    database.courseDao().deleteCourseById(it.id)
-                    database.vocabularyDao().deleteWordsByCourse(it.id)
+                // Seed sample courses and articles if either is empty
+                val existingCourses = database.courseDao().getAllCoursesList()
+                val existingArticles = database.articleDao().getAllArticlesList()
+                if (existingCourses.isEmpty() || existingArticles.isEmpty()) {
+                    seedSampleData(force = false)
                 }
             } catch (_: Exception) {}
         }
     }
 
-    suspend fun seedInitialData() = withContext(Dispatchers.IO) {
-        // No-op: user explicitly requested NO sample data anywhere.
+    suspend fun seedSampleData(force: Boolean = false) = withContext(Dispatchers.IO) {
+        val existingCourses = database.courseDao().getAllCoursesList()
+        if (force || existingCourses.isEmpty()) {
+            database.courseDao().insertCourses(SampleData.sampleCourses)
+            database.vocabularyDao().insertWords(SampleData.sampleWords)
+            val existingGames = database.gamePracticeDao().getAllItemsList()
+            if (existingGames.isEmpty()) {
+                database.gamePracticeDao().insertItems(SampleData.sampleGames)
+            }
+            val existingQ = database.questionBankDao().getAllQuestionsList()
+            if (existingQ.isEmpty()) {
+                database.questionBankDao().insertQuestions(SampleData.sampleQuestionBank)
+            }
+        }
+
+        val existingArticles = database.articleDao().getAllArticlesList()
+        if (force || existingArticles.isEmpty()) {
+            // Remove any deletion locks for sample articles
+            SampleData.sampleArticles.forEach { art ->
+                database.deletedArticleDao().removeDeleted(art.title.trim().lowercase())
+            }
+            database.articleDao().insertArticles(SampleData.sampleArticles)
+        }
+
+        refreshProgressAndSync("1235")
     }
+
+    suspend fun seedInitialData() = seedSampleData(force = false)
 
     suspend fun createCourse(title: String, description: String? = null, headersJson: String? = null): CourseEntity = withContext(Dispatchers.IO) {
         val id = "course_" + System.currentTimeMillis()
@@ -547,6 +570,49 @@ class MemorizerRepository(
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    val articleScraperService = com.example.data.service.ArticleFlashcardScraperService.getInstance()
+    val articleSitemapService = com.example.data.service.ArticleSitemapService.getInstance()
+
+    suspend fun scrapeArticleAndExtractBody(url: String): Result<String> {
+        return articleScraperService.extractMainBodyTextFromUrl(url)
+    }
+
+    suspend fun scrapeAndGenerateFlashcards(
+        urls: List<String>,
+        saveToDb: Boolean = true
+    ): Result<List<com.example.data.service.GeneratedFlashcard>> = withContext(Dispatchers.IO) {
+        try {
+            val words = database.vocabularyDao().getAllWordsList()
+            val cards = articleScraperService.generateFlashcardsFromUrls(urls, words)
+            if (saveToDb && cards.isNotEmpty()) {
+                articleScraperService.saveToFlashcardDatabase(context, cards)
+                articleScraperService.saveToVocabularyDatabase(context, cards)
+            }
+            Result.success(cards)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun fetchWebsiteSitemap(urlOrDomain: String): Result<com.example.data.service.SitemapFetchResult> {
+        return articleSitemapService.fetchSitemap(urlOrDomain)
+    }
+
+    suspend fun batchImportSitemapArticles(
+        selectedArticles: List<com.example.data.service.SitemapArticleItem>,
+        courseId: String = "course_default",
+        onProgress: (current: Int, total: Int, currentTitle: String) -> Unit = { _, _, _ -> }
+    ): Result<List<ArticleEntity>> {
+        return articleSitemapService.batchImportArticlesToReader(context, selectedArticles, courseId, onProgress)
+    }
+
+    suspend fun batchGenerateSitemapFlashcards(
+        selectedArticles: List<com.example.data.service.SitemapArticleItem>,
+        onProgress: (current: Int, total: Int, currentTitle: String) -> Unit = { _, _, _ -> }
+    ): Result<Int> {
+        return articleSitemapService.batchGenerateFlashcardsFromArticles(context, selectedArticles, onProgress)
     }
 
     suspend fun resetAllData(userId: String = "1235") = withContext(Dispatchers.IO) {

@@ -19,8 +19,14 @@ val KalpurushFontFamily = FontFamily(
     Font(R.font.kalpurush, FontWeight.Normal)
 )
 
-// Global font alias
+val AikyaFontFamily = FontFamily(
+    Font(R.font.aikya_regular, FontWeight.Normal),
+    Font(R.font.aikya_bold, FontWeight.Bold)
+)
+
+// Global font aliases
 val KalpurushFont = KalpurushFontFamily
+val AikyaFont = AikyaFontFamily
 
 fun isBengaliText(text: String?): Boolean {
     if (text.isNullOrBlank()) return false
@@ -29,6 +35,9 @@ fun isBengaliText(text: String?): Boolean {
 
 fun selectFontForText(text: String?): FontFamily =
     if (isBengaliText(text)) KalpurushFontFamily else PoppinsFontFamily
+
+fun selectArticleFontForText(text: String?): FontFamily =
+    if (isBengaliText(text)) AikyaFontFamily else PoppinsFontFamily
 
 // Material 3 typography with Poppins font family across all text styles
 val Typography = Typography(

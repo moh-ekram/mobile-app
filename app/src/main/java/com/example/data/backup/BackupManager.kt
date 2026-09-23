@@ -12,6 +12,8 @@ import com.example.data.model.ArticleEntity
 import com.example.data.model.GamePracticeEntity
 import com.example.data.model.QuestionBankEntity
 import com.example.data.parser.FileParsers
+import com.example.widget.DailyVocabWidgetProvider
+import com.example.notification.NotificationHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -151,6 +153,7 @@ class BackupManager(private val context: Context, private val database: AppDatab
         }
         jsonRoot.put("profile", profileObj)
 
+        val flaggedWordIdsArray = JSONArray()
         val wordsArray = JSONArray()
         words.forEach { w ->
             val wObj = JSONObject()
@@ -170,9 +173,15 @@ class BackupManager(private val context: Context, private val database: AppDatab
             wObj.put("lastQuizStatus", w.lastQuizStatus ?: "not_studied")
             wObj.put("quizCorrectCount", w.quizCorrectCount)
             wObj.put("quizIncorrectCount", w.quizIncorrectCount)
+            wObj.put("isReported", w.isReported)
+            wObj.put("reportReason", w.reportReason ?: "")
+            if (w.isReported) {
+                flaggedWordIdsArray.put(w.id)
+            }
             wordsArray.put(wObj)
         }
         jsonRoot.put("words", wordsArray)
+        jsonRoot.put("flaggedWordIds", flaggedWordIdsArray)
 
         val articlesArray = JSONArray()
         articles.forEach { a ->
@@ -245,6 +254,9 @@ class BackupManager(private val context: Context, private val database: AppDatab
         pObj.put("quizCompleted", pToSave.quizCompleted)
         pObj.put("quizTotalScore", pToSave.quizTotalScore)
         jsonRoot.put("progress", pObj)
+
+        // Preferred Settings & User Preferences Backup
+        jsonRoot.put("settings", buildSettingsJson())
 
         jsonRoot.toString(2)
     }
@@ -358,6 +370,7 @@ class BackupManager(private val context: Context, private val database: AppDatab
             jsonRoot.put("profile", profileObj)
 
             // Words Array with course association
+            val flaggedWordIdsArray = JSONArray()
             val wordsArray = JSONArray()
             words.forEach { w ->
                 val wObj = JSONObject()
@@ -379,9 +392,15 @@ class BackupManager(private val context: Context, private val database: AppDatab
                 wObj.put("quizIncorrectCount", w.quizIncorrectCount)
                 wObj.put("timesReviewed", w.timesReviewed)
                 wObj.put("lastReviewedAt", w.lastReviewedAt)
+                wObj.put("isReported", w.isReported)
+                wObj.put("reportReason", w.reportReason ?: "")
+                if (w.isReported) {
+                    flaggedWordIdsArray.put(w.id)
+                }
                 wordsArray.put(wObj)
             }
             jsonRoot.put("words", wordsArray)
+            jsonRoot.put("flaggedWordIds", flaggedWordIdsArray)
 
             // Articles Array
             val articlesArray = JSONArray()
@@ -461,13 +480,16 @@ class BackupManager(private val context: Context, private val database: AppDatab
             pObj.put("quizTotalScore", pToSave.quizTotalScore)
             jsonRoot.put("progress", pObj)
 
+            // Preferred Settings & User Preferences Backup
+            jsonRoot.put("settings", buildSettingsJson())
+
             val jsonString = jsonRoot.toString(2)
             val jsonFile = getJsonBackupFile()
             jsonFile.writeText(jsonString)
 
             // 2. CSV / Excel format backup content - includes courseId & courseTitle
             val csvSb = java.lang.StringBuilder()
-            csvSb.append("id,courseId,courseTitle,group,Place1: Word,Place2: Meaning,Place3: Example,Place4: Synonyms,Place5: Extra,Place6: Mnemonic,status\n")
+            csvSb.append("id,courseId,courseTitle,group,Place1: Word,Place2: Meaning,Place3: Example,Place4: Synonyms,Place5: Extra,Place6: Mnemonic,status,isReported,reportReason\n")
             words.forEach { w ->
                 val cTitle = courseMap[w.courseId]?.title ?: "General Course"
                 csvSb.append("\"${w.id}\",")
@@ -480,7 +502,9 @@ class BackupManager(private val context: Context, private val database: AppDatab
                 csvSb.append("\"${escapeCsv(w.synonyms ?: "")}\",")
                 csvSb.append("\"${escapeCsv(w.extraWord ?: "")}\",")
                 csvSb.append("\"${escapeCsv(w.mnemonic ?: "")}\",")
-                csvSb.append("\"${w.status}\"\n")
+                csvSb.append("\"${w.status}\",")
+                csvSb.append("\"${w.isReported}\",")
+                csvSb.append("\"${escapeCsv(w.reportReason ?: "")}\"\n")
             }
             val csvString = csvSb.toString()
             val csvFile = getCsvBackupFile()
@@ -547,10 +571,10 @@ class BackupManager(private val context: Context, private val database: AppDatab
             }
             val courseMap = courses.associateBy { it.id }
             val csvSb = java.lang.StringBuilder()
-            csvSb.append("id,courseId,courseTitle,group,Place1: Word,Place2: Meaning,Place3: Example,Place4: Synonyms,Place5: Extra,Place6: Mnemonic,status\n")
+            csvSb.append("id,courseId,courseTitle,group,Place1: Word,Place2: Meaning,Place3: Example,Place4: Synonyms,Place5: Extra,Place6: Mnemonic,status,isReported,reportReason\n")
             words.forEach { w ->
                 val cTitle = courseMap[w.courseId]?.title ?: "General Course"
-                csvSb.append("\"${w.id}\",\"${w.courseId}\",\"${escapeCsv(cTitle)}\",\"${escapeCsv(w.group)}\",\"${escapeCsv(w.word)}\",\"${escapeCsv(w.meaning)}\",\"${escapeCsv(w.example ?: "")}\",\"${escapeCsv(w.synonyms ?: "")}\",\"${escapeCsv(w.extraWord ?: "")}\",\"${escapeCsv(w.mnemonic ?: "")}\",\"${w.status}\"\n")
+                csvSb.append("\"${w.id}\",\"${w.courseId}\",\"${escapeCsv(cTitle)}\",\"${escapeCsv(w.group)}\",\"${escapeCsv(w.word)}\",\"${escapeCsv(w.meaning)}\",\"${escapeCsv(w.example ?: "")}\",\"${escapeCsv(w.synonyms ?: "")}\",\"${escapeCsv(w.extraWord ?: "")}\",\"${escapeCsv(w.mnemonic ?: "")}\",\"${w.status}\",\"${w.isReported}\",\"${escapeCsv(w.reportReason ?: "")}\"\n")
             }
             writeToSafTree(treeUri, "memorizer_vocabulary.csv", "text/csv", csvSb.toString().toByteArray())
 
@@ -816,6 +840,12 @@ class BackupManager(private val context: Context, private val database: AppDatab
      */
     suspend fun restoreFromFileContent(content: String, isJson: Boolean, userId: String = "1235"): Result<Int> = withContext(Dispatchers.IO) {
         try {
+            val existingFlaggedMap = try {
+                database.vocabularyDao().getAllWordsList().filter { it.isReported }.associate { it.id to (it.reportReason ?: "") }
+            } catch (_: Exception) {
+                emptyMap<String, String>()
+            }
+
             val coursesToInsert = mutableListOf<CourseEntity>()
             val wordsToInsert = mutableListOf<VocabularyWordEntity>()
             val articlesToInsert = mutableListOf<ArticleEntity>()
@@ -826,6 +856,14 @@ class BackupManager(private val context: Context, private val database: AppDatab
             if (isJson || trimmed.startsWith("{") || trimmed.startsWith("[")) {
                 if (trimmed.startsWith("{")) {
                     val root = JSONObject(trimmed)
+
+                    val backupFlaggedIds = mutableSetOf<String>()
+                    root.optJSONArray("flaggedWordIds")?.let { arr ->
+                        for (i in 0 until arr.length()) {
+                            val fid = arr.optString(i, "")
+                            if (fid.isNotBlank()) backupFlaggedIds.add(fid)
+                        }
+                    }
 
                     // 0. User Profile & Photo Restore
                     val profObj = root.optJSONObject("profile") ?: root.optJSONObject("userProfile") ?: root.optJSONObject("user")
@@ -861,6 +899,12 @@ class BackupManager(private val context: Context, private val database: AppDatab
                             .putInt("daily_goal", pGoal)
                             .putString("bio", pBio)
                             .apply()
+                    }
+
+                    // 0.1 Preferred Settings & User Preferences Restore
+                    val settingsObj = root.optJSONObject("settings") ?: root.optJSONObject("preferences")
+                    if (settingsObj != null) {
+                        applySettingsFromJson(settingsObj)
                     }
 
                     // Helper lambdas to parse a word JSON object:
@@ -907,6 +951,15 @@ class BackupManager(private val context: Context, private val database: AppDatab
                                 coursesToInsert.add(CourseEntity(id = wordCourseId, title = wordCourseTitle.ifEmpty { "Restored Course" }))
                             }
 
+                            val isFlagged = wObj.optBoolean("isReported", false) ||
+                                    wObj.optBoolean("isFlagged", false) ||
+                                    wObj.optString("isReported", "").equals("true", ignoreCase = true) ||
+                                    backupFlaggedIds.contains(wId) ||
+                                    existingFlaggedMap.containsKey(wId)
+                            val flagReason = findStr(wObj, "reportReason", "report_reason", "flagReason").ifEmpty {
+                                existingFlaggedMap[wId]
+                            }
+
                             wordsToInsert.add(
                                 VocabularyWordEntity(
                                     id = wId,
@@ -925,7 +978,9 @@ class BackupManager(private val context: Context, private val database: AppDatab
                                     lastReviewedAt = if (wObj.has("lastReviewedAt")) wObj.optLong("lastReviewedAt") else System.currentTimeMillis(),
                                     lastQuizStatus = findStr(wObj, "lastQuizStatus", "last_quiz_status", "quizStatus").ifEmpty { "not_studied" },
                                     quizCorrectCount = findIntVal(wObj, 0, "quizCorrectCount", "quiz_correct_count", "correctCount", "correct"),
-                                    quizIncorrectCount = findIntVal(wObj, 0, "quizIncorrectCount", "quiz_incorrect_count", "incorrectCount", "incorrect")
+                                    quizIncorrectCount = findIntVal(wObj, 0, "quizIncorrectCount", "quiz_incorrect_count", "incorrectCount", "incorrect"),
+                                    isReported = isFlagged,
+                                    reportReason = flagReason?.ifBlank { null }
                                 )
                             )
                         }
@@ -1329,6 +1384,19 @@ class BackupManager(private val context: Context, private val database: AppDatab
                 wordsToInsert.addAll(remappedWords)
             }
 
+            // Restore flagged state if ID matches any flagged word
+            if (existingFlaggedMap.isNotEmpty()) {
+                val markedWords = wordsToInsert.map { w ->
+                    if (!w.isReported && existingFlaggedMap.containsKey(w.id)) {
+                        w.copy(isReported = true, reportReason = w.reportReason ?: existingFlaggedMap[w.id])
+                    } else {
+                        w
+                    }
+                }
+                wordsToInsert.clear()
+                wordsToInsert.addAll(markedWords)
+            }
+
             val totalRestoredCount = wordsToInsert.size + coursesToInsert.size + articlesToInsert.size + gamesToInsert.size + questionsToInsert.size
             if (totalRestoredCount > 0) {
                 if (coursesToInsert.isNotEmpty()) {
@@ -1370,6 +1438,189 @@ class BackupManager(private val context: Context, private val database: AppDatab
             restoreFromFileContent(content, isJson, userId)
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    private fun buildSettingsJson(): JSONObject {
+        val sObj = JSONObject()
+        try {
+            // General / Study / Screen Preferences
+            val appPrefs = context.getSharedPreferences("memorizer_prefs", Context.MODE_PRIVATE)
+            val genObj = JSONObject()
+            genObj.put("is_dark_theme", appPrefs.getBoolean("is_dark_theme", false))
+            genObj.put("is_flip_animation_enabled", appPrefs.getBoolean("is_flip_animation_enabled", true))
+            genObj.put("is_focus_mode", appPrefs.getBoolean("is_focus_mode", false))
+            genObj.put("is_haptic_enabled", appPrefs.getBoolean("is_haptic_enabled", true))
+            genObj.put("card_sort_order", appPrefs.getString("card_sort_order", "default"))
+            genObj.put("selected_card_groups_csv", appPrefs.getString("selected_card_groups_csv", ""))
+            genObj.put("selected_card_statuses_csv", appPrefs.getString("selected_card_statuses_csv", ""))
+            genObj.put("article_sync_url", appPrefs.getString("article_sync_url", ""))
+            sObj.put("general", genObj)
+
+            // Course Selections
+            val coursePrefs = context.getSharedPreferences("memorizer_course_prefs", Context.MODE_PRIVATE)
+            val courseObj = JSONObject()
+            courseObj.put("selected_course_ids_csv", coursePrefs.getString("selected_course_ids_csv", ""))
+            courseObj.put("saved_active_course_id", coursePrefs.getString("saved_active_course_id", ""))
+            sObj.put("course_preferences", courseObj)
+
+            // Widget Preferences
+            val widgetPrefs = context.getSharedPreferences(DailyVocabWidgetProvider.PREFS_NAME, Context.MODE_PRIVATE)
+            val widgetObj = JSONObject()
+            widgetObj.put("font_size", widgetPrefs.getString(DailyVocabWidgetProvider.KEY_WIDGET_FONT_SIZE, "medium"))
+            widgetObj.put("widget_size", widgetPrefs.getString(DailyVocabWidgetProvider.KEY_WIDGET_SIZE, "standard"))
+            widgetObj.put("rotate_10s", widgetPrefs.getBoolean(DailyVocabWidgetProvider.KEY_ROTATE_10S, true))
+            widgetObj.put("rotate_on_home_return", widgetPrefs.getBoolean(DailyVocabWidgetProvider.KEY_ROTATE_ON_HOME_RETURN, true))
+            widgetObj.put("selected_tags_csv", widgetPrefs.getString(DailyVocabWidgetProvider.KEY_WIDGET_TAG_FILTER, "all"))
+            widgetObj.put("selected_courses_csv", widgetPrefs.getString(DailyVocabWidgetProvider.KEY_WIDGET_COURSE_IDS, "all"))
+            sObj.put("widget_preferences", widgetObj)
+
+            // Notification Preferences
+            val notifPrefs = context.getSharedPreferences(NotificationHelper.PREFS_NAME, Context.MODE_PRIVATE)
+            val notifObj = JSONObject()
+            notifObj.put("notifications_enabled", notifPrefs.getBoolean(NotificationHelper.KEY_ENABLED, true))
+            notifObj.put("notification_hour", notifPrefs.getInt(NotificationHelper.KEY_HOUR, 20))
+            notifObj.put("notification_minute", notifPrefs.getInt(NotificationHelper.KEY_MINUTE, 0))
+            notifObj.put("notification_frequency", notifPrefs.getString(NotificationHelper.KEY_FREQUENCY, "2h"))
+            notifObj.put("show_word_meaning", notifPrefs.getBoolean(NotificationHelper.KEY_SHOW_WORD, true))
+            notifObj.put("streak_alert_enabled", notifPrefs.getBoolean(NotificationHelper.KEY_STREAK_ALERT, true))
+            notifObj.put("sound_enabled", notifPrefs.getBoolean(NotificationHelper.KEY_SOUND_ENABLED, true))
+            sObj.put("notification_preferences", notifObj)
+
+            // Game Stats & Accuracy Ratio Backup (Column Match, Archer Aim, Quiz Test)
+            val cmPrefs = context.getSharedPreferences("column_match_stats_prefs", Context.MODE_PRIVATE)
+            val archerPrefs = context.getSharedPreferences("archer_aim_stats_prefs", Context.MODE_PRIVATE)
+            val quizStatsPrefs = context.getSharedPreferences("quiz_test_stats_prefs", Context.MODE_PRIVATE)
+            val gameStatsObj = JSONObject()
+            gameStatsObj.put("cm_total_matches", cmPrefs.getInt("cm_total_matches", 0))
+            gameStatsObj.put("cm_total_mistakes", cmPrefs.getInt("cm_total_mistakes", 0))
+            gameStatsObj.put("cm_rounds", cmPrefs.getInt("cm_rounds", 0))
+            gameStatsObj.put("archer_total_hits", archerPrefs.getInt("archer_total_hits", 0))
+            gameStatsObj.put("archer_total_misses", archerPrefs.getInt("archer_total_misses", 0))
+            gameStatsObj.put("archer_rounds", archerPrefs.getInt("archer_rounds", 0))
+            gameStatsObj.put("quiz_test_total_answered", quizStatsPrefs.getInt("quiz_test_total_answered", 0))
+            gameStatsObj.put("quiz_test_total_correct", quizStatsPrefs.getInt("quiz_test_total_correct", 0))
+            gameStatsObj.put("quiz_test_attempts", quizStatsPrefs.getInt("quiz_test_attempts", 0))
+            sObj.put("game_stats", gameStatsObj)
+        } catch (e: Exception) {
+            android.util.Log.e("BackupManager", "Error building settings JSON", e)
+        }
+        return sObj
+    }
+
+    private fun applySettingsFromJson(sObj: JSONObject) {
+        try {
+            // General
+            val genObj = sObj.optJSONObject("general") ?: sObj.optJSONObject("study")
+            if (genObj != null) {
+                val appPrefs = context.getSharedPreferences("memorizer_prefs", Context.MODE_PRIVATE)
+                val editor = appPrefs.edit()
+                if (genObj.has("is_dark_theme")) editor.putBoolean("is_dark_theme", genObj.optBoolean("is_dark_theme", false))
+                if (genObj.has("is_flip_animation_enabled")) editor.putBoolean("is_flip_animation_enabled", genObj.optBoolean("is_flip_animation_enabled", true))
+                if (genObj.has("is_focus_mode")) editor.putBoolean("is_focus_mode", genObj.optBoolean("is_focus_mode", false))
+                if (genObj.has("is_haptic_enabled")) editor.putBoolean("is_haptic_enabled", genObj.optBoolean("is_haptic_enabled", true))
+                if (genObj.has("card_sort_order")) editor.putString("card_sort_order", genObj.optString("card_sort_order", "default"))
+                if (genObj.has("selected_card_groups_csv")) {
+                    val csv = genObj.optString("selected_card_groups_csv", "")
+                    editor.putString("selected_card_groups_csv", csv)
+                    val set = csv.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+                    editor.putStringSet("selected_card_groups", set)
+                }
+                if (genObj.has("selected_card_statuses_csv")) {
+                    val csv = genObj.optString("selected_card_statuses_csv", "")
+                    editor.putString("selected_card_statuses_csv", csv)
+                    val set = csv.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+                    editor.putStringSet("selected_card_statuses", set)
+                }
+                if (genObj.has("article_sync_url")) editor.putString("article_sync_url", genObj.optString("article_sync_url", ""))
+                editor.apply()
+            }
+
+            // Course preferences
+            val courseObj = sObj.optJSONObject("course_preferences") ?: sObj.optJSONObject("courses")
+            if (courseObj != null) {
+                val coursePrefs = context.getSharedPreferences("memorizer_course_prefs", Context.MODE_PRIVATE)
+                val cEditor = coursePrefs.edit()
+                if (courseObj.has("selected_course_ids_csv")) {
+                    val csv = courseObj.optString("selected_course_ids_csv", "")
+                    cEditor.putString("selected_course_ids_csv", csv)
+                    val set = csv.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+                    cEditor.putStringSet("selected_course_ids", set)
+                }
+                if (courseObj.has("saved_active_course_id")) {
+                    cEditor.putString("saved_active_course_id", courseObj.optString("saved_active_course_id", ""))
+                }
+                cEditor.apply()
+            }
+
+            // Widget preferences
+            val widgetObj = sObj.optJSONObject("widget_preferences") ?: sObj.optJSONObject("widget")
+            if (widgetObj != null) {
+                val widgetPrefs = context.getSharedPreferences(DailyVocabWidgetProvider.PREFS_NAME, Context.MODE_PRIVATE)
+                val wEditor = widgetPrefs.edit()
+                if (widgetObj.has("font_size")) wEditor.putString(DailyVocabWidgetProvider.KEY_WIDGET_FONT_SIZE, widgetObj.optString("font_size", "medium"))
+                if (widgetObj.has("widget_size")) wEditor.putString(DailyVocabWidgetProvider.KEY_WIDGET_SIZE, widgetObj.optString("widget_size", "standard"))
+                if (widgetObj.has("rotate_10s")) wEditor.putBoolean(DailyVocabWidgetProvider.KEY_ROTATE_10S, widgetObj.optBoolean("rotate_10s", true))
+                if (widgetObj.has("rotate_on_home_return")) wEditor.putBoolean(DailyVocabWidgetProvider.KEY_ROTATE_ON_HOME_RETURN, widgetObj.optBoolean("rotate_on_home_return", true))
+                if (widgetObj.has("selected_tags_csv")) {
+                    val raw = widgetObj.optString("selected_tags_csv", "all")
+                    wEditor.putString(DailyVocabWidgetProvider.KEY_WIDGET_TAG_FILTER, raw)
+                }
+                if (widgetObj.has("selected_courses_csv")) {
+                    val raw = widgetObj.optString("selected_courses_csv", "all")
+                    wEditor.putString(DailyVocabWidgetProvider.KEY_WIDGET_COURSE_IDS, raw)
+                }
+                wEditor.apply()
+                DailyVocabWidgetProvider.updateAllWidgets(context)
+            }
+
+            // Notification preferences
+            val notifObj = sObj.optJSONObject("notification_preferences") ?: sObj.optJSONObject("notification")
+            if (notifObj != null) {
+                val notifPrefs = context.getSharedPreferences(NotificationHelper.PREFS_NAME, Context.MODE_PRIVATE)
+                val nEditor = notifPrefs.edit()
+                val isEn = if (notifObj.has("notifications_enabled")) notifObj.optBoolean("notifications_enabled", true) else true
+                nEditor.putBoolean(NotificationHelper.KEY_ENABLED, isEn)
+                if (notifObj.has("notification_hour")) nEditor.putInt(NotificationHelper.KEY_HOUR, notifObj.optInt("notification_hour", 20))
+                if (notifObj.has("notification_minute")) nEditor.putInt(NotificationHelper.KEY_MINUTE, notifObj.optInt("notification_minute", 0))
+                if (notifObj.has("notification_frequency")) nEditor.putString(NotificationHelper.KEY_FREQUENCY, notifObj.optString("notification_frequency", "2h"))
+                if (notifObj.has("show_word_meaning")) nEditor.putBoolean(NotificationHelper.KEY_SHOW_WORD, notifObj.optBoolean("show_word_meaning", true))
+                if (notifObj.has("streak_alert_enabled")) nEditor.putBoolean(NotificationHelper.KEY_STREAK_ALERT, notifObj.optBoolean("streak_alert_enabled", true))
+                if (notifObj.has("sound_enabled")) nEditor.putBoolean(NotificationHelper.KEY_SOUND_ENABLED, notifObj.optBoolean("sound_enabled", true))
+                nEditor.apply()
+                if (isEn) {
+                    NotificationHelper.rescheduleNext(context)
+                } else {
+                    NotificationHelper.cancelDailyReminder(context)
+                }
+            }
+
+            // Restore Game Stats
+            val gameStatsObj = sObj.optJSONObject("game_stats")
+            if (gameStatsObj != null) {
+                val cmPrefs = context.getSharedPreferences("column_match_stats_prefs", Context.MODE_PRIVATE)
+                val cmEditor = cmPrefs.edit()
+                if (gameStatsObj.has("cm_total_matches")) cmEditor.putInt("cm_total_matches", gameStatsObj.optInt("cm_total_matches", 0))
+                if (gameStatsObj.has("cm_total_mistakes")) cmEditor.putInt("cm_total_mistakes", gameStatsObj.optInt("cm_total_mistakes", 0))
+                if (gameStatsObj.has("cm_rounds")) cmEditor.putInt("cm_rounds", gameStatsObj.optInt("cm_rounds", 0))
+                cmEditor.apply()
+
+                val archerPrefs = context.getSharedPreferences("archer_aim_stats_prefs", Context.MODE_PRIVATE)
+                val aEditor = archerPrefs.edit()
+                if (gameStatsObj.has("archer_total_hits")) aEditor.putInt("archer_total_hits", gameStatsObj.optInt("archer_total_hits", 0))
+                if (gameStatsObj.has("archer_total_misses")) aEditor.putInt("archer_total_misses", gameStatsObj.optInt("archer_total_misses", 0))
+                if (gameStatsObj.has("archer_rounds")) aEditor.putInt("archer_rounds", gameStatsObj.optInt("archer_rounds", 0))
+                aEditor.apply()
+
+                val quizStatsPrefs = context.getSharedPreferences("quiz_test_stats_prefs", Context.MODE_PRIVATE)
+                val qEditor = quizStatsPrefs.edit()
+                if (gameStatsObj.has("quiz_test_total_answered")) qEditor.putInt("quiz_test_total_answered", gameStatsObj.optInt("quiz_test_total_answered", 0))
+                if (gameStatsObj.has("quiz_test_total_correct")) qEditor.putInt("quiz_test_total_correct", gameStatsObj.optInt("quiz_test_total_correct", 0))
+                if (gameStatsObj.has("quiz_test_attempts")) qEditor.putInt("quiz_test_attempts", gameStatsObj.optInt("quiz_test_attempts", 0))
+                qEditor.apply()
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("BackupManager", "Error restoring settings JSON", e)
         }
     }
 

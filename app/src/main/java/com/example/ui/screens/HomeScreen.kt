@@ -53,6 +53,7 @@ fun HomeScreen(
     onNavigate: (String) -> Unit,
     onSelectGroup: (String?) -> Unit,
     onSelectStatus: (String) -> Unit = {},
+    onSelectFlagged: () -> Unit = {},
     widgetWord: VocabularyWordEntity? = null,
     widgetCategory: String = "all",
     onSetWidgetCategory: (String) -> Unit = {},
@@ -79,6 +80,7 @@ fun HomeScreen(
     val confusionCount = activeWords.count { it.status == "confusion" }
     val dontKnowCount = activeWords.count { it.status == "dont_know" }
     val unratedCount = activeWords.count { it.status == "unrated" }
+    val flaggedCount = activeWords.count { it.isReported }
     val masteryPercent = if (totalWords > 0) ((knowCount.toFloat() / totalWords) * 100).toInt() else 0
 
     var startAnimation by remember { mutableStateOf(false) }
@@ -621,7 +623,7 @@ fun HomeScreen(
             }
         }
 
-        val groups = activeWords.map { it.group }.distinct().sorted()
+        val groups = activeWords.mapNotNull { it.group?.takeIf { g -> g.isNotBlank() } }.distinct().sorted()
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 groups.forEach { grp ->
@@ -659,7 +661,7 @@ fun HomeScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    val displayGrpName = if (grp.all { it.isDigit() }) "Group $grp" else grp
+                                    val displayGrpName = if (grp.isNotBlank() && grp.all { it.isDigit() }) "Group $grp" else grp
                                     Text(
                                         text = displayGrpName,
                                         fontFamily = PoppinsFontFamily,

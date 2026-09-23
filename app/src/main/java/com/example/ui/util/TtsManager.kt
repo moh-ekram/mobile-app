@@ -5,7 +5,11 @@ import android.speech.tts.TextToSpeech
 import java.util.Locale
 
 class TtsManager(context: Context) : TextToSpeech.OnInitListener {
-    private var tts: TextToSpeech? = TextToSpeech(context.applicationContext, this)
+    private var tts: TextToSpeech? = try {
+        TextToSpeech(context.applicationContext, this)
+    } catch (_: Exception) {
+        null
+    }
     private var isInitialized = false
 
     override fun onInit(status: Int) {

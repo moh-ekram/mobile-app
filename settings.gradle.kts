@@ -19,5 +19,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "ArticleReader"
+rootProject.name = "Memorizer"
 include(":app")
