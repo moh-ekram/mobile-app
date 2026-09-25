@@ -226,6 +226,8 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
     val isSyncingDrive by viewModel.isSyncingDrive.collectAsState()
     val driveSyncUrl by viewModel.driveSyncUrl.collectAsState()
     val driveSyncSummary by viewModel.driveSyncSummary.collectAsState()
+    val qbSyncUrl by viewModel.qbSyncUrl.collectAsState()
+    val isSyncingQB by viewModel.isSyncingQB.collectAsState()
     val selectedCourseIds by viewModel.selectedCourseIds.collectAsState()
     val showOnlyFlagged by viewModel.showOnlyFlagged.collectAsState()
     val palette = LocalAppPalette.current
@@ -613,7 +615,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             onClearDriveSummary = { viewModel.clearDriveSyncSummary() },
                             onCreateCourse = { title, desc, fileContent, isJson -> viewModel.createCourse(title, desc, fileContent, isJson) },
                             onSelectCourse = { cId -> viewModel.setActiveCourse(cId) },
-                            onDeleteCourse = { cId -> viewModel.deleteCourse(cId) },
+                            onDeleteCourse = { cId, keepProgress -> viewModel.deleteCourse(cId, keepProgress) },
                             onAddWord = { word -> viewModel.addCustomWord(word) },
                             onUpdateWord = { word -> viewModel.updateWord(word) },
                             onUpdateCourse = { cId, title, desc -> viewModel.updateCourse(cId, title, desc) },
@@ -628,6 +630,10 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             onImportGame = { content, type -> viewModel.importGameFile(content, type) },
                             onImportGameItems = { items -> viewModel.importGameItems(items) },
                             onImportQB = { content -> viewModel.importQuestionBankFile(content) },
+                            qbSyncUrl = qbSyncUrl,
+                            isSyncingQB = isSyncingQB,
+                            onImportQBFromUrl = { url, clearExisting -> viewModel.importQuestionBankFromUrl(url, clearExisting) },
+                            onImportQBBytes = { bytes, fileName, clearExisting -> viewModel.importQuestionBankBytes(bytes, fileName, clearExisting) },
                             onResetData = { viewModel.resetToSample() }
                         )
                     }

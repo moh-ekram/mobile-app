@@ -15,9 +15,10 @@ import com.example.data.model.*
         CourseEntity::class,
         ArticleEntity::class,
         DeletedArticleTitleEntity::class,
-        Flashcard::class
+        Flashcard::class,
+        ArchivedWordProgressEntity::class
     ],
-    version = 9,
+    version = 10,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -29,6 +30,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun articleDao(): ArticleDao
     abstract fun deletedArticleDao(): DeletedArticleDao
     abstract fun flashcardDao(): FlashcardDao
+    abstract fun archivedWordProgressDao(): ArchivedWordProgressDao
 
     companion object {
         @Volatile

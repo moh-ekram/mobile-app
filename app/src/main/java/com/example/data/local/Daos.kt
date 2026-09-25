@@ -123,23 +123,38 @@ interface VocabularyDao {
     @Update
     suspend fun updateWord(word: VocabularyWordEntity)
 
+    @Query("SELECT * FROM archived_word_progress WHERE normalizedWord IN (:normalizedWords) OR originalId IN (:ids)")
+    suspend fun getArchivedProgressForWords(normalizedWords: List<String>, ids: List<String>): List<ArchivedWordProgressEntity>
+
     /**
      * Upserts incoming words while preserving all user learning progress,
-     * flashcard ratings, quiz counts, and review timestamps for any matching word IDs.
+     * flashcard ratings, quiz counts, and review timestamps for any matching word IDs,
+     * as well as restoring archived progress for previously deleted courses.
      * Returns Pair(updatedExistingCount, insertedNewCount).
      */
     @Transaction
     suspend fun safeUpsertWordsPreservingProgress(incomingWords: List<VocabularyWordEntity>): Pair<Int, Int> {
         if (incomingWords.isEmpty()) return Pair(0, 0)
         val incomingIds = incomingWords.map { it.id }
+        val incomingNormalized = incomingWords.map { it.word.lowercase().trim() }
         // Batch fetch all existing words that share IDs with incoming words
         val existingWordsMap = getWordsByIds(incomingIds).associateBy { it.id }
+        val archivedList = try {
+            getArchivedProgressForWords(incomingNormalized, incomingIds)
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val archivedById = archivedList.associateBy { it.originalId }
+        val archivedByWord = archivedList.associateBy { it.normalizedWord }
 
         var updatedCount = 0
         var insertedCount = 0
 
         val merged = incomingWords.map { incoming ->
             val existing = existingWordsMap[incoming.id]
+            val norm = incoming.word.lowercase().trim()
+            val archived = archivedById[incoming.id] ?: archivedByWord[norm]
+
             if (existing != null) {
                 updatedCount++
                 // Preserve user learning progress and quiz statistics
@@ -152,6 +167,19 @@ interface VocabularyDao {
                     lastQuizStatus = existing.lastQuizStatus,
                     quizCorrectCount = existing.quizCorrectCount,
                     quizIncorrectCount = existing.quizIncorrectCount
+                )
+            } else if (archived != null && (archived.status != "unrated" || archived.timesReviewed > 0 || archived.quizCorrectCount > 0 || archived.quizIncorrectCount > 0)) {
+                // Restored from archived progress of previously deleted course
+                updatedCount++
+                incoming.copy(
+                    status = archived.status,
+                    timesReviewed = archived.timesReviewed,
+                    lastReviewedAt = archived.lastReviewedAt,
+                    isReported = archived.isReported,
+                    reportReason = archived.reportReason,
+                    lastQuizStatus = archived.lastQuizStatus,
+                    quizCorrectCount = archived.quizCorrectCount,
+                    quizIncorrectCount = archived.quizIncorrectCount
                 )
             } else {
                 insertedCount++
@@ -294,4 +322,23 @@ interface FlashcardDao {
     @Query("DELETE FROM flashcards")
     suspend fun clearAll()
 }
+
+@Dao
+interface ArchivedWordProgressDao {
+    @Query("SELECT * FROM archived_word_progress")
+    suspend fun getAll(): List<ArchivedWordProgressEntity>
+
+    @Query("SELECT * FROM archived_word_progress WHERE courseId = :courseId")
+    suspend fun getByCourse(courseId: String): List<ArchivedWordProgressEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(items: List<ArchivedWordProgressEntity>)
+
+    @Query("DELETE FROM archived_word_progress WHERE courseId = :courseId")
+    suspend fun deleteByCourse(courseId: String)
+
+    @Query("DELETE FROM archived_word_progress")
+    suspend fun clearAll()
+}
+
 

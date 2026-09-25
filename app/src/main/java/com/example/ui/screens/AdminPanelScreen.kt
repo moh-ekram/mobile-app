@@ -65,7 +65,7 @@ fun AdminPanelScreen(
     onClearDriveSummary: () -> Unit = {},
     onCreateCourse: (String, String?, String?, Boolean) -> Unit = { _, _, _, _ -> },
     onSelectCourse: (String) -> Unit = {},
-    onDeleteCourse: (String) -> Unit = {},
+    onDeleteCourse: (String, Boolean) -> Unit = { _, _ -> },
     onAddWord: (VocabularyWordEntity) -> Unit,
     onUpdateWord: (VocabularyWordEntity) -> Unit = {},
     onUpdateCourse: (String, String, String?) -> Unit = { _, _, _ -> },
@@ -619,7 +619,7 @@ private fun CoursesAdminView(
     onBatchUpload: () -> Unit = {},
     onCreateCourseClick: () -> Unit,
     onSelectCourse: (String) -> Unit,
-    onDeleteCourse: (String) -> Unit,
+    onDeleteCourse: (String, Boolean) -> Unit,
     onEditCourse: (CourseEntity) -> Unit = {},
     onManageWords: () -> Unit = {},
     onUploadToCourse: (String) -> Unit
@@ -937,29 +937,57 @@ private fun CoursesAdminView(
         AlertDialog(
             onDismissRequest = { coursePendingDelete = null },
             title = {
-                Text("Delete Course?", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = SlateText)
+                Text("Delete Course", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = SlateText)
             },
             text = {
-                Text(
-                    text = "Are you sure you want to delete '${courseToDelete.title}'?\n\nAll vocabulary words and data associated with this course will be deleted.",
-                    fontSize = 13.sp,
-                    color = SlateMuted
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Delete '${courseToDelete.title}'?",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                        color = SlateText
+                    )
+                    Text(
+                        "Keep your learning progress (ratings & review history) for future re-imports?",
+                        fontSize = 12.sp,
+                        color = SlateMuted
+                    )
+                }
             },
             confirmButton = {
-                Button(
-                    onClick = {
-                        onDeleteCourse(courseToDelete.id)
-                        coursePendingDelete = null
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = RoseError)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Delete Course")
+                    Button(
+                        onClick = {
+                            val id = courseToDelete.id
+                            coursePendingDelete = null
+                            onDeleteCourse(id, true)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Text("Keep Progress", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    Button(
+                        onClick = {
+                            val id = courseToDelete.id
+                            coursePendingDelete = null
+                            onDeleteCourse(id, false)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = RoseError),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Text("Delete All", fontSize = 11.5.sp, color = Color.White)
+                    }
                 }
             },
             dismissButton = {
                 TextButton(onClick = { coursePendingDelete = null }) {
-                    Text("Cancel")
+                    Text("Cancel", fontSize = 12.sp)
                 }
             }
         )

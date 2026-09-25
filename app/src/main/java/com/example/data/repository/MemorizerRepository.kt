@@ -10,6 +10,7 @@ import com.example.data.model.GamePracticeEntity
 import com.example.data.model.QuestionBankEntity
 import com.example.data.model.UserProgressEntity
 import com.example.data.model.VocabularyWordEntity
+import com.example.data.model.ArchivedWordProgressEntity
 import com.example.data.parser.ArticleParser
 import com.example.data.parser.FileParsers
 import com.example.data.supabase.SupabaseSyncService
@@ -130,7 +131,32 @@ class MemorizerRepository(
         database.courseDao().updateCourseTitle(courseId, newTitle)
     }
 
-    suspend fun deleteCourse(courseId: String, userId: String = "1235") = withContext(Dispatchers.IO) {
+    suspend fun deleteCourse(courseId: String, keepProgress: Boolean = true, userId: String = "1235") = withContext(Dispatchers.IO) {
+        if (keepProgress) {
+            val words = database.vocabularyDao().getWordsListByCourse(courseId)
+            if (words.isNotEmpty()) {
+                val archived = words.map { w ->
+                    ArchivedWordProgressEntity(
+                        id = "${courseId}_${w.word.lowercase().trim()}",
+                        originalId = w.id,
+                        word = w.word,
+                        normalizedWord = w.word.lowercase().trim(),
+                        courseId = courseId,
+                        status = w.status,
+                        timesReviewed = w.timesReviewed,
+                        lastReviewedAt = w.lastReviewedAt,
+                        isReported = w.isReported,
+                        reportReason = w.reportReason,
+                        lastQuizStatus = w.lastQuizStatus,
+                        quizCorrectCount = w.quizCorrectCount,
+                        quizIncorrectCount = w.quizIncorrectCount
+                    )
+                }
+                database.archivedWordProgressDao().insertAll(archived)
+            }
+        } else {
+            database.archivedWordProgressDao().deleteByCourse(courseId)
+        }
         database.courseDao().deleteCourseById(courseId)
         database.vocabularyDao().deleteWordsByCourse(courseId)
         refreshProgressAndSync(userId)
@@ -558,14 +584,68 @@ class MemorizerRepository(
         }
     }
 
-    suspend fun importQuestionBankFile(content: String): Result<Int> = withContext(Dispatchers.IO) {
+    suspend fun importQuestionBankFile(content: String, clearExisting: Boolean = false): Result<Int> = withContext(Dispatchers.IO) {
         try {
-            val items = FileParsers.parseQuestionBankCsv(content)
+            val items = FileParsers.parseQuestionBankAny(content)
             if (items.isNotEmpty()) {
+                if (clearExisting) {
+                    database.questionBankDao().getAllQuestionsList().forEach {
+                        database.questionBankDao().deleteQuestion(it)
+                    }
+                }
                 database.questionBankDao().insertQuestions(items)
                 Result.success(items.size)
             } else {
                 Result.failure(Exception("No valid Question Bank questions found"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun importQuestionBankFromBytes(bytes: ByteArray, fileName: String, clearExisting: Boolean = false): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            val items = FileParsers.parseQuestionBankFromBytes(bytes, fileName)
+            if (items.isNotEmpty()) {
+                if (clearExisting) {
+                    database.questionBankDao().getAllQuestionsList().forEach {
+                        database.questionBankDao().deleteQuestion(it)
+                    }
+                }
+                database.questionBankDao().insertQuestions(items)
+                Result.success(items.size)
+            } else {
+                Result.failure(Exception("No valid Question Bank questions found in $fileName"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun importQuestionBankFromUrl(
+        inputUrl: String,
+        clearExisting: Boolean = false
+    ): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            val downloadedFiles = GoogleDriveSyncService.fetchFilesFromInput(inputUrl)
+            if (downloadedFiles.isEmpty()) {
+                return@withContext Result.failure(Exception("No readable files found in the provided link."))
+            }
+            val allQuestions = mutableListOf<QuestionBankEntity>()
+            for (file in downloadedFiles) {
+                val questions = FileParsers.parseQuestionBankFromBytes(file.bytes, file.fileName)
+                allQuestions.addAll(questions)
+            }
+            if (allQuestions.isNotEmpty()) {
+                if (clearExisting) {
+                    database.questionBankDao().getAllQuestionsList().forEach {
+                        database.questionBankDao().deleteQuestion(it)
+                    }
+                }
+                database.questionBankDao().insertQuestions(allQuestions)
+                Result.success(allQuestions.size)
+            } else {
+                Result.failure(Exception("No valid Question Bank questions found in the link data."))
             }
         } catch (e: Exception) {
             Result.failure(e)

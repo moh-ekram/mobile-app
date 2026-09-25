@@ -21,9 +21,11 @@ class TtsManager(context: Context) : TextToSpeech.OnInitListener {
     }
 
     fun speak(text: String) {
-        if (!isInitialized || text.isBlank()) return
-        tts?.stop()
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "memorizer_tts_${System.currentTimeMillis()}")
+        try {
+            if (!isInitialized || text.isBlank()) return
+            tts?.stop()
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "memorizer_tts_${System.currentTimeMillis()}")
+        } catch (_: Exception) {}
     }
 
     fun shutdown() {

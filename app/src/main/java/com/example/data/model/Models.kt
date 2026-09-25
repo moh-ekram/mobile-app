@@ -68,6 +68,24 @@ data class VocabularyWordEntity(
     val quizIncorrectCount: Int = 0
 )
 
+@Entity(tableName = "archived_word_progress")
+data class ArchivedWordProgressEntity(
+    @PrimaryKey val id: String, // composite "${courseId}_${normalizedWord}" or word.id
+    val originalId: String,
+    val word: String,
+    val normalizedWord: String,
+    val courseId: String,
+    val status: String = "unrated",
+    val timesReviewed: Int = 0,
+    val lastReviewedAt: Long = System.currentTimeMillis(),
+    val isReported: Boolean = false,
+    val reportReason: String? = null,
+    val lastQuizStatus: String? = "not_studied",
+    val quizCorrectCount: Int = 0,
+    val quizIncorrectCount: Int = 0,
+    val archivedAt: Long = System.currentTimeMillis()
+)
+
 @Entity(tableName = "game_practice_items")
 data class GamePracticeEntity(
     @PrimaryKey val id: String,

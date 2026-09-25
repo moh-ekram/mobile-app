@@ -11,6 +11,7 @@ import com.example.data.model.CourseEntity
 import com.example.data.model.ArticleEntity
 import com.example.data.model.GamePracticeEntity
 import com.example.data.model.QuestionBankEntity
+import com.example.data.model.ArchivedWordProgressEntity
 import com.example.data.parser.FileParsers
 import com.example.widget.DailyVocabWidgetProvider
 import com.example.notification.NotificationHelper
@@ -254,6 +255,32 @@ class BackupManager(private val context: Context, private val database: AppDatab
         pObj.put("quizCompleted", pToSave.quizCompleted)
         pObj.put("quizTotalScore", pToSave.quizTotalScore)
         jsonRoot.put("progress", pObj)
+
+        val archivedItems = try {
+            database.archivedWordProgressDao().getAll()
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val archivedArray = JSONArray()
+        archivedItems.forEach { arch ->
+            val aObj = JSONObject()
+            aObj.put("id", arch.id)
+            aObj.put("originalId", arch.originalId)
+            aObj.put("word", arch.word)
+            aObj.put("normalizedWord", arch.normalizedWord)
+            aObj.put("courseId", arch.courseId)
+            aObj.put("status", arch.status)
+            aObj.put("timesReviewed", arch.timesReviewed)
+            aObj.put("lastReviewedAt", arch.lastReviewedAt)
+            aObj.put("isReported", arch.isReported)
+            aObj.put("reportReason", arch.reportReason ?: "")
+            aObj.put("lastQuizStatus", arch.lastQuizStatus ?: "not_studied")
+            aObj.put("quizCorrectCount", arch.quizCorrectCount)
+            aObj.put("quizIncorrectCount", arch.quizIncorrectCount)
+            aObj.put("archivedAt", arch.archivedAt)
+            archivedArray.put(aObj)
+        }
+        jsonRoot.put("archived_word_progress", archivedArray)
 
         // Preferred Settings & User Preferences Backup
         jsonRoot.put("settings", buildSettingsJson())
@@ -851,6 +878,7 @@ class BackupManager(private val context: Context, private val database: AppDatab
             val articlesToInsert = mutableListOf<ArticleEntity>()
             val gamesToInsert = mutableListOf<GamePracticeEntity>()
             val questionsToInsert = mutableListOf<QuestionBankEntity>()
+            val archivedToInsert = mutableListOf<ArchivedWordProgressEntity>()
 
             val trimmed = content.trim()
             if (isJson || trimmed.startsWith("{") || trimmed.startsWith("[")) {
@@ -1194,6 +1222,38 @@ class BackupManager(private val context: Context, private val database: AppDatab
                         }
                     }
 
+                    // 5.1 Archived Word Progress
+                    val archArr = root.optJSONArray("archived_word_progress")
+                    if (archArr != null) {
+                        for (i in 0 until archArr.length()) {
+                            val aObj = archArr.optJSONObject(i) ?: continue
+                            val word = aObj.optString("word", "").trim()
+                            if (word.isBlank()) continue
+                            val origId = aObj.optString("originalId", "arch_${System.currentTimeMillis()}_$i")
+                            val courseId = aObj.optString("courseId", "course_default")
+                            val id = aObj.optString("id", "${courseId}_${word.lowercase().trim()}")
+                            val rawReason = aObj.optString("reportReason", "").trim()
+                            archivedToInsert.add(
+                                ArchivedWordProgressEntity(
+                                    id = id,
+                                    originalId = origId,
+                                    word = word,
+                                    normalizedWord = aObj.optString("normalizedWord", word.lowercase().trim()),
+                                    courseId = courseId,
+                                    status = aObj.optString("status", "unrated"),
+                                    timesReviewed = aObj.optInt("timesReviewed", 0),
+                                    lastReviewedAt = aObj.optLong("lastReviewedAt", System.currentTimeMillis()),
+                                    isReported = aObj.optBoolean("isReported", false),
+                                    reportReason = if (rawReason.isNotEmpty()) rawReason else null,
+                                    lastQuizStatus = aObj.optString("lastQuizStatus", "not_studied"),
+                                    quizCorrectCount = aObj.optInt("quizCorrectCount", 0),
+                                    quizIncorrectCount = aObj.optInt("quizIncorrectCount", 0),
+                                    archivedAt = aObj.optLong("archivedAt", System.currentTimeMillis())
+                                )
+                            )
+                        }
+                    }
+
                     // 6. Progress Restoration (with smart derivation from restored words)
                     val pObj = root.optJSONObject("progress")
                         ?: root.optJSONObject("userProgress")
@@ -1397,7 +1457,7 @@ class BackupManager(private val context: Context, private val database: AppDatab
                 wordsToInsert.addAll(markedWords)
             }
 
-            val totalRestoredCount = wordsToInsert.size + coursesToInsert.size + articlesToInsert.size + gamesToInsert.size + questionsToInsert.size
+            val totalRestoredCount = wordsToInsert.size + coursesToInsert.size + articlesToInsert.size + gamesToInsert.size + questionsToInsert.size + archivedToInsert.size
             if (totalRestoredCount > 0) {
                 if (coursesToInsert.isNotEmpty()) {
                     database.courseDao().insertCourses(coursesToInsert)
@@ -1413,6 +1473,9 @@ class BackupManager(private val context: Context, private val database: AppDatab
                 }
                 if (questionsToInsert.isNotEmpty()) {
                     database.questionBankDao().insertQuestions(questionsToInsert)
+                }
+                if (archivedToInsert.isNotEmpty()) {
+                    database.archivedWordProgressDao().insertAll(archivedToInsert)
                 }
 
                 // Re-sync backup files on device

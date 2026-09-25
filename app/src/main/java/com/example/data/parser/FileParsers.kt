@@ -350,24 +350,23 @@ object FileParsers {
     }
 
     /**
-     * Parses Question Bank CSV.
+     * Parses Question Bank from 2D rows (CSV or Excel sheets).
      * Columns: Id*, Question*, Opt1-4*, Ans*, Explanation, Filter1:label, Filter2:label, Filter3:label
      */
-    fun parseQuestionBankCsv(content: String): List<QuestionBankEntity> {
-        val lines = content.lines().filter { it.isNotBlank() }
-        if (lines.size < 2) return emptyList()
+    fun parseQuestionBankRows(rows: List<List<String>>): List<QuestionBankEntity> {
+        if (rows.size < 2) return emptyList()
 
-        val rawHeaders = parseCsvLine(lines[0]).map { it.trim() }
+        val rawHeaders = rows[0].map { it.trim() }
         val headers = rawHeaders.map { it.lowercase() }
 
         val idIdx = headers.indexOfFirst { it == "id" || it == "id*" }
         val qIdx = headers.indexOfFirst { it.contains("question") }
-        val opt1Idx = headers.indexOfFirst { it.contains("opt1") }
-        val opt2Idx = headers.indexOfFirst { it.contains("opt2") }
-        val opt3Idx = headers.indexOfFirst { it.contains("opt3") }
-        val opt4Idx = headers.indexOfFirst { it.contains("opt4") }
-        val ansIdx = headers.indexOfFirst { it.contains("ans") }
-        val expIdx = headers.indexOfFirst { it.contains("explanation") }
+        val opt1Idx = headers.indexOfFirst { it.contains("opt1") || it == "option 1" || it == "option1" }
+        val opt2Idx = headers.indexOfFirst { it.contains("opt2") || it == "option 2" || it == "option2" }
+        val opt3Idx = headers.indexOfFirst { it.contains("opt3") || it == "option 3" || it == "option3" }
+        val opt4Idx = headers.indexOfFirst { it.contains("opt4") || it == "option 4" || it == "option4" }
+        val ansIdx = headers.indexOfFirst { it.contains("ans") || it.contains("correct") }
+        val expIdx = headers.indexOfFirst { it.contains("explanation") || it.contains("explain") }
 
         // Filter columns with labels
         var f1Idx = -1
@@ -379,34 +378,37 @@ object FileParsers {
 
         rawHeaders.forEachIndexed { index, header ->
             val lower = header.lowercase()
-            if (lower.startsWith("filter1") || lower.startsWith("fiter1")) {
+            if (lower.startsWith("filter1") || lower.startsWith("fiter1") || lower == "category") {
                 f1Idx = index
                 val p = header.split(":", limit = 2)
                 if (p.size > 1) f1Label = p[1].trim()
-            } else if (lower.startsWith("filter2") || lower.startsWith("fiter2")) {
+                else if (lower == "category") f1Label = "Category"
+            } else if (lower.startsWith("filter2") || lower.startsWith("fiter2") || lower == "difficulty") {
                 f2Idx = index
                 val p = header.split(":", limit = 2)
                 if (p.size > 1) f2Label = p[1].trim()
-            } else if (lower.startsWith("filter3") || lower.startsWith("fiter3")) {
+                else if (lower == "difficulty") f2Label = "Difficulty"
+            } else if (lower.startsWith("filter3") || lower.startsWith("fiter3") || lower == "source") {
                 f3Idx = index
                 val p = header.split(":", limit = 2)
                 if (p.size > 1) f3Label = p[1].trim()
+                else if (lower == "source") f3Label = "Source"
             }
         }
 
         val result = mutableListOf<QuestionBankEntity>()
-        for (i in 1 until lines.size) {
-            val values = parseCsvLine(lines[i])
+        for (i in 1 until rows.size) {
+            val values = rows[i]
             if (values.size <= maxOf(opt1Idx, qIdx)) continue
 
-            val id = if (idIdx in values.indices && values[idIdx].isNotBlank()) values[idIdx].trim() else "qb_$i"
+            val id = if (idIdx in values.indices && values[idIdx].isNotBlank()) values[idIdx].trim() else "qb_${System.currentTimeMillis()}_$i"
             val question = if (qIdx in values.indices) values[qIdx].trim() else ""
             var opt1 = if (opt1Idx in values.indices) values[opt1Idx].trim() else ""
             var opt2 = if (opt2Idx in values.indices) values[opt2Idx].trim() else ""
             var opt3 = if (opt3Idx in values.indices) values[opt3Idx].trim() else ""
             var opt4 = if (opt4Idx in values.indices) values[opt4Idx].trim() else ""
             var answer = if (ansIdx in values.indices) values[ansIdx].trim() else ""
-            val explanation = if (expIdx in values.indices) values[expIdx].trim() else null
+            val explanation = if (expIdx in values.indices) values[expIdx].trim().ifEmpty { null } else null
 
             // Resolve answer according to the 3 rules (exact match, '#', A/B/C/D)
             val resolved = QuestionAnswerResolver.resolve(opt1, opt2, opt3, opt4, answer)
@@ -416,9 +418,9 @@ object FileParsers {
             opt4 = resolved.cleanOpt4
             answer = resolved.correctAnswer
 
-            val filter1 = if (f1Idx in values.indices) values[f1Idx].trim() else null
-            val filter2 = if (f2Idx in values.indices) values[f2Idx].trim() else null
-            val filter3 = if (f3Idx in values.indices) values[f3Idx].trim() else null
+            val filter1 = if (f1Idx in values.indices) values[f1Idx].trim().ifEmpty { null } else null
+            val filter2 = if (f2Idx in values.indices) values[f2Idx].trim().ifEmpty { null } else null
+            val filter3 = if (f3Idx in values.indices) values[f3Idx].trim().ifEmpty { null } else null
 
             if (question.isNotBlank()) {
                 result.add(
@@ -442,6 +444,126 @@ object FileParsers {
             }
         }
         return result
+    }
+
+    /**
+     * Parses Question Bank CSV.
+     * Columns: Id*, Question*, Opt1-4*, Ans*, Explanation, Filter1:label, Filter2:label, Filter3:label
+     */
+    fun parseQuestionBankCsv(content: String): List<QuestionBankEntity> {
+        val lines = content.lines().filter { it.isNotBlank() }
+        if (lines.size < 2) return emptyList()
+        val rows = lines.map { parseCsvLine(it) }
+        return parseQuestionBankRows(rows)
+    }
+
+    /**
+     * Parses Question Bank JSON (Array of objects or Object with questions/questionBank key).
+     */
+    fun parseQuestionBankJson(jsonStr: String): List<QuestionBankEntity> {
+        val result = mutableListOf<QuestionBankEntity>()
+        try {
+            val trimmed = jsonStr.trim()
+            val arr: org.json.JSONArray = if (trimmed.startsWith("[")) {
+                org.json.JSONArray(trimmed)
+            } else if (trimmed.startsWith("{")) {
+                val root = org.json.JSONObject(trimmed)
+                root.optJSONArray("questionBank")
+                    ?: root.optJSONArray("questions")
+                    ?: root.optJSONArray("items")
+                    ?: root.optJSONArray("data")
+                    ?: root.optJSONArray("qb")
+                    ?: org.json.JSONArray().put(root)
+            } else {
+                return emptyList()
+            }
+
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i) ?: continue
+                val qText = obj.optString("question", obj.optString("Question", obj.optString("q", obj.optString("prompt", "")))).trim()
+                if (qText.isBlank()) continue
+
+                var o1 = obj.optString("opt1", obj.optString("Opt1", obj.optString("option1", obj.optString("a", "")))).trim()
+                var o2 = obj.optString("opt2", obj.optString("Opt2", obj.optString("option2", obj.optString("b", "")))).trim()
+                var o3 = obj.optString("opt3", obj.optString("Opt3", obj.optString("option3", obj.optString("c", "")))).trim()
+                var o4 = obj.optString("opt4", obj.optString("Opt4", obj.optString("option4", obj.optString("d", "")))).trim()
+                var ans = obj.optString("answer", obj.optString("Answer", obj.optString("ans", obj.optString("correctAnswer", "")))).trim()
+
+                val resolved = QuestionAnswerResolver.resolve(o1, o2, o3, o4, ans)
+                o1 = resolved.cleanOpt1
+                o2 = resolved.cleanOpt2
+                o3 = resolved.cleanOpt3
+                o4 = resolved.cleanOpt4
+                ans = resolved.correctAnswer
+
+                val exp = obj.optString("explanation", obj.optString("Explanation", obj.optString("exp", ""))).trim().ifEmpty { null }
+                val f1 = obj.optString("filter1", obj.optString("category", obj.optString("Category", ""))).trim().ifEmpty { null }
+                val f2 = obj.optString("filter2", obj.optString("difficulty", obj.optString("Difficulty", ""))).trim().ifEmpty { null }
+                val f3 = obj.optString("filter3", obj.optString("source", obj.optString("Source", ""))).trim().ifEmpty { null }
+
+                val f1Label = obj.optString("filter1Label", "Category").ifBlank { "Category" }
+                val f2Label = obj.optString("filter2Label", "Difficulty").ifBlank { "Difficulty" }
+                val f3Label = obj.optString("filter3Label", "Source").ifBlank { "Source" }
+
+                val id = obj.optString("id", obj.optString("qbId", "qb_${System.currentTimeMillis()}_$i"))
+
+                result.add(
+                    QuestionBankEntity(
+                        id = id,
+                        question = qText,
+                        opt1 = o1,
+                        opt2 = o2,
+                        opt3 = o3,
+                        opt4 = o4,
+                        answer = ans,
+                        explanation = exp,
+                        filter1 = f1,
+                        filter2 = f2,
+                        filter3 = f3,
+                        filter1Label = f1Label,
+                        filter2Label = f2Label,
+                        filter3Label = f3Label
+                    )
+                )
+            }
+        } catch (_: Exception) {}
+        return result
+    }
+
+    /**
+     * Parses Question Bank from any content (auto-detecting JSON vs CSV).
+     */
+    fun parseQuestionBankAny(content: String): List<QuestionBankEntity> {
+        val trimmed = content.trim()
+        if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+            val jsonItems = parseQuestionBankJson(trimmed)
+            if (jsonItems.isNotEmpty()) return jsonItems
+        }
+        return parseQuestionBankCsv(trimmed)
+    }
+
+    /**
+     * Parses Question Bank from raw bytes, auto-detecting Excel (.xlsx), JSON, or CSV.
+     */
+    fun parseQuestionBankFromBytes(bytes: ByteArray, fileName: String = ""): List<QuestionBankEntity> {
+        val isZipOrXlsx = (bytes.size > 4 && bytes[0] == 0x50.toByte() && bytes[1] == 0x4B.toByte()) ||
+                fileName.endsWith(".xlsx", ignoreCase = true)
+        if (isZipOrXlsx) {
+            try {
+                val rows = parseXlsx(java.io.ByteArrayInputStream(bytes))
+                val items = parseQuestionBankRows(rows)
+                if (items.isNotEmpty()) return items
+            } catch (_: Exception) {}
+        }
+        val content = try {
+            bytes.toString(Charsets.UTF_8)
+        } catch (_: Exception) {
+            ""
+        }
+        if (content.isNotBlank()) {
+            return parseQuestionBankAny(content)
+        }
+        return emptyList()
     }
 
     /**

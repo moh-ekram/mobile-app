@@ -119,7 +119,7 @@ fun SettingsScreen(
     onClearDriveSummary: () -> Unit = {},
     onCreateCourse: (String, String?, String?, Boolean) -> Unit = { _, _, _, _ -> },
     onSelectCourse: (String) -> Unit = {},
-    onDeleteCourse: (String) -> Unit = {},
+    onDeleteCourse: (String, Boolean) -> Unit = { _, _ -> },
     onAddWord: (VocabularyWordEntity) -> Unit = {},
     onUpdateWord: (VocabularyWordEntity) -> Unit = {},
     onUpdateCourse: (String, String, String?) -> Unit = { _, _, _ -> },
@@ -134,6 +134,10 @@ fun SettingsScreen(
     onImportGame: (String, String) -> Unit = { _, _ -> },
     onImportGameItems: (List<GamePracticeEntity>) -> Unit = {},
     onImportQB: (String) -> Unit = {},
+    qbSyncUrl: String = "",
+    isSyncingQB: Boolean = false,
+    onImportQBFromUrl: (String, Boolean) -> Unit = { _, _ -> },
+    onImportQBBytes: (ByteArray, String, Boolean) -> Unit = { _, _, _ -> },
     onResetData: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -146,11 +150,36 @@ fun SettingsScreen(
     var showCreateCourseDialog by remember { mutableStateOf(false) }
     var showAddWordDialog by remember { mutableStateOf(false) }
     var showDriveSyncDialog by remember { mutableStateOf(false) }
+    var showQbSyncDialog by remember { mutableStateOf(false) }
     var showRestoreDialog by remember { mutableStateOf(false) }
     var restoreText by remember { mutableStateOf("") }
     var wordBeingEdited by remember { mutableStateOf<VocabularyWordEntity?>(null) }
     var courseBeingEdited by remember { mutableStateOf<CourseEntity?>(null) }
     var showResetConfirmDialog by remember { mutableStateOf(false) }
+
+    // File picker for Question Bank (CSV/JSON/Excel)
+    val qbFilePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                var fileName = "qb_${System.currentTimeMillis()}"
+                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (nameIndex != -1 && cursor.moveToFirst()) {
+                        fileName = cursor.getString(nameIndex)
+                    }
+                }
+                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                if (bytes != null && bytes.isNotEmpty()) {
+                    onImportQBBytes(bytes, fileName, false)
+                    Toast.makeText(context, "Processing Question Bank file...", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "Failed to read file: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     // Multi-file picker for batch courses
     val batchFilePicker = rememberLauncherForActivityResult(
@@ -321,7 +350,9 @@ fun SettingsScreen(
                     onDeleteWord = onDeleteWord,
                     onReportWord = onReportWord,
                     onDeleteQuestion = onDeleteQuestion,
-                    onClearAllQB = onClearAllQB
+                    onClearAllQB = onClearAllQB,
+                    onImportQBClick = { showQbSyncDialog = true },
+                    onImportQBFileClick = { qbFilePicker.launch("*/*") }
                 )
                 2 -> WidgetAndRemindersTab(
                     courses = courses.filter { it.id in selectedCourseIds },
@@ -344,7 +375,8 @@ fun SettingsScreen(
                     onRestoreFile = { driveRestoreLauncher.launch(arrayOf("application/json", "text/*", "*/*")) },
                     onCloudSync = onCloudSync,
                     onDirectPasteRestore = { showRestoreDialog = true },
-                    onResetData = { showResetConfirmDialog = true }
+                    onResetData = { showResetConfirmDialog = true },
+                    onImportQBClick = { showQbSyncDialog = true }
                 )
             }
         }
@@ -421,6 +453,18 @@ fun SettingsScreen(
             onSync = { url, preserve ->
                 onSyncFromDrive(url, preserve)
                 showDriveSyncDialog = false
+            }
+        )
+    }
+
+    if (showQbSyncDialog) {
+        CompactQbSyncModal(
+            initialUrl = qbSyncUrl,
+            isSyncing = isSyncingQB,
+            onDismiss = { showQbSyncDialog = false },
+            onSync = { url, clearExisting ->
+                onImportQBFromUrl(url, clearExisting)
+                showQbSyncDialog = false
             }
         )
     }
@@ -837,7 +881,7 @@ private fun CoursesSettingsTab(
     onSelectAllCourses: () -> Unit,
     onDeselectAllCourses: () -> Unit,
     onSelectCourse: (String) -> Unit,
-    onDeleteCourse: (String) -> Unit,
+    onDeleteCourse: (String, Boolean) -> Unit,
     onCreateCourseClick: () -> Unit,
     onEditCourseClick: (CourseEntity) -> Unit,
     onBatchImportClick: () -> Unit,
@@ -848,14 +892,41 @@ private fun CoursesSettingsTab(
     onDeleteWord: (String) -> Unit,
     onReportWord: (String, Boolean, String?) -> Unit,
     onDeleteQuestion: (String) -> Unit,
-    onClearAllQB: () -> Unit
+    onClearAllQB: () -> Unit,
+    onImportQBClick: () -> Unit,
+    onImportQBFileClick: () -> Unit
 ) {
     val palette = LocalAppPalette.current
     var contentSubView by remember { mutableStateOf("courses") } // "courses", "words", "qb"
     var wordSearchQuery by remember { mutableStateOf("") }
+    var qbSearchQuery by remember { mutableStateOf("") }
+    var showClearAllQBConfirm by remember { mutableStateOf(false) }
     var selectedCourseFilterForWords by remember { mutableStateOf("all") }
     var selectedStatusFilters by remember { mutableStateOf<Set<String>>(emptySet()) }
     var courseToDelete by remember { mutableStateOf<CourseEntity?>(null) }
+
+    if (showClearAllQBConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearAllQBConfirm = false },
+            title = { Text("Clear All Questions?", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
+            text = { Text("Are you sure you want to delete all ${questions.size} questions from Question Bank? This cannot be undone.", fontSize = 12.sp) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showClearAllQBConfirm = false
+                        onClearAllQB()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48)),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Clear All", fontSize = 12.sp)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearAllQBConfirm = false }) { Text("Cancel", fontSize = 12.sp) }
+            }
+        )
+    }
 
     // Course Delete Confirmation Dialog
     if (courseToDelete != null) {
@@ -866,27 +937,54 @@ private fun CoursesSettingsTab(
                 Text("Delete Course", fontWeight = FontWeight.Bold, fontSize = 16.sp)
             },
             text = {
-                Text(
-                    "Are you sure you want to delete \"${course.title}\"? All words in this course will also be deleted.",
-                    fontSize = 13.sp,
-                    color = palette.textPrimary
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Delete \"${course.title}\"?",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                        color = palette.textPrimary
+                    )
+                    Text(
+                        "Keep your learning progress (ratings & review history) for future re-imports?",
+                        fontSize = 12.sp,
+                        color = palette.textSecondary
+                    )
+                }
             },
             confirmButton = {
-                Button(
-                    onClick = {
-                        val id = course.id
-                        courseToDelete = null
-                        onDeleteCourse(id)
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Delete", color = Color.White)
+                    Button(
+                        onClick = {
+                            val id = course.id
+                            courseToDelete = null
+                            onDeleteCourse(id, true)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Text("Keep Progress", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    Button(
+                        onClick = {
+                            val id = course.id
+                            courseToDelete = null
+                            onDeleteCourse(id, false)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48)),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Text("Delete All", fontSize = 11.5.sp, color = Color.White)
+                    }
                 }
             },
             dismissButton = {
                 TextButton(onClick = { courseToDelete = null }) {
-                    Text("Cancel")
+                    Text("Cancel", fontSize = 12.sp)
                 }
             }
         )
@@ -1192,7 +1290,7 @@ private fun CoursesSettingsTab(
             }
         }
 
-        // Sub-View: QUESTION BANK (Games section removed)
+        // Sub-View: QUESTION BANK (QB)
         if (contentSubView == "qb") {
             item {
                 Row(
@@ -1200,32 +1298,154 @@ private fun CoursesSettingsTab(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Question Bank", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = palette.textPrimary)
-                    if (questions.isNotEmpty()) {
-                        TextButton(onClick = onClearAllQB) {
-                            Text("Clear All", fontSize = 11.sp, color = Color(0xFFE11D48))
+                    Column {
+                        Text("Question Bank", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = palette.textPrimary)
+                        Text(
+                            text = "${questions.size} questions available",
+                            fontSize = 11.sp,
+                            color = palette.textMuted
+                        )
+                    }
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Link Import Button
+                        Button(
+                            onClick = onImportQBClick,
+                            colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                            modifier = Modifier.height(34.dp)
+                        ) {
+                            Icon(Icons.Default.Link, contentDescription = "Add Link", modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Add Link", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                        }
+
+                        // File Import Button
+                        IconButton(
+                            onClick = onImportQBFileClick,
+                            modifier = Modifier.size(34.dp).clip(CircleShape).background(palette.surface)
+                        ) {
+                            Icon(Icons.Default.UploadFile, contentDescription = "Import File", tint = IndigoPrimary, modifier = Modifier.size(16.dp))
+                        }
+
+                        if (questions.isNotEmpty()) {
+                            IconButton(
+                                onClick = { showClearAllQBConfirm = true },
+                                modifier = Modifier.size(34.dp).clip(CircleShape).background(palette.surface)
+                            ) {
+                                Icon(Icons.Default.DeleteSweep, contentDescription = "Clear All", tint = Color(0xFFE11D48), modifier = Modifier.size(16.dp))
+                            }
                         }
                     }
                 }
             }
 
-            items(questions.take(50), key = { it.id }) { q ->
-                Card(
-                    shape = RoundedCornerShape(10.dp),
-                    colors = CardDefaults.cardColors(containerColor = palette.surface),
-                    border = BorderStroke(1.dp, palette.border)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+            if (questions.isEmpty()) {
+                item {
+                    Card(
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = palette.surface),
+                        border = BorderStroke(1.dp, palette.border),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(q.question, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = palette.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text("Ans: ${q.answer}", fontSize = 10.sp, color = EmeraldSuccess)
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(Icons.Default.HelpOutline, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(36.dp))
+                            Text(
+                                "Question Bank is Empty",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = palette.textPrimary
+                            )
+                            Text(
+                                "Google Drive, Google Sheets, বা সরাসরি CSV/JSON লিঙ্ক এড করে কুইজ ও গেমসের প্রশ্ন ইম্পোর্ট করুন।",
+                                fontSize = 12.sp,
+                                color = palette.textSecondary,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    onClick = onImportQBClick,
+                                    colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Add QB Link", fontSize = 12.sp)
+                                }
+                                OutlinedButton(
+                                    onClick = onImportQBFileClick,
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("From File", fontSize = 12.sp)
+                                }
+                            }
                         }
-                        IconButton(onClick = { onDeleteQuestion(q.id) }, modifier = Modifier.size(26.dp)) {
-                            Icon(Icons.Default.DeleteOutline, contentDescription = "Delete", tint = Color(0xFFE11D48), modifier = Modifier.size(14.dp))
+                    }
+                }
+            } else {
+                // Search box
+                item {
+                    OutlinedTextField(
+                        value = qbSearchQuery,
+                        onValueChange = { qbSearchQuery = it },
+                        placeholder = { Text("Search question or answer...", fontSize = 11.sp) },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                        trailingIcon = {
+                            if (qbSearchQuery.isNotBlank()) {
+                                IconButton(onClick = { qbSearchQuery = "" }, modifier = Modifier.size(24.dp)) {
+                                    Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(14.dp))
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().height(46.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                    )
+                }
+
+                val filtered = if (qbSearchQuery.isBlank()) questions else questions.filter {
+                    it.question.contains(qbSearchQuery, ignoreCase = true) ||
+                            it.answer.contains(qbSearchQuery, ignoreCase = true) ||
+                            (!it.explanation.isNullOrBlank() && it.explanation.contains(qbSearchQuery, ignoreCase = true)) ||
+                            (!it.filter1.isNullOrBlank() && it.filter1.contains(qbSearchQuery, ignoreCase = true))
+                }
+
+                items(filtered.take(60), key = { it.id }) { q ->
+                    Card(
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(containerColor = palette.surface),
+                        border = BorderStroke(1.dp, palette.border)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text(q.question, fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp, color = palette.textPrimary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Ans: ${q.answer}", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = EmeraldSuccess)
+                                    if (!q.filter1.isNullOrBlank()) {
+                                        Text("• ${q.filter1}", fontSize = 10.sp, color = palette.textMuted)
+                                    }
+                                }
+                                if (!q.explanation.isNullOrBlank()) {
+                                    Text(q.explanation, fontSize = 10.sp, color = palette.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                            IconButton(onClick = { onDeleteQuestion(q.id) }, modifier = Modifier.size(26.dp)) {
+                                Icon(Icons.Default.DeleteOutline, contentDescription = "Delete", tint = Color(0xFFE11D48), modifier = Modifier.size(14.dp))
+                            }
                         }
                     }
                 }
@@ -1963,7 +2183,8 @@ private fun BackupSettingsTab(
     onRestoreFile: () -> Unit,
     onCloudSync: () -> Unit,
     onDirectPasteRestore: () -> Unit,
-    onResetData: () -> Unit
+    onResetData: () -> Unit,
+    onImportQBClick: () -> Unit = {}
 ) {
     val palette = LocalAppPalette.current
     val context = LocalContext.current
@@ -2074,6 +2295,42 @@ private fun BackupSettingsTab(
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Restore Drive", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                         }
+                    }
+                }
+            }
+        }
+
+        // Question Bank Link Sync Card
+        item {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = palette.surface),
+                border = BorderStroke(1.dp, palette.border)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.HelpOutline, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(22.dp))
+                        Column {
+                            Text("Question Bank (QB) Link Sync", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = palette.textPrimary)
+                            Text("Import questions from Google Drive / Sheets link", fontSize = 10.sp, color = palette.textMuted)
+                        }
+                    }
+                    FilledTonalButton(
+                        onClick = onImportQBClick,
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                    ) {
+                        Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(13.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Add Link", fontSize = 11.sp)
                     }
                 }
             }
@@ -2514,6 +2771,144 @@ private fun CompactDriveSyncModal(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+private fun CompactQbSyncModal(
+    initialUrl: String,
+    isSyncing: Boolean,
+    onDismiss: () -> Unit,
+    onSync: (url: String, clearExisting: Boolean) -> Unit
+) {
+    var url by remember { mutableStateOf(initialUrl) }
+    var clearExisting by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val palette = LocalAppPalette.current
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(Icons.Default.Link, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(20.dp))
+                Text("Import Question Bank from Link", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Google Drive (file/folder), Google Sheets, বা সরাসরি CSV/JSON/Excel লিংক দিয়ে প্রশ্ন ইম্পোর্ট করুন।",
+                    fontSize = 11.5.sp,
+                    color = palette.textSecondary
+                )
+
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    label = { Text("QB Share Link / URL", fontSize = 11.sp) },
+                    placeholder = { Text("https://drive.google.com/... or https://docs.google.com/spreadsheets/...", fontSize = 10.sp) },
+                    leadingIcon = {
+                        Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(16.dp), tint = IndigoPrimary)
+                    },
+                    trailingIcon = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (url.isNotBlank()) {
+                                IconButton(onClick = { url = "" }, modifier = Modifier.size(24.dp)) {
+                                    Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(14.dp))
+                                }
+                            }
+                            IconButton(
+                                onClick = {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                                    val clip = clipboard?.primaryClip
+                                    if (clip != null && clip.itemCount > 0) {
+                                        val pasteText = clip.getItemAt(0).text?.toString() ?: ""
+                                        if (pasteText.isNotBlank()) {
+                                            url = pasteText.trim()
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(Icons.Default.ContentPaste, contentDescription = "Paste", modifier = Modifier.size(14.dp), tint = IndigoPrimary)
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    textStyle = LocalTextStyle.current.copy(fontSize = 12.sp),
+                    shape = RoundedCornerShape(10.dp)
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9),
+                    border = BorderStroke(0.5.dp, palette.border)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = clearExisting,
+                            onCheckedChange = { clearExisting = it },
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text("পূর্বের প্রশ্নগুলো মুছে নতুনগুলো বসান", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = palette.textPrimary)
+                            Text("আনচেক থাকলে বর্তমান প্রশ্নের সাথে যোগ হবে", fontSize = 9.5.sp, color = palette.textMuted)
+                        }
+                    }
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (palette.isDark) Color(0xFF0F172A) else Color(0xFFEFF6FF),
+                    border = BorderStroke(0.5.dp, IndigoPrimary.copy(alpha = 0.3f))
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(Icons.Default.Info, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(16.dp))
+                        Text(
+                            text = "লিংকটি পাবলিক ('Anyone with link can view') হতে হবে। CSV তে Question, Opt1-4, Ans কলাম থাকা আবশ্যক।",
+                            fontSize = 10.sp,
+                            color = palette.textSecondary
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (url.isNotBlank()) onSync(url.trim(), clearExisting)
+                },
+                enabled = url.isNotBlank() && !isSyncing,
+                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                if (isSyncing) {
+                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Importing...", fontSize = 11.5.sp)
+                } else {
+                    Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Import Now", fontSize = 11.5.sp)
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isSyncing) {
+                Text("Cancel", fontSize = 11.5.sp)
+            }
         }
     )
 }

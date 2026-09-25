@@ -91,10 +91,6 @@ internal fun isWordMatchingFlashcardStatus(word: VocabularyWordEntity, selectedS
         "dont_know", "needs review", "dontknow" -> "dont_know"
         else -> "unrated"
     }
-    // Requirement: Only words marked as Confused, Know, Don't Know should be included in the games
-    if (normStatus !in setOf("know", "confusion", "dont_know")) {
-        return false
-    }
     if (selectedStatuses.isEmpty() || "all" in selectedStatuses) {
         return true
     }
@@ -104,6 +100,7 @@ internal fun isWordMatchingFlashcardStatus(word: VocabularyWordEntity, selectedS
             "know" -> normStatus == "know"
             "confusion", "confused" -> normStatus == "confusion"
             "dont_know" -> normStatus == "dont_know"
+            "unrated", "unread" -> normStatus == "unrated"
             else -> false
         }
     }
@@ -1277,10 +1274,14 @@ fun GamePracticeScreen(
                     ArcherAimGameView(
                         gameState = activeArcherGame!!,
                         onHit = { wordId ->
-                            onRecordWordQuizAnswer(wordId, true)
+                            try {
+                                onRecordWordQuizAnswer(wordId, true)
+                            } catch (_: Exception) {}
                         },
                         onMiss = { wordId ->
-                            onRecordWordQuizAnswer(wordId, false)
+                            try {
+                                onRecordWordQuizAnswer(wordId, false)
+                            } catch (_: Exception) {}
                         },
                         onRoundFinished = { statsUpdateTrigger++ },
                         onPlayAgain = { startArcherAimGame() },
@@ -2293,13 +2294,14 @@ private fun ColumnMatchConfigView(
                         }
 
                         val statusSummary = if (selectedStatuses.isEmpty() || "all" in selectedStatuses) {
-                            "All Tagged"
+                            "All Words"
                         } else {
                             selectedStatuses.joinToString(", ") {
                                 when (it) {
                                     "know" -> "Know"
                                     "confusion", "confused" -> "Confused"
                                     "dont_know" -> "Don't Know"
+                                    "unrated", "unread" -> "Unrated"
                                     else -> it
                                 }
                             }
@@ -2473,7 +2475,8 @@ private fun ColumnMatchConfigView(
 
                             val isAllStatusesSelected = selectedStatuses.isEmpty() || "all" in selectedStatuses
                             val statusList = listOf(
-                                Triple("all", "All Tagged", IndigoPrimary to IndigoLight),
+                                Triple("all", "All Words", IndigoPrimary to IndigoLight),
+                                Triple("unrated", "Unrated", SlateMuted to Color(0xFFF1F5F9)),
                                 Triple("know", "Know", EmeraldSuccess to EmeraldLight),
                                 Triple("confusion", "Confused", AmberWarning to AmberLight),
                                 Triple("dont_know", "Don't Know", RoseError to RoseLight)
@@ -3331,13 +3334,14 @@ private fun ArcherAimConfigView(
                             }
 
                             val statusLabel = if (selectedStatuses.isEmpty() || "all" in selectedStatuses) {
-                                "All Tagged"
+                                "All Words"
                             } else {
                                 selectedStatuses.joinToString(", ") {
                                     when (it) {
                                         "know" -> "Know"
                                         "confusion", "confused" -> "Confused"
                                         "dont_know" -> "Don't Know"
+                                        "unrated", "unread" -> "Unrated"
                                         else -> it
                                     }
                                 }
@@ -3461,7 +3465,8 @@ private fun ArcherAimConfigView(
 
                             val isAllStatusesSelected = selectedStatuses.isEmpty() || "all" in selectedStatuses
                             val statusList = listOf(
-                                Triple("all", "All Tagged", IndigoPrimary to IndigoLight),
+                                Triple("all", "All Words", IndigoPrimary to IndigoLight),
+                                Triple("unrated", "Unrated", SlateMuted to Color(0xFFF1F5F9)),
                                 Triple("know", "Know", EmeraldSuccess to EmeraldLight),
                                 Triple("confusion", "Confused", AmberWarning to AmberLight),
                                 Triple("dont_know", "Don't Know", RoseError to RoseLight)
@@ -3852,13 +3857,14 @@ private fun CourseQuizConfigView(
                         }
                         val groupSummary = if (selectedGroups.isEmpty() || "all" in selectedGroups) "All Groups" else "${selectedGroups.size} Groups"
                         val statusSummary = if (selectedStatuses.isEmpty() || "all" in selectedStatuses) {
-                            "All Tagged"
+                            "All Words"
                         } else {
                             selectedStatuses.joinToString(", ") {
                                 when (it) {
                                     "know" -> "Know"
                                     "confusion", "confused" -> "Confused"
                                     "dont_know" -> "Don't Know"
+                                    "unrated", "unread" -> "Unrated"
                                     else -> it
                                 }
                             }
@@ -4093,7 +4099,8 @@ private fun CourseQuizConfigView(
 
                             val isAllStatusesSelected = selectedStatuses.isEmpty() || "all" in selectedStatuses
                             val statusList = listOf(
-                                Triple("all", "All Tagged", IndigoPrimary to IndigoLight),
+                                Triple("all", "All Words", IndigoPrimary to IndigoLight),
+                                Triple("unrated", "Unrated", SlateMuted to Color(0xFFF1F5F9)),
                                 Triple("know", "Know", EmeraldSuccess to EmeraldLight),
                                 Triple("confusion", "Confused", AmberWarning to AmberLight),
                                 Triple("dont_know", "Don't Know", RoseError to RoseLight)
@@ -4168,6 +4175,9 @@ private fun CourseQuizConfigView(
                                                 }
                                             }
                                         }
+                                    }
+                                    repeat(2 - rowPair.size) {
+                                        Spacer(modifier = Modifier.weight(1f))
                                     }
                                 }
                             }

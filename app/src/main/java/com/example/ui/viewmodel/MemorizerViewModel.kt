@@ -250,9 +250,19 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         syncPrefs.getString("saved_drive_sync_url", "https://drive.google.com/drive/folders/1OBqSlB21FD_-0tpRZE8H6R5VFzDkeX2n") ?: ""
     )
 
+    val qbSyncUrl = MutableStateFlow(
+        syncPrefs.getString("saved_qb_sync_url", "") ?: ""
+    )
+    val isSyncingQB = MutableStateFlow(false)
+
     fun setDriveSyncUrl(url: String) {
         driveSyncUrl.value = url
         syncPrefs.edit().putString("saved_drive_sync_url", url).apply()
+    }
+
+    fun setQbSyncUrl(url: String) {
+        qbSyncUrl.value = url
+        syncPrefs.edit().putString("saved_qb_sync_url", url).apply()
     }
 
     fun clearDriveSyncSummary() {
@@ -357,10 +367,10 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun deleteCourse(courseId: String) {
+    fun deleteCourse(courseId: String, keepProgress: Boolean = true) {
         viewModelScope.launch {
             val uid = _currentUser.value?.userId ?: "1235"
-            repository.deleteCourse(courseId, uid)
+            repository.deleteCourse(courseId, keepProgress, uid)
             val curSel = _selectedCourseIds.value.toMutableSet()
             curSel.remove(courseId)
             _selectedCourseIds.value = curSel
@@ -370,7 +380,7 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
                 val remaining = allCourses.value.filter { it.id != courseId && curSel.contains(it.id) }
                 activeCourseId.value = remaining.firstOrNull()?.id ?: curSel.firstOrNull() ?: ""
             }
-            _statusMessage.value = "Course removed"
+            _statusMessage.value = if (keepProgress) "Course deleted (progress saved)" else "Course & progress deleted"
         }
     }
 
@@ -1330,14 +1340,51 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun importQuestionBankFile(content: String) {
+    fun importQuestionBankFile(content: String, clearExisting: Boolean = false) {
         viewModelScope.launch {
-            val result = repository.importQuestionBankFile(content)
+            val result = repository.importQuestionBankFile(content, clearExisting)
             result.onSuccess { count ->
                 _statusMessage.value = "Imported $count Question Bank items!"
             }.onFailure { err ->
                 _statusMessage.value = "QB import failed: ${err.message}"
             }
+        }
+    }
+
+    fun importQuestionBankBytes(bytes: ByteArray, fileName: String, clearExisting: Boolean = false) {
+        viewModelScope.launch {
+            val result = repository.importQuestionBankFromBytes(bytes, fileName, clearExisting)
+            result.onSuccess { count ->
+                _statusMessage.value = "Imported $count Question Bank items from $fileName!"
+            }.onFailure { err ->
+                _statusMessage.value = "QB import failed: ${err.message}"
+            }
+        }
+    }
+
+    fun importQuestionBankFromUrl(
+        url: String = qbSyncUrl.value,
+        clearExisting: Boolean = false,
+        onComplete: ((Result<Int>) -> Unit)? = null
+    ) {
+        val targetUrl = url.trim()
+        if (targetUrl.isBlank()) {
+            _statusMessage.value = "Please enter a valid Question Bank link."
+            onComplete?.invoke(Result.failure(Exception("Please enter a valid link.")))
+            return
+        }
+        setQbSyncUrl(targetUrl)
+        viewModelScope.launch {
+            isSyncingQB.value = true
+            _statusMessage.value = "Connecting and importing Question Bank from link..."
+            val result = repository.importQuestionBankFromUrl(targetUrl, clearExisting)
+            isSyncingQB.value = false
+            result.onSuccess { count ->
+                _statusMessage.value = "Successfully imported $count Question Bank items from link!"
+            }.onFailure { err ->
+                _statusMessage.value = "QB import failed: ${err.message}"
+            }
+            onComplete?.invoke(result)
         }
     }
 
@@ -1394,8 +1441,10 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun recordWordQuizAnswer(wordId: String, isCorrect: Boolean) {
         viewModelScope.launch {
-            val uid = _currentUser.value?.userId ?: "1235"
-            repository.recordWordQuizAnswer(wordId, isCorrect, uid)
+            try {
+                val uid = _currentUser.value?.userId ?: "1235"
+                repository.recordWordQuizAnswer(wordId, isCorrect, uid)
+            } catch (_: Exception) {}
         }
     }
 

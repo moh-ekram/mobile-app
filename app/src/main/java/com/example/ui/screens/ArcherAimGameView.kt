@@ -614,14 +614,14 @@ fun ArcherAimGameView(
                     // DIRECT HIT: Trigger expanding shockwave ripple & flash
                     hitImpactPoint = impact
                     coroutineScope.launch {
-                        hitPulseRadius = 0f
+                        hitPulseRadius = 1f
                         hitPulseAlpha = 1f
                         val pulseAnim = Animatable(0f)
                         pulseAnim.animateTo(
                             targetValue = 1f,
                             animationSpec = tween(durationMillis = 480, easing = FastOutSlowInEasing)
                         ) {
-                            hitPulseRadius = value * 140f
+                            hitPulseRadius = (value * 140f).coerceAtLeast(1f)
                             hitPulseAlpha = (1f - value).coerceAtLeast(0f)
                         }
                     }
@@ -631,9 +631,15 @@ fun ArcherAimGameView(
                     isRoundResolved = true
                     roundSuccess = true
                     hitLetterFeedback = "BULLSEYE! Target Hit!"
-                    haptic.ratingSelected()
-                    onHit(currentTarget.wordEntity.id)
-                    ttsManager.speak(currentTarget.place1Text)
+                    try {
+                        haptic.ratingSelected()
+                    } catch (_: Exception) {}
+                    try {
+                        onHit(currentTarget.wordEntity.id)
+                    } catch (_: Exception) {}
+                    try {
+                        ttsManager.speak(currentTarget.place1Text)
+                    } catch (_: Exception) {}
                 } else {
                     // MISS: Trigger camera screen shake & red vignette flash
                     coroutineScope.launch {
@@ -645,9 +651,15 @@ fun ArcherAimGameView(
                     isRoundResolved = true
                     roundSuccess = false
                     hitLetterFeedback = if (hitLabel != null) "Hit '$hitLabel'!" else "Missed target!"
-                    haptic.cardFlip()
-                    onMiss(currentTarget.wordEntity.id)
-                    ttsManager.speak(currentTarget.place1Text)
+                    try {
+                        haptic.cardFlip()
+                    } catch (_: Exception) {}
+                    try {
+                        onMiss(currentTarget.wordEntity.id)
+                    } catch (_: Exception) {}
+                    try {
+                        ttsManager.speak(currentTarget.place1Text)
+                    } catch (_: Exception) {}
                 }
             }
         }
@@ -762,35 +774,41 @@ fun ArcherAimGameView(
             }
 
             // 7. HIT SHOCKWAVE PULSE & FLASH ON BULLSEYE
-            if (hitPulseAlpha > 0f && hitImpactPoint != null) {
+            if (hitPulseAlpha > 0.01f && hitPulseRadius > 1f && hitImpactPoint != null) {
                 val impactPt = hitImpactPoint!!
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(Color(0x99FFD700), Color(0x6638BDF8), Color.Transparent),
+                val safeRadius = hitPulseRadius.coerceAtLeast(1f)
+                try {
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color(0x99FFD700), Color(0x6638BDF8), Color.Transparent),
+                            center = impactPt,
+                            radius = safeRadius
+                        ),
+                        radius = safeRadius,
+                        center = impactPt
+                    )
+                    drawCircle(
+                        color = Color(0xFF38BDF8).copy(alpha = hitPulseAlpha.coerceIn(0f, 1f)),
+                        radius = safeRadius,
                         center = impactPt,
-                        radius = hitPulseRadius
-                    ),
-                    radius = hitPulseRadius,
-                    center = impactPt
-                )
-                drawCircle(
-                    color = Color(0xFF38BDF8).copy(alpha = hitPulseAlpha),
-                    radius = hitPulseRadius,
-                    center = impactPt,
-                    style = Stroke(width = 3.5f * hitPulseAlpha)
-                )
+                        style = Stroke(width = (3.5f * hitPulseAlpha).coerceAtLeast(0.5f))
+                    )
+                } catch (_: Exception) {}
             }
 
             // 8. MISS CAMERA SHAKE RED VIGNETTE FLASH
             if (missShakeAnim.value > 0f) {
-                drawRect(
-                    brush = Brush.radialGradient(
-                        colors = listOf(Color.Transparent, Color(0x66EF4444).copy(alpha = missShakeAnim.value * 0.45f)),
-                        center = Offset(size.width / 2f, size.height / 2f),
-                        radius = size.width * 0.85f
-                    ),
-                    size = size
-                )
+                try {
+                    val safeRadius = (size.width * 0.85f).coerceAtLeast(1f)
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Color.Transparent, Color(0x66EF4444).copy(alpha = (missShakeAnim.value * 0.45f).coerceIn(0f, 1f))),
+                            center = Offset(size.width / 2f, size.height / 2f),
+                            radius = safeRadius
+                        ),
+                        size = size
+                    )
+                } catch (_: Exception) {}
             }
 
             // 9. PARTICLES

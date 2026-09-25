@@ -51,13 +51,6 @@ import com.example.data.model.CourseEntity
 import com.example.data.model.VocabularyWordEntity
 import com.example.data.parser.ArticleParser
 import com.example.data.parser.ParsedArticleItem
-import com.example.data.parser.ScannedArticleLink
-import com.example.data.parser.RssFeedItem
-import com.example.data.parser.RssFeedResult
-import com.example.data.service.ArticleFlashcardScraperService
-import com.example.data.service.GeneratedFlashcard
-import com.example.data.service.FlashcardType
-import com.example.data.service.ScrapedArticleContent
 import com.example.ui.theme.*
 import java.util.Locale
 import android.content.ClipboardManager
@@ -265,8 +258,6 @@ fun ArticleReaderView(
     var isBookmarked by remember { mutableStateOf(false) }
     var isSpeaking by remember { mutableStateOf(false) }
     var showReadingControlsSheet by remember { mutableStateOf(false) }
-    var showFlashcardExtractorSheet by remember { mutableStateOf(false) }
-    var showSitemapSheet by remember { mutableStateOf(false) }
     var showChaptersDropdown by remember { mutableStateOf(false) }
 
     // TTS engine for audio pronunciation
@@ -590,7 +581,7 @@ fun ArticleReaderView(
                                 ) {
                                     Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("স্যাম্পল কোর্স ও আর্টিকেল যোগ করুন", fontFamily = PoppinsFontFamily, fontWeight = FontWeight.SemiBold)
+                                    Text("Load Sample Content", fontFamily = PoppinsFontFamily, fontWeight = FontWeight.SemiBold)
                                 }
 
                                 Row(
@@ -781,42 +772,6 @@ fun ArticleReaderView(
                                     }
 
                                     IconButton(
-                                        onClick = { showFlashcardExtractorSheet = true },
-                                        modifier = Modifier.size(30.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Style,
-                                            contentDescription = "Extract Flashcards from URL",
-                                            modifier = Modifier.size(16.dp),
-                                            tint = IndigoPrimary
-                                        )
-                                    }
-
-                                    IconButton(
-                                        onClick = { showSitemapSheet = true },
-                                        modifier = Modifier.size(30.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Default.AccountTree,
-                                            contentDescription = "Extract Articles from Sitemap.xml",
-                                            modifier = Modifier.size(16.dp),
-                                            tint = IndigoPrimary
-                                        )
-                                    }
-
-                                    IconButton(
-                                        onClick = onAddSampleData,
-                                        modifier = Modifier.size(30.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Default.AutoAwesome,
-                                            contentDescription = "স্যাম্পল কোর্স ও আর্টিকেল যোগ করুন",
-                                            modifier = Modifier.size(16.dp),
-                                            tint = IndigoPrimary
-                                        )
-                                    }
-
-                                    IconButton(
                                         onClick = { showLocalReaderSettings = true },
                                         modifier = Modifier.size(30.dp)
                                     ) {
@@ -829,23 +784,6 @@ fun ArticleReaderView(
                                     }
                                 }
                             }
-                        }
-                    }
-
-                    item {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "💡 Swipe right to edit  •  Swipe left to delete",
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 11.5.sp,
-                                color = SlateMuted
-                            )
                         }
                     }
 
@@ -1065,108 +1003,138 @@ fun ArticleReaderView(
                             .fillMaxSize()
                             .padding(top = 10.dp, bottom = 12.dp, start = 14.dp, end = 14.dp)
                     ) {
-                        // Header: Minimal Back Button, Centered Chapter with Prev/Next, Right Reader Controls icon
+                        // Header: Minimal, Iconized Back Button, Compact Chapter Pill, Quick Actions
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(bottom = 6.dp),
+                                .padding(bottom = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             IconButton(
                                 onClick = { onSelectArticle(null) },
-                                modifier = Modifier.size(34.dp)
+                                modifier = Modifier.size(32.dp)
                             ) {
                                 Icon(
                                     Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "Back to list",
+                                    contentDescription = "Back",
                                     tint = subtleMuted,
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
 
+                            // Compact Chapter Pill (Prev, 1/X, Next)
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = if (isReaderNightMode) Color(0xFF334155) else Color(0xFFF1F5F9),
+                                modifier = Modifier.clickable { showChaptersDropdown = true }
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    if (articles.size > 1 && currentIndex > 0) {
+                                        IconButton(
+                                            onClick = { onSelectArticle(articles[currentIndex - 1]) },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.AutoMirrored.Filled.ArrowBack,
+                                                contentDescription = "Previous article",
+                                                tint = if (isReaderNightMode) Color(0xFFCBD5E1) else SlateText,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                        }
+                                    } else {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                    }
+
+                                    Text(
+                                        text = "${currentIndex + 1} / ${articles.size}",
+                                        fontFamily = PoppinsFontFamily,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (isReaderNightMode) Color(0xFFE2E8F0) else SlateText,
+                                        modifier = Modifier.padding(horizontal = 4.dp)
+                                    )
+
+                                    if (articles.size > 1 && currentIndex < articles.size - 1) {
+                                        IconButton(
+                                            onClick = { onSelectArticle(articles[currentIndex + 1]) },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.AutoMirrored.Filled.ArrowForward,
+                                                contentDescription = "Next article",
+                                                tint = if (isReaderNightMode) Color(0xFFCBD5E1) else SlateText,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                        }
+                                    } else {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                    }
+                                }
+                            }
+
+                            // Right: Minimal Quick Action Icons (TTS Audio, Theme Toggle, Reader Settings)
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
                             ) {
-                                if (currentIndex > 0) {
-                                    IconButton(
-                                        onClick = { onSelectArticle(articles[currentIndex - 1]) },
-                                        modifier = Modifier.size(28.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.AutoMirrored.Filled.ArrowBack,
-                                            contentDescription = "Previous chapter",
-                                            tint = subtleMuted,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                }
-
-                                Text(
-                                    text = "Chapter ${currentIndex + 1}",
-                                    fontFamily = FontFamily.Serif,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Normal,
-                                    color = subtleMuted,
-                                    letterSpacing = 1.2.sp
-                                )
-
-                                if (currentIndex < articles.size - 1) {
-                                    IconButton(
-                                        onClick = { onSelectArticle(articles[currentIndex + 1]) },
-                                        modifier = Modifier.size(28.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.AutoMirrored.Filled.ArrowForward,
-                                            contentDescription = "Next chapter",
-                                            tint = subtleMuted,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                }
-                            }
-
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                // TTS Audio toggle
                                 IconButton(
-                                    onClick = { showFlashcardExtractorSheet = true },
-                                    modifier = Modifier.size(34.dp)
+                                    onClick = {
+                                        if (isSpeaking) {
+                                            tts?.stop()
+                                            isSpeaking = false
+                                        } else {
+                                            tts?.speak(currentArticle.content, TextToSpeech.QUEUE_FLUSH, null, "article_tts")
+                                            isSpeaking = true
+                                        }
+                                    },
+                                    modifier = Modifier.size(32.dp)
                                 ) {
                                     Icon(
-                                        Icons.Default.Style,
-                                        contentDescription = "Extract Flashcards",
-                                        tint = if (isReaderNightMode) Color(0xFF818CF8) else IndigoPrimary,
-                                        modifier = Modifier.size(19.dp)
+                                        if (isSpeaking) Icons.Default.VolumeUp else Icons.Default.Headphones,
+                                        contentDescription = "Listen to Article",
+                                        tint = if (isSpeaking) IndigoPrimary else subtleMuted,
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
 
+                                // Dark / Light Mode Toggle
                                 IconButton(
-                                    onClick = { showSitemapSheet = true },
-                                    modifier = Modifier.size(34.dp)
+                                    onClick = {
+                                        isReaderNightMode = !isReaderNightMode
+                                        readerPrefs.edit().putBoolean("reader_night_mode", isReaderNightMode).apply()
+                                    },
+                                    modifier = Modifier.size(32.dp)
                                 ) {
                                     Icon(
-                                        Icons.Default.AccountTree,
-                                        contentDescription = "Sitemap XML Extractor",
-                                        tint = if (isReaderNightMode) Color(0xFF818CF8) else IndigoPrimary,
-                                        modifier = Modifier.size(19.dp)
+                                        if (isReaderNightMode) Icons.Default.WbSunny else Icons.Default.NightlightRound,
+                                        contentDescription = "Toggle Theme",
+                                        tint = if (isReaderNightMode) Color(0xFFFDE047) else subtleMuted,
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
 
+                                // Reading Controls Sheet
                                 IconButton(
                                     onClick = { showReadingControlsSheet = true },
-                                    modifier = Modifier.size(34.dp)
+                                    modifier = Modifier.size(32.dp)
                                 ) {
                                     Icon(
                                         Icons.Default.Tune,
-                                        contentDescription = "Reader Controls",
+                                        contentDescription = "Reader Settings",
                                         tint = subtleMuted,
-                                        modifier = Modifier.size(19.dp)
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
                             }
                         }
 
-                        // Reading Content with Drop Cap & Interactive Words
+                        // Reading Content with Interactive Words
                         val isBengaliArticle = isBengaliText(currentArticle.content)
                         val selectedFont = if (isBengaliArticle) AikyaFontFamily else when (readerFontFamily) {
                             "serif" -> FontFamily.Serif
@@ -1192,120 +1160,132 @@ fun ArticleReaderView(
                                 .weight(1f)
                                 .fillMaxWidth()
                                 .padding(horizontal = readerPaddingDp.dp.coerceAtLeast(6.dp)),
-                            contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp)
+                            contentPadding = PaddingValues(top = 6.dp, bottom = 16.dp)
                         ) {
-                            // Article Title and Author Header (Headline style)
+                            // Article Title and Metadata Header
                             item {
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(bottom = 14.dp)
+                                        .padding(bottom = 12.dp)
                                 ) {
                                     val isTitleBengali = isBengaliText(currentArticle.title)
                                     Text(
                                         text = currentArticle.title,
                                         fontFamily = if (isTitleBengali) AikyaFontFamily else PoppinsFontFamily,
-                                        fontSize = (readerFontSize * 1.55f).coerceAtLeast(24f).sp,
+                                        fontSize = (readerFontSize * 1.45f).coerceAtLeast(22f).sp,
                                         fontWeight = FontWeight.Bold,
                                         color = textColor,
-                                        lineHeight = ((readerFontSize * 1.55f).coerceAtLeast(24f) * 1.25f).sp
+                                        lineHeight = ((readerFontSize * 1.45f).coerceAtLeast(22f) * 1.25f).sp
                                     )
-                                    if (currentArticle.author.isNotBlank()) {
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        val isAuthorBengali = isBengaliText(currentArticle.author)
-                                        Text(
-                                            text = "By ${currentArticle.author}",
-                                            fontFamily = if (isAuthorBengali) AikyaFontFamily else PoppinsFontFamily,
-                                            fontSize = (readerFontSize * 0.95f).coerceAtLeast(14f).sp,
-                                            fontWeight = FontWeight.Medium,
-                                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
-                                            color = subtleMuted
-                                        )
+
+                                    // Minimal Iconized Metadata Row (Reading time, words, author)
+                                    val wordCount = currentArticle.content.split(Regex("""\s+""")).count { it.isNotBlank() }
+                                    val estReadingMinutes = (wordCount / 180).coerceAtLeast(1)
+                                    val displayAuthor = currentArticle.author.trim()
+                                    val hasValidAuthor = displayAuthor.isNotBlank() && !displayAuthor.equals("Anonymous Author", ignoreCase = true)
+
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Schedule,
+                                                contentDescription = null,
+                                                tint = subtleMuted,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                            Text(
+                                                text = "${estReadingMinutes}m",
+                                                fontFamily = PoppinsFontFamily,
+                                                fontSize = 11.5.sp,
+                                                color = subtleMuted
+                                            )
+                                        }
+
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.TextFields,
+                                                contentDescription = null,
+                                                tint = subtleMuted,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                            Text(
+                                                text = "$wordCount w",
+                                                fontFamily = PoppinsFontFamily,
+                                                fontSize = 11.5.sp,
+                                                color = subtleMuted
+                                            )
+                                        }
+
+                                        if (hasValidAuthor) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Person,
+                                                    contentDescription = null,
+                                                    tint = subtleMuted,
+                                                    modifier = Modifier.size(13.dp)
+                                                )
+                                                Text(
+                                                    text = displayAuthor,
+                                                    fontFamily = PoppinsFontFamily,
+                                                    fontSize = 11.5.sp,
+                                                    color = subtleMuted,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
                                     }
-                                    Spacer(modifier = Modifier.height(12.dp))
+
+                                    Spacer(modifier = Modifier.height(10.dp))
                                     HorizontalDivider(
                                         modifier = Modifier.fillMaxWidth(),
                                         thickness = 1.dp,
                                         color = if (isReaderNightMode) Color(0xFF334155) else Color(0xFFE2E8F0)
                                     )
-                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Spacer(modifier = Modifier.height(8.dp))
                                 }
                             }
 
+                            // Clean Article Body (No broken drop-cap Row side-by-side that broke wrapping!)
                             item {
-                                val trimmedText = currentArticle.content.trimStart()
-                                val firstLetter = trimmedText.firstOrNull()
-                                val isBengaliStart = firstLetter != null && isBengaliText(firstLetter.toString())
-
-                                if (!isBengaliStart && firstLetter != null && firstLetter.isLetter()) {
-                                    // Editorial Drop Cap layout for Latin text
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.Top
-                                    ) {
-                                        Text(
-                                            text = firstLetter.toString(),
-                                            fontFamily = FontFamily.Serif,
-                                            fontSize = (readerFontSize * 2.7f).sp,
-                                            fontWeight = FontWeight.Normal,
-                                            color = textColor,
-                                            lineHeight = (readerFontSize * 2.2f).sp,
-                                            modifier = Modifier.padding(end = 6.dp, top = 2.dp)
-                                        )
-
-                                        ClickableText(
-                                            text = annotatedText,
-                                            style = TextStyle(
-                                                fontSize = readerFontSize.sp,
-                                                lineHeight = (readerFontSize * readerLineSpacing).sp,
-                                                color = textColor,
-                                                fontFamily = selectedFont,
-                                                textAlign = if (readerJustify) TextAlign.Justify else TextAlign.Start
-                                            ),
-                                            onClick = { offset ->
-                                                annotatedText.getStringAnnotations(
-                                                    tag = "VOCAB_MATCH",
-                                                    start = offset,
-                                                    end = offset
-                                                ).firstOrNull()?.let { annotation ->
-                                                    val key = annotation.item.lowercase(Locale.ROOT)
-                                                    val matchedList = place1MultiMap[key] ?: place2MultiMap[key] ?: emptyList()
-                                                    if (matchedList.isNotEmpty()) {
-                                                        matchedWordsForPopup = matchedList
-                                                        popupWordIndex = 0
-                                                    }
-                                                }
-                                            },
-                                            modifier = Modifier.fillMaxWidth()
-                                        )
-                                    }
-                                } else {
-                                    ClickableText(
-                                        text = annotatedText,
-                                        style = TextStyle(
-                                            fontSize = readerFontSize.sp,
-                                            lineHeight = (readerFontSize * readerLineSpacing).sp,
-                                            color = textColor,
-                                            fontFamily = selectedFont,
-                                            textAlign = if (readerJustify) TextAlign.Justify else TextAlign.Start
-                                        ),
-                                        onClick = { offset ->
-                                            annotatedText.getStringAnnotations(
-                                                tag = "VOCAB_MATCH",
-                                                start = offset,
-                                                end = offset
-                                            ).firstOrNull()?.let { annotation ->
-                                                val key = annotation.item.lowercase(Locale.ROOT)
-                                                val matchedList = place1MultiMap[key] ?: place2MultiMap[key] ?: emptyList()
-                                                if (matchedList.isNotEmpty()) {
-                                                    matchedWordsForPopup = matchedList
-                                                    popupWordIndex = 0
-                                                }
+                                ClickableText(
+                                    text = annotatedText,
+                                    style = TextStyle(
+                                        fontSize = readerFontSize.sp,
+                                        lineHeight = (readerFontSize * readerLineSpacing).sp,
+                                        color = textColor,
+                                        fontFamily = selectedFont,
+                                        textAlign = if (readerJustify) TextAlign.Justify else TextAlign.Start
+                                    ),
+                                    onClick = { offset ->
+                                        annotatedText.getStringAnnotations(
+                                            tag = "VOCAB_MATCH",
+                                            start = offset,
+                                            end = offset
+                                        ).firstOrNull()?.let { annotation ->
+                                            val key = annotation.item.lowercase(Locale.ROOT)
+                                            val matchedList = place1MultiMap[key] ?: place2MultiMap[key] ?: emptyList()
+                                            if (matchedList.isNotEmpty()) {
+                                                matchedWordsForPopup = matchedList
+                                                popupWordIndex = 0
                                             }
-                                        },
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-                                }
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
                             }
                         }
 
@@ -1374,22 +1354,23 @@ fun ArticleReaderView(
                                     interactionSource = remember { MutableInteractionSource() },
                                     indication = null
                                 ) { /* Consume clicks inside card so outside dismiss is not triggered */ },
-                            shape = RoundedCornerShape(20.dp),
+                            shape = RoundedCornerShape(18.dp),
                             colors = CardDefaults.cardColors(containerColor = cardBgColor),
                             border = BorderStroke(1.dp, cardBorder.copy(alpha = 0.7f)),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 10.dp)
+                            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
                         ) {
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 18.dp, vertical = 14.dp)
+                                    .padding(horizontal = 16.dp, vertical = 12.dp)
                             ) {
-                                // Header: Word, Pronunciation, Badges, Sequential match navigator, Block & Close
+                                // Header: Word, Pronounce, Group badge, Match Navigator, Block & Close
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
+                                    // Left: Word + Audio + Group
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1399,7 +1380,7 @@ fun ArticleReaderView(
                                         Text(
                                             text = displayWord,
                                             fontFamily = selectArticleFontForText(displayWord),
-                                            fontSize = 18.sp,
+                                            fontSize = 17.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = primaryTextColor,
                                             maxLines = 1,
@@ -1408,128 +1389,118 @@ fun ArticleReaderView(
 
                                         IconButton(
                                             onClick = { tts?.speak(displayWord, TextToSpeech.QUEUE_FLUSH, null, "tts_article") },
-                                            modifier = Modifier.size(26.dp)
+                                            modifier = Modifier.size(24.dp)
                                         ) {
                                             Icon(
                                                 Icons.Default.VolumeUp,
                                                 contentDescription = "Pronounce word",
-                                                tint = Color(0xFF6366F1),
-                                                modifier = Modifier.size(16.dp)
+                                                tint = IndigoPrimary,
+                                                modifier = Modifier.size(15.dp)
                                             )
-                                        }
-
-                                        // Course badge
-                                        if (currentCourse != null) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(6.dp))
-                                                    .background(IndigoLight)
-                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                                            ) {
-                                                Text(
-                                                    text = currentCourse.title.take(12),
-                                                    fontSize = 10.sp,
-                                                    color = IndigoPrimary,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    maxLines = 1
-                                                )
-                                            }
                                         }
 
                                         Box(
                                             modifier = Modifier
                                                 .clip(RoundedCornerShape(6.dp))
                                                 .background(badgeBg)
-                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                .padding(horizontal = 5.dp, vertical = 2.dp)
                                         ) {
                                             Text(
                                                 text = "G${word.group}",
-                                                fontSize = 10.5.sp,
+                                                fontSize = 10.sp,
                                                 color = badgeText,
                                                 fontWeight = FontWeight.Bold
                                             )
                                         }
                                     }
 
-                                    // Right controls: Sequential course switcher, Block button, Close button
+                                    // Right: Multi-match switcher + Block + Close
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(2.dp)
                                     ) {
-                                        // Sequential navigation when multiple courses have matched words
                                         if (matchedWordsForPopup.size > 1) {
                                             Row(
                                                 verticalAlignment = Alignment.CenterVertically,
                                                 modifier = Modifier
                                                     .clip(RoundedCornerShape(8.dp))
                                                     .background(if (isReaderNightMode) Color(0xFF334155) else Color(0xFFF1F5F9))
-                                                    .padding(horizontal = 2.dp, vertical = 1.dp)
+                                                    .padding(horizontal = 2.dp)
                                             ) {
                                                 IconButton(
                                                     onClick = { if (popupWordIndex > 0) popupWordIndex-- },
                                                     enabled = popupWordIndex > 0,
-                                                    modifier = Modifier.size(22.dp)
+                                                    modifier = Modifier.size(20.dp)
                                                 ) {
                                                     Icon(
                                                         Icons.AutoMirrored.Filled.ArrowBack,
-                                                        contentDescription = "Previous course match",
+                                                        contentDescription = "Prev match",
                                                         tint = if (popupWordIndex > 0) IndigoPrimary else secondaryTextColor.copy(alpha = 0.4f),
-                                                        modifier = Modifier.size(13.dp)
+                                                        modifier = Modifier.size(11.dp)
                                                     )
                                                 }
                                                 Text(
                                                     text = "${popupWordIndex + 1}/${matchedWordsForPopup.size}",
                                                     fontFamily = PoppinsFontFamily,
-                                                    fontSize = 11.sp,
+                                                    fontSize = 10.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     color = IndigoPrimary
                                                 )
                                                 IconButton(
                                                     onClick = { if (popupWordIndex < matchedWordsForPopup.size - 1) popupWordIndex++ },
                                                     enabled = popupWordIndex < matchedWordsForPopup.size - 1,
-                                                    modifier = Modifier.size(22.dp)
+                                                    modifier = Modifier.size(20.dp)
                                                 ) {
                                                     Icon(
                                                         Icons.AutoMirrored.Filled.ArrowForward,
-                                                        contentDescription = "Next course match",
+                                                        contentDescription = "Next match",
                                                         tint = if (popupWordIndex < matchedWordsForPopup.size - 1) IndigoPrimary else secondaryTextColor.copy(alpha = 0.4f),
-                                                        modifier = Modifier.size(13.dp)
+                                                        modifier = Modifier.size(11.dp)
                                                     )
                                                 }
                                             }
                                         }
 
-                                        // Block Word Button (opens confirmation dialog)
                                         IconButton(
-                                            onClick = {
-                                                wordToBlockConfirmation = word
-                                            },
-                                            modifier = Modifier.size(26.dp)
+                                            onClick = { wordToBlockConfirmation = word },
+                                            modifier = Modifier.size(24.dp)
                                         ) {
                                             Icon(
                                                 Icons.Default.Block,
-                                                contentDescription = "Block word from matching",
-                                                tint = RoseError.copy(alpha = 0.85f),
-                                                modifier = Modifier.size(15.dp)
+                                                contentDescription = "Block word",
+                                                tint = RoseError.copy(alpha = 0.8f),
+                                                modifier = Modifier.size(14.dp)
                                             )
                                         }
 
-                                        // Close Button
                                         IconButton(
                                             onClick = {
                                                 matchedWordsForPopup = emptyList()
                                                 popupWordIndex = 0
                                             },
-                                            modifier = Modifier.size(26.dp)
+                                            modifier = Modifier.size(24.dp)
                                         ) {
                                             Icon(
                                                 Icons.Default.Close,
-                                                contentDescription = "Close popup",
+                                                contentDescription = "Close",
                                                 tint = secondaryTextColor,
-                                                modifier = Modifier.size(15.dp)
+                                                modifier = Modifier.size(14.dp)
                                             )
                                         }
                                     }
+                                }
+
+                                // Optional Course badge sub-line
+                                if (currentCourse != null) {
+                                    Text(
+                                        text = currentCourse.title,
+                                        fontSize = 10.5.sp,
+                                        color = IndigoPrimary,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(top = 1.dp, bottom = 2.dp)
+                                    )
                                 }
 
                                 // Place 2: Meaning / Definition
@@ -1537,17 +1508,17 @@ fun ArticleReaderView(
                                 Text(
                                     text = displayMeaning,
                                     fontFamily = selectArticleFontForText(displayMeaning),
-                                    fontSize = 14.sp,
+                                    fontSize = 13.5.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = meaningTextColor,
-                                    modifier = Modifier.padding(top = 2.dp, bottom = 4.dp)
+                                    modifier = Modifier.padding(vertical = 2.dp)
                                 )
 
                                 if (!word.example.isNullOrBlank()) {
                                     Text(
                                         text = "“${word.example}”",
                                         fontFamily = selectArticleFontForText(word.example),
-                                        fontSize = 12.sp,
+                                        fontSize = 11.5.sp,
                                         fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
                                         color = secondaryTextColor,
                                         maxLines = 2,
@@ -1559,7 +1530,7 @@ fun ArticleReaderView(
                                 if (!word.synonyms.isNullOrBlank()) {
                                     Text(
                                         text = "Synonyms: ${word.synonyms}",
-                                        fontSize = 11.sp,
+                                        fontSize = 10.5.sp,
                                         color = secondaryTextColor.copy(alpha = 0.85f),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
@@ -1569,12 +1540,12 @@ fun ArticleReaderView(
                                     Spacer(modifier = Modifier.height(4.dp))
                                 }
 
-                                // Functional Rating Action Buttons: Know, Confused, Don't Know
+                                // Minimal, Iconized Rating Buttons: Know, Review, Learn
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    // 1. Know Button
+                                    // 1. Know
                                     val isKnow = latestStatus.equals("know", ignoreCase = true)
                                     Button(
                                         onClick = {
@@ -1586,23 +1557,21 @@ fun ArticleReaderView(
                                                 popupWordIndex = 0
                                             }
                                         },
-                                        modifier = Modifier.weight(1f),
-                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.weight(1f).height(34.dp),
+                                        shape = RoundedCornerShape(10.dp),
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = if (isKnow) Color(0xFF10B981) else if (isReaderNightMode) Color(0xFF064E3B).copy(alpha = 0.4f) else Color(0xFFECFDF5),
                                             contentColor = if (isKnow) Color.White else if (isReaderNightMode) Color(0xFF6EE7B7) else Color(0xFF047857)
                                         ),
                                         border = if (isKnow) null else BorderStroke(1.dp, if (isReaderNightMode) Color(0xFF047857) else Color(0xFFA7F3D0)),
-                                        contentPadding = PaddingValues(vertical = 8.dp)
+                                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
                                     ) {
-                                        if (isKnow) {
-                                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(13.dp))
-                                            Spacer(modifier = Modifier.width(3.dp))
-                                        }
-                                        Text("Know", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(13.dp))
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                        Text("Know", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
                                     }
 
-                                    // 2. Confused Button
+                                    // 2. Review
                                     val isConfused = latestStatus.equals("confusion", ignoreCase = true)
                                     Button(
                                         onClick = {
@@ -1614,19 +1583,21 @@ fun ArticleReaderView(
                                                 popupWordIndex = 0
                                             }
                                         },
-                                        modifier = Modifier.weight(1f),
-                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.weight(1f).height(34.dp),
+                                        shape = RoundedCornerShape(10.dp),
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = if (isConfused) Color(0xFFF59E0B) else if (isReaderNightMode) Color(0xFF78350F).copy(alpha = 0.4f) else Color(0xFFFFFBEB),
                                             contentColor = if (isConfused) Color.White else if (isReaderNightMode) Color(0xFFFCD34D) else Color(0xFFB45309)
                                         ),
                                         border = if (isConfused) null else BorderStroke(1.dp, if (isReaderNightMode) Color(0xFFB45309) else Color(0xFFFDE68A)),
-                                        contentPadding = PaddingValues(vertical = 8.dp)
+                                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
                                     ) {
-                                        Text("Confused", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                        Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(12.dp))
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                        Text("Review", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
                                     }
 
-                                    // 3. Don't Know Button
+                                    // 3. Learn
                                     val isDontKnow = latestStatus.equals("dont_know", ignoreCase = true)
                                     Button(
                                         onClick = {
@@ -1638,16 +1609,18 @@ fun ArticleReaderView(
                                                 popupWordIndex = 0
                                             }
                                         },
-                                        modifier = Modifier.weight(1f),
-                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier.weight(1f).height(34.dp),
+                                        shape = RoundedCornerShape(10.dp),
                                         colors = ButtonDefaults.buttonColors(
                                             containerColor = if (isDontKnow) Color(0xFFF43F5E) else if (isReaderNightMode) Color(0xFF881337).copy(alpha = 0.4f) else Color(0xFFFFF1F2),
                                             contentColor = if (isDontKnow) Color.White else if (isReaderNightMode) Color(0xFFFDA4AF) else Color(0xFFBE123C)
                                         ),
                                         border = if (isDontKnow) null else BorderStroke(1.dp, if (isReaderNightMode) Color(0xFFBE123C) else Color(0xFFFECDD3)),
-                                        contentPadding = PaddingValues(vertical = 8.dp)
+                                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
                                     ) {
-                                        Text("Don't Know", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                        Icon(Icons.Default.School, contentDescription = null, modifier = Modifier.size(12.dp))
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                        Text("Learn", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
                                     }
                                 }
                             }
@@ -2278,32 +2251,6 @@ fun ArticleReaderView(
         }
     }
 
-    if (showFlashcardExtractorSheet) {
-        ArticleFlashcardExtractorBottomSheet(
-            activeArticle = currentArticle,
-            targetWords = words,
-            onDismiss = { showFlashcardExtractorSheet = false },
-            onSaved = { count ->
-                android.widget.Toast.makeText(context, "Saved $count flashcards to study!", android.widget.Toast.LENGTH_SHORT).show()
-                showFlashcardExtractorSheet = false
-            }
-        )
-    }
-
-    if (showSitemapSheet) {
-        ArticleSitemapExtractorBottomSheet(
-            onDismiss = { showSitemapSheet = false },
-            onArticlesImported = { count ->
-                android.widget.Toast.makeText(context, "Batch imported $count articles to library!", android.widget.Toast.LENGTH_SHORT).show()
-                showSitemapSheet = false
-            },
-            onFlashcardsGenerated = { count ->
-                android.widget.Toast.makeText(context, "Generated $count flashcards from sitemap articles!", android.widget.Toast.LENGTH_SHORT).show()
-                showSitemapSheet = false
-            }
-        )
-    }
-
     // Reader Display Settings Dialog (English, Minimalist layout, font size, padding, alignment)
     if (isReaderSettingsVisible) {
         ReaderSettingsDialog(
@@ -2441,43 +2388,15 @@ private fun ArticleEditorDialog(
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
-    // 0: Page Scanner, 1: RSS Feed, 2: Sitemap XML, 3: Bulk URLs, 4: Single / Text
-    var selectedTab by remember { mutableIntStateOf(if (isEditing) 4 else initialTab.coerceIn(0, 4)) }
+    // 0: Single, 1: Bulk URLs
+    var selectedTab by remember { mutableIntStateOf(if (isEditing) 0 else initialTab.coerceIn(0, 1)) }
 
     // Single / Text states
     var title by remember { mutableStateOf(initialTitle) }
     var author by remember { mutableStateOf(initialAuthor) }
     var content by remember { mutableStateOf(initialContent) }
 
-    // Tab 0: Page Scanner states (System 1)
-    var scannerUrl by remember { mutableStateOf("") }
-    var isScanningPage by remember { mutableStateOf(false) }
-    var scanErrorMessage by remember { mutableStateOf<String?>(null) }
-    var scannedLinks by remember { mutableStateOf<List<ScannedArticleLink>>(emptyList()) }
-    var selectedScannedUrls by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var isBatchImportingScan by remember { mutableStateOf(false) }
-    var scanImportProgress by remember { mutableStateOf(0 to 0) }
-
-    // Tab 1: RSS Feed states (System 2)
-    var rssUrl by remember { mutableStateOf("") }
-    var isFetchingRss by remember { mutableStateOf(false) }
-    var rssErrorMessage by remember { mutableStateOf<String?>(null) }
-    var rssResult by remember { mutableStateOf<RssFeedResult?>(null) }
-    var selectedRssUrls by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var fetchFullRssWebText by remember { mutableStateOf(true) }
-    var isBatchImportingRss by remember { mutableStateOf(false) }
-    var rssImportProgress by remember { mutableStateOf(0 to 0) }
-
-    // Tab 2: Sitemap XML states
-    var sitemapInputUrl by remember { mutableStateOf("") }
-    var isFetchingSitemapInDialog by remember { mutableStateOf(false) }
-    var sitemapErrorMessage by remember { mutableStateOf<String?>(null) }
-    var sitemapExtractedArticles by remember { mutableStateOf<List<com.example.data.service.SitemapArticleItem>>(emptyList()) }
-    var selectedSitemapUrls by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var isBatchImportingSitemap by remember { mutableStateOf(false) }
-    var sitemapImportProgress by remember { mutableStateOf(0 to 0) }
-
-    // Tab 2: Bulk URLs states (System 3)
+    // Bulk URLs states
     var bulkUrlsInput by remember { mutableStateOf("") }
     var isBatchImportingBulk by remember { mutableStateOf(false) }
     var bulkImportProgress by remember { mutableStateOf(0 to 0) }
@@ -2491,16 +2410,10 @@ private fun ArticleEditorDialog(
             .toList()
     }
 
-    // Single Tab: Web URL & Google Doc states
+    // Single Tab: Web URL state
     var singleWebUrl by remember { mutableStateOf("") }
     var isExtractingSingleWeb by remember { mutableStateOf(false) }
     var singleWebErrorMessage by remember { mutableStateOf<String?>(null) }
-    var extractedSingleWebArticle by remember { mutableStateOf<ParsedArticleItem?>(null) }
-
-    var googleDocUrl by remember { mutableStateOf("") }
-    var isFetchingDoc by remember { mutableStateOf(false) }
-    var docErrorMessage by remember { mutableStateOf<String?>(null) }
-    var docFetchedArticles by remember { mutableStateOf<List<ParsedArticleItem>>(emptyList()) }
 
     // Live parse detection for manual text
     val liveParsedArticles = remember(content, title, author) {
@@ -2539,60 +2452,6 @@ private fun ArticleEditorDialog(
         }
     }
 
-    val doScanPage: (String) -> Unit = { targetUrl ->
-        val clean = targetUrl.trim()
-        if (clean.isNotBlank()) {
-            isScanningPage = true
-            scanErrorMessage = null
-            scannedLinks = emptyList()
-            selectedScannedUrls = emptySet()
-            coroutineScope.launch {
-                val res = ArticleParser.scanPageForArticles(clean)
-                isScanningPage = false
-                res.fold(
-                    onSuccess = { links ->
-                        if (links.isEmpty()) {
-                            scanErrorMessage = "No article links found. Try entering a news section or category URL."
-                        } else {
-                            scannedLinks = links
-                            selectedScannedUrls = links.map { it.url }.toSet()
-                        }
-                    },
-                    onFailure = { err ->
-                        scanErrorMessage = err.message ?: "Failed to scan page."
-                    }
-                )
-            }
-        }
-    }
-
-    val doFetchRss: (String) -> Unit = { targetFeed ->
-        val clean = targetFeed.trim()
-        if (clean.isNotBlank()) {
-            isFetchingRss = true
-            rssErrorMessage = null
-            rssResult = null
-            selectedRssUrls = emptySet()
-            coroutineScope.launch {
-                val res = ArticleParser.fetchRssFeed(clean)
-                isFetchingRss = false
-                res.fold(
-                    onSuccess = { feed ->
-                        if (feed.items.isEmpty()) {
-                            rssErrorMessage = "RSS feed has no articles."
-                        } else {
-                            rssResult = feed
-                            selectedRssUrls = feed.items.map { it.link }.toSet()
-                        }
-                    },
-                    onFailure = { err ->
-                        rssErrorMessage = err.message ?: "Failed to load RSS feed."
-                    }
-                )
-            }
-        }
-    }
-
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -2612,32 +2471,23 @@ private fun ArticleEditorDialog(
                     .fillMaxWidth()
                     .padding(20.dp)
             ) {
-                // Minimal Header
+                // Header
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = if (isEditing) "Edit Article" else "Import Articles",
-                            fontFamily = PoppinsFontFamily,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp,
-                            color = SlateText
-                        )
-                        if (!isEditing) {
-                            Text(
-                                text = "Select a source to add to your library",
-                                fontSize = 11.5.sp,
-                                color = SlateMuted
-                            )
-                        }
-                    }
+                    Text(
+                        text = if (isEditing) "Edit Article" else "Import Article",
+                        fontFamily = PoppinsFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp,
+                        color = SlateText
+                    )
                     IconButton(
                         onClick = onDismiss,
                         modifier = Modifier
-                            .size(32.dp)
+                            .size(28.dp)
                             .clip(CircleShape)
                             .background(SlateLight)
                     ) {
@@ -2645,60 +2495,61 @@ private fun ArticleEditorDialog(
                             Icons.Default.Close,
                             contentDescription = "Close",
                             tint = SlateMuted,
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(15.dp)
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
                 if (!isEditing) {
-                    // Minimal Clean Pill Tabs
+                    // Minimal Segmented Pill Tabs
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
-                            .padding(bottom = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFFF1F5F9))
+                            .padding(3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        val tabsData = listOf(
-                            Triple(0, "Scanner", Icons.Default.TravelExplore),
-                            Triple(1, "RSS", Icons.Default.RssFeed),
-                            Triple(2, "Sitemap", Icons.Default.AccountTree),
-                            Triple(3, "Bulk", Icons.Default.FormatListBulleted),
-                            Triple(4, "Single", Icons.Default.Description)
-                        )
-                        tabsData.forEach { (tabIndex, tabTitle, tabIcon) ->
+                        listOf(
+                            0 to ("Single" to Icons.Default.Description),
+                            1 to ("Bulk" to Icons.Default.FormatListBulleted)
+                        ).forEach { (tabIndex, pair) ->
+                            val (label, icon) = pair
                             val isSelected = selectedTab == tabIndex
                             Surface(
-                                shape = RoundedCornerShape(20.dp),
-                                color = if (isSelected) IndigoPrimary else Color(0xFFF1F5F9),
-                                border = if (isSelected) null else BorderStroke(1.dp, Color(0xFFE2E8F0)),
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .clickable { selectedTab = tabIndex }
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { selectedTab = tabIndex },
+                                color = if (isSelected) Color.White else Color.Transparent,
+                                shadowElevation = if (isSelected) 1.5.dp else 0.dp,
+                                shape = RoundedCornerShape(8.dp)
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    modifier = Modifier.padding(vertical = 7.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(
-                                        tabIcon,
+                                        icon,
                                         contentDescription = null,
-                                        modifier = Modifier.size(13.dp),
-                                        tint = if (isSelected) Color.White else SlateMuted
+                                        modifier = Modifier.size(14.dp),
+                                        tint = if (isSelected) IndigoPrimary else SlateMuted
                                     )
+                                    Spacer(modifier = Modifier.width(6.dp))
                                     Text(
-                                        text = tabTitle,
-                                        fontSize = 11.5.sp,
+                                        text = label,
+                                        fontSize = 12.sp,
                                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                                        color = if (isSelected) Color.White else SlateText
+                                        color = if (isSelected) IndigoPrimary else SlateMuted
                                     )
                                 }
                             }
                         }
                     }
+                    Spacer(modifier = Modifier.height(10.dp))
                 }
 
                 // Scrollable Content
@@ -2711,711 +2562,18 @@ private fun ArticleEditorDialog(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     when (selectedTab) {
-                    0 -> {
-                        // SYSTEM 1: Page / Category Scanner
-                        Text(
-                            text = "Extract multiple article links from a website section or category page.",
-                            fontSize = 11.5.sp,
-                            color = SlateMuted
-                        )
-
-                        OutlinedTextField(
-                            value = scannerUrl,
-                            onValueChange = {
-                                scannerUrl = it
-                                scanErrorMessage = null
-                            },
-                            label = { Text("Webpage or Category URL") },
-                            placeholder = { Text("https://theguardian.com/world") },
-                            trailingIcon = {
-                                IconButton(onClick = {
-                                    try {
-                                        val clipService = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                                        val clipText = clipService?.primaryClip?.getItemAt(0)?.text?.toString()
-                                        if (!clipText.isNullOrBlank()) {
-                                            scannerUrl = clipText.trim()
-                                            scanErrorMessage = null
-                                        }
-                                    } catch (_: Exception) {}
-                                }) {
-                                    Icon(Icons.Default.ContentPaste, contentDescription = "Paste", tint = IndigoPrimary)
-                                }
-                            },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        // Quick Presets
-                        Text("Popular sources:", fontSize = 11.sp, color = SlateMuted, fontWeight = FontWeight.Medium)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            val scannerPresets = listOf(
-                                "Guardian" to "https://www.theguardian.com/world",
-                                "TechCrunch" to "https://techcrunch.com",
-                                "The Verge" to "https://www.theverge.com"
-                            )
-                            scannerPresets.forEach { (label, url) ->
-                                OutlinedButton(
-                                    onClick = {
-                                        scannerUrl = url
-                                        doScanPage(url)
-                                    },
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text(label, fontSize = 10.5.sp, maxLines = 1)
-                                }
-                            }
-                        }
-
-                        Button(
-                            onClick = { doScanPage(scannerUrl) },
-                            enabled = scannerUrl.isNotBlank() && !isScanningPage && !isBatchImportingScan,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
-                        ) {
-                            if (isScanningPage) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Scanning Webpage...", fontSize = 12.5.sp)
-                            } else {
-                                Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Scan Page for Articles", fontSize = 12.5.sp)
-                            }
-                        }
-
-                        if (scanErrorMessage != null) {
-                            Card(
-                                colors = CardDefaults.cardColors(containerColor = RoseLight),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Row(modifier = Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = RoseError, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(text = scanErrorMessage ?: "", color = RoseError, fontSize = 11.sp)
-                                }
-                            }
-                        }
-
-                        if (isBatchImportingScan) {
-                            Card(
-                                colors = CardDefaults.cardColors(containerColor = IndigoLight),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Column(modifier = Modifier.padding(10.dp)) {
-                                    Text(
-                                        text = "Importing article ${scanImportProgress.first} of ${scanImportProgress.second}...",
-                                        fontSize = 11.5.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = IndigoPrimary
-                                    )
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    LinearProgressIndicator(
-                                        progress = {
-                                            if (scanImportProgress.second > 0)
-                                                scanImportProgress.first.toFloat() / scanImportProgress.second.toFloat()
-                                            else 0f
-                                        },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        color = IndigoPrimary
-                                    )
-                                }
-                            }
-                        }
-
-                        if (scannedLinks.isNotEmpty()) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "${scannedLinks.size} Articles Found (${selectedScannedUrls.size} selected)",
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = SlateText
-                                )
-                                TextButton(
-                                    onClick = {
-                                        selectedScannedUrls = if (selectedScannedUrls.size == scannedLinks.size) {
-                                            emptySet()
-                                        } else {
-                                            scannedLinks.map { it.url }.toSet()
-                                        }
-                                    },
-                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
-                                ) {
-                                    Text(
-                                        if (selectedScannedUrls.size == scannedLinks.size) "Deselect All" else "Select All",
-                                        fontSize = 11.sp,
-                                        color = IndigoPrimary
-                                    )
-                                }
-                            }
-
-                            Card(
-                                shape = RoundedCornerShape(8.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color.White),
-                                border = BorderStroke(1.dp, SlateBorder)
-                            ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .heightIn(max = 200.dp)
-                                        .verticalScroll(rememberScrollState())
-                                        .padding(4.dp)
-                                ) {
-                                    scannedLinks.forEach { link ->
-                                        val isSelected = selectedScannedUrls.contains(link.url)
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(6.dp))
-                                                .clickable {
-                                                    selectedScannedUrls = if (isSelected) {
-                                                        selectedScannedUrls - link.url
-                                                    } else {
-                                                        selectedScannedUrls + link.url
-                                                    }
-                                                }
-                                                .padding(horizontal = 4.dp, vertical = 4.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Checkbox(
-                                                checked = isSelected,
-                                                onCheckedChange = { checked ->
-                                                    selectedScannedUrls = if (checked) {
-                                                        selectedScannedUrls + link.url
-                                                    } else {
-                                                        selectedScannedUrls - link.url
-                                                    }
-                                                },
-                                                modifier = Modifier.size(24.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = link.title,
-                                                    fontSize = 11.5.sp,
-                                                    fontWeight = FontWeight.Medium,
-                                                    color = SlateText,
-                                                    maxLines = 2,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                                Text(
-                                                    text = link.url.substringAfter("://").take(45),
-                                                    fontSize = 9.5.sp,
-                                                    color = SlateMuted,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
                     1 -> {
-                        // SYSTEM 2: RSS Feed Integration
-                        Text(
-                            text = "Auto-fetch latest news and articles from any RSS or Atom feed.",
-                            fontSize = 11.5.sp,
-                            color = SlateMuted
-                        )
-
-                        OutlinedTextField(
-                            value = rssUrl,
-                            onValueChange = {
-                                rssUrl = it
-                                rssErrorMessage = null
-                            },
-                            label = { Text("RSS Feed URL") },
-                            placeholder = { Text("https://feeds.bbci.co.uk/news/world/rss.xml") },
-                            trailingIcon = {
-                                IconButton(onClick = {
-                                    try {
-                                        val clipService = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                                        val clipText = clipService?.primaryClip?.getItemAt(0)?.text?.toString()
-                                        if (!clipText.isNullOrBlank()) {
-                                            rssUrl = clipText.trim()
-                                            rssErrorMessage = null
-                                        }
-                                    } catch (_: Exception) {}
-                                }) {
-                                    Icon(Icons.Default.ContentPaste, contentDescription = "Paste", tint = IndigoPrimary)
-                                }
-                            },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        // RSS Presets
-                        Text("Featured RSS Feeds:", fontSize = 11.sp, color = SlateMuted, fontWeight = FontWeight.Medium)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            val rssPresets = listOf(
-                                "BBC News" to "https://feeds.bbci.co.uk/news/world/rss.xml",
-                                "TechCrunch" to "https://techcrunch.com/feed/",
-                                "ScienceDaily" to "https://www.sciencedaily.com/rss/top/science.xml"
-                            )
-                            rssPresets.forEach { (label, url) ->
-                                OutlinedButton(
-                                    onClick = {
-                                        rssUrl = url
-                                        doFetchRss(url)
-                                    },
-                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text(label, fontSize = 10.5.sp, maxLines = 1)
-                                }
-                            }
-                        }
-
-                        Button(
-                            onClick = { doFetchRss(rssUrl) },
-                            enabled = rssUrl.isNotBlank() && !isFetchingRss && !isBatchImportingRss,
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
-                        ) {
-                            if (isFetchingRss) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Loading RSS Feed...", fontSize = 12.5.sp)
-                            } else {
-                                Icon(Icons.Default.RssFeed, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Fetch RSS Feed", fontSize = 12.5.sp)
-                            }
-                        }
-
-                        if (rssErrorMessage != null) {
-                            Card(
-                                colors = CardDefaults.cardColors(containerColor = RoseLight),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Row(modifier = Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = RoseError, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(text = rssErrorMessage ?: "", color = RoseError, fontSize = 11.sp)
-                                }
-                            }
-                        }
-
-                        if (isBatchImportingRss) {
-                            Card(
-                                colors = CardDefaults.cardColors(containerColor = IndigoLight),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Column(modifier = Modifier.padding(10.dp)) {
-                                    Text(
-                                        text = "Importing ${rssImportProgress.first} of ${rssImportProgress.second} articles...",
-                                        fontSize = 11.5.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = IndigoPrimary
-                                    )
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    LinearProgressIndicator(
-                                        progress = {
-                                            if (rssImportProgress.second > 0)
-                                                rssImportProgress.first.toFloat() / rssImportProgress.second.toFloat()
-                                            else 0f
-                                        },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        color = IndigoPrimary
-                                    )
-                                }
-                            }
-                        }
-
-                        if (rssResult != null) {
-                            val feed = rssResult!!
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(SlateLight)
-                                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Checkbox(
-                                    checked = fetchFullRssWebText,
-                                    onCheckedChange = { fetchFullRssWebText = it },
-                                    modifier = Modifier.size(24.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "Extract full webpage article text",
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = SlateText
-                                )
-                            }
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "${feed.items.size} Articles in Feed (${selectedRssUrls.size} selected)",
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = SlateText
-                                )
-                                TextButton(
-                                    onClick = {
-                                        selectedRssUrls = if (selectedRssUrls.size == feed.items.size) {
-                                            emptySet()
-                                        } else {
-                                            feed.items.map { it.link }.toSet()
-                                        }
-                                    },
-                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
-                                ) {
-                                    Text(
-                                        if (selectedRssUrls.size == feed.items.size) "Deselect All" else "Select All",
-                                        fontSize = 11.sp,
-                                        color = IndigoPrimary
-                                    )
-                                }
-                            }
-
-                            Card(
-                                shape = RoundedCornerShape(8.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color.White),
-                                border = BorderStroke(1.dp, SlateBorder)
-                            ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .heightIn(max = 200.dp)
-                                        .verticalScroll(rememberScrollState())
-                                        .padding(4.dp)
-                                ) {
-                                    feed.items.forEach { item ->
-                                        val isSelected = selectedRssUrls.contains(item.link)
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(6.dp))
-                                                .clickable {
-                                                    selectedRssUrls = if (isSelected) {
-                                                        selectedRssUrls - item.link
-                                                    } else {
-                                                        selectedRssUrls + item.link
-                                                    }
-                                                }
-                                                .padding(horizontal = 4.dp, vertical = 4.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Checkbox(
-                                                checked = isSelected,
-                                                onCheckedChange = { checked ->
-                                                    selectedRssUrls = if (checked) {
-                                                        selectedRssUrls + item.link
-                                                    } else {
-                                                        selectedRssUrls - item.link
-                                                    }
-                                                },
-                                                modifier = Modifier.size(24.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = item.title,
-                                                    fontSize = 11.5.sp,
-                                                    fontWeight = FontWeight.Medium,
-                                                    color = SlateText,
-                                                    maxLines = 2,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                                if (item.author.isNotBlank() || item.pubDate.isNotBlank()) {
-                                                    Text(
-                                                        text = listOf(item.author, item.pubDate).filter { it.isNotBlank() }.joinToString(" • "),
-                                                        fontSize = 9.5.sp,
-                                                        color = SlateMuted,
-                                                        maxLines = 1
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    2 -> {
-                        // SYSTEM: Sitemap XML
-                        Text(
-                            text = "Extract and select article URLs from any website's sitemap.xml for batch import.",
-                            fontSize = 11.5.sp,
-                            color = SlateMuted
-                        )
-
-                        OutlinedTextField(
-                            value = sitemapInputUrl,
-                            onValueChange = {
-                                sitemapInputUrl = it
-                                sitemapErrorMessage = null
-                            },
-                            label = { Text("Website or Sitemap URL") },
-                            placeholder = { Text("https://techcrunch.com/sitemap.xml") },
-                            trailingIcon = {
-                                IconButton(onClick = {
-                                    try {
-                                        val clip = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                                        val txt = clip?.primaryClip?.getItemAt(0)?.text?.toString()
-                                        if (!txt.isNullOrBlank()) {
-                                            sitemapInputUrl = txt.trim()
-                                            sitemapErrorMessage = null
-                                        }
-                                    } catch (_: Exception) {}
-                                }) {
-                                    Icon(Icons.Default.ContentPaste, contentDescription = "Paste", tint = IndigoPrimary)
-                                }
-                            },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        // Presets
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            listOf(
-                                "TechCrunch" to "https://techcrunch.com/sitemap.xml",
-                                "The Verge" to "https://www.theverge.com/sitemap.xml",
-                                "The Guardian" to "https://www.theguardian.com/sitemap.xml",
-                                "BBC News" to "https://www.bbc.com/sitemap.xml"
-                            ).forEach { (name, link) ->
-                                AssistChip(
-                                    onClick = {
-                                        sitemapInputUrl = link
-                                        isFetchingSitemapInDialog = true
-                                        sitemapErrorMessage = null
-                                        sitemapExtractedArticles = emptyList()
-                                        selectedSitemapUrls = emptySet()
-                                        coroutineScope.launch {
-                                            val res = com.example.data.service.ArticleSitemapService.getInstance().fetchSitemap(link)
-                                            isFetchingSitemapInDialog = false
-                                            res.fold(
-                                                onSuccess = { sRes ->
-                                                    sitemapExtractedArticles = sRes.articles
-                                                    selectedSitemapUrls = sRes.articles.take(8).map { it.url }.toSet()
-                                                },
-                                                onFailure = { err ->
-                                                    sitemapErrorMessage = err.message ?: "Failed to fetch sitemap"
-                                                }
-                                            )
-                                        }
-                                    },
-                                    label = { Text(name, fontSize = 11.sp) },
-                                    colors = AssistChipDefaults.assistChipColors(containerColor = SlateLight),
-                                    border = BorderStroke(1.dp, SlateBorder),
-                                    modifier = Modifier.height(28.dp)
-                                )
-                            }
-                        }
-
-                        Button(
-                            onClick = {
-                                val clean = sitemapInputUrl.trim()
-                                if (clean.isNotBlank()) {
-                                    isFetchingSitemapInDialog = true
-                                    sitemapErrorMessage = null
-                                    sitemapExtractedArticles = emptyList()
-                                    selectedSitemapUrls = emptySet()
-                                    coroutineScope.launch {
-                                        val res = com.example.data.service.ArticleSitemapService.getInstance().fetchSitemap(clean)
-                                        isFetchingSitemapInDialog = false
-                                        res.fold(
-                                            onSuccess = { sRes ->
-                                                if (sRes.articles.isEmpty()) {
-                                                    sitemapErrorMessage = "No article URLs found in this sitemap."
-                                                } else {
-                                                    sitemapExtractedArticles = sRes.articles
-                                                    selectedSitemapUrls = sRes.articles.take(8).map { it.url }.toSet()
-                                                }
-                                            },
-                                            onFailure = { err ->
-                                                sitemapErrorMessage = err.message ?: "Failed to fetch sitemap."
-                                            }
-                                        )
-                                    }
-                                }
-                            },
-                            enabled = !isFetchingSitemapInDialog && sitemapInputUrl.isNotBlank(),
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
-                        ) {
-                            if (isFetchingSitemapInDialog) {
-                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color.White)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Parsing Sitemap XML...", fontSize = 12.sp)
-                            } else {
-                                Icon(Icons.Default.AccountTree, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Extract Sitemap Articles", fontSize = 12.sp)
-                            }
-                        }
-
-                        if (sitemapErrorMessage != null) {
-                            Text(sitemapErrorMessage ?: "", color = RoseError, fontSize = 11.sp)
-                        }
-
-                        if (isBatchImportingSitemap) {
-                            Column(modifier = Modifier.fillMaxWidth()) {
-                                Text(
-                                    text = "Importing article ${sitemapImportProgress.first} of ${sitemapImportProgress.second}...",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = IndigoPrimary
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                LinearProgressIndicator(
-                                    progress = {
-                                        if (sitemapImportProgress.second > 0)
-                                            sitemapImportProgress.first.toFloat() / sitemapImportProgress.second.toFloat()
-                                        else 0f
-                                    },
-                                    modifier = Modifier.fillMaxWidth(),
-                                    color = IndigoPrimary
-                                )
-                            }
-                        }
-
-                        if (sitemapExtractedArticles.isNotEmpty()) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "${sitemapExtractedArticles.size} URLs (${selectedSitemapUrls.size} selected)",
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = SlateText
-                                )
-                                TextButton(
-                                    onClick = {
-                                        selectedSitemapUrls = if (selectedSitemapUrls.size == sitemapExtractedArticles.size) {
-                                            emptySet()
-                                        } else {
-                                            sitemapExtractedArticles.map { it.url }.toSet()
-                                        }
-                                    },
-                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
-                                ) {
-                                    Text(
-                                        if (selectedSitemapUrls.size == sitemapExtractedArticles.size) "Deselect All" else "Select All",
-                                        fontSize = 11.sp,
-                                        color = IndigoPrimary
-                                    )
-                                }
-                            }
-
-                            Card(
-                                shape = RoundedCornerShape(8.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color.White),
-                                border = BorderStroke(1.dp, SlateBorder)
-                            ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .heightIn(max = 200.dp)
-                                        .verticalScroll(rememberScrollState())
-                                        .padding(4.dp)
-                                ) {
-                                    sitemapExtractedArticles.forEach { item ->
-                                        val isChecked = selectedSitemapUrls.contains(item.url)
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(6.dp))
-                                                .clickable {
-                                                    selectedSitemapUrls = if (isChecked) {
-                                                        selectedSitemapUrls - item.url
-                                                    } else {
-                                                        selectedSitemapUrls + item.url
-                                                    }
-                                                }
-                                                .padding(horizontal = 4.dp, vertical = 4.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Checkbox(
-                                                checked = isChecked,
-                                                onCheckedChange = { chk ->
-                                                    selectedSitemapUrls = if (chk) {
-                                                        selectedSitemapUrls + item.url
-                                                    } else {
-                                                        selectedSitemapUrls - item.url
-                                                    }
-                                                },
-                                                modifier = Modifier.size(24.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = item.title,
-                                                    fontSize = 11.5.sp,
-                                                    fontWeight = FontWeight.Medium,
-                                                    color = SlateText,
-                                                    maxLines = 2,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                                Text(
-                                                    text = item.url.substringAfter("://").take(45),
-                                                    fontSize = 9.5.sp,
-                                                    color = SlateMuted,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    3 -> {
-                        // SYSTEM 3: Bulk URLs Paste
-                        Text(
-                            text = "Paste multiple article links to download and import them simultaneously.",
-                            fontSize = 11.5.sp,
-                            color = SlateMuted
-                        )
-
                         OutlinedTextField(
                             value = bulkUrlsInput,
                             onValueChange = {
                                 bulkUrlsInput = it
                                 bulkErrorMessage = null
                             },
-                            label = { Text("Paste Links (one per line)") },
-                            placeholder = {
-                                Text("https://theguardian.com/article-1\nhttps://techcrunch.com/article-2\nhttps://example.com/article-3")
-                            },
+                            label = { Text("URLs") },
+                            placeholder = { Text("Paste links, one per line...") },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(130.dp),
+                                .height(140.dp),
                             maxLines = 8
                         )
 
@@ -3424,185 +2582,163 @@ private fun ArticleEditorDialog(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            OutlinedButton(
-                                onClick = {
-                                    try {
-                                        val clipService = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                                        val clipText = clipService?.primaryClip?.getItemAt(0)?.text?.toString()
-                                        if (!clipText.isNullOrBlank()) {
-                                            bulkUrlsInput = if (bulkUrlsInput.isBlank()) clipText.trim()
-                                            else bulkUrlsInput.trim() + "\n" + clipText.trim()
-                                            bulkErrorMessage = null
-                                        }
-                                    } catch (_: Exception) {}
-                                },
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                shape = RoundedCornerShape(8.dp)
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (detectedBulkUrls.isNotEmpty()) IndigoLight else SlateLight
                             ) {
-                                Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Paste from Clipboard", fontSize = 11.sp)
-                            }
-
-                            if (bulkUrlsInput.isNotBlank()) {
-                                TextButton(
-                                    onClick = { bulkUrlsInput = "" },
-                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Clear", fontSize = 11.sp, color = SlateMuted)
+                                    Icon(
+                                        if (detectedBulkUrls.isNotEmpty()) Icons.Default.CheckCircle else Icons.Default.Link,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(13.dp),
+                                        tint = if (detectedBulkUrls.isNotEmpty()) IndigoPrimary else SlateMuted
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "${detectedBulkUrls.size} URLs",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = if (detectedBulkUrls.isNotEmpty()) IndigoPrimary else SlateMuted
+                                    )
                                 }
                             }
-                        }
 
-                        Card(
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (detectedBulkUrls.isNotEmpty()) IndigoLight else SlateLight
-                            ),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
                             Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(2.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    if (detectedBulkUrls.isNotEmpty()) Icons.Default.CheckCircle else Icons.Default.Info,
-                                    contentDescription = null,
-                                    tint = if (detectedBulkUrls.isNotEmpty()) IndigoPrimary else SlateMuted,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "${detectedBulkUrls.size} Valid URLs Detected",
-                                    fontSize = 11.5.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = if (detectedBulkUrls.isNotEmpty()) IndigoPrimary else SlateMuted
-                                )
+                                TextButton(
+                                    onClick = {
+                                        try {
+                                            val clipService = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                            val clipText = clipService?.primaryClip?.getItemAt(0)?.text?.toString()
+                                            if (!clipText.isNullOrBlank()) {
+                                                bulkUrlsInput = if (bulkUrlsInput.isBlank()) clipText.trim()
+                                                else bulkUrlsInput.trim() + "\n" + clipText.trim()
+                                                bulkErrorMessage = null
+                                            }
+                                        } catch (_: Exception) {}
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(13.dp), tint = IndigoPrimary)
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    Text("Paste", fontSize = 11.sp, color = IndigoPrimary)
+                                }
+
+                                if (bulkUrlsInput.isNotBlank()) {
+                                    TextButton(
+                                        onClick = { bulkUrlsInput = "" },
+                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                                    ) {
+                                        Text("Clear", fontSize = 11.sp, color = SlateMuted)
+                                    }
+                                }
                             }
                         }
 
                         if (bulkErrorMessage != null) {
-                            Card(
-                                colors = CardDefaults.cardColors(containerColor = RoseLight),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Row(modifier = Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = RoseError, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(text = bulkErrorMessage ?: "", color = RoseError, fontSize = 11.sp)
-                                }
-                            }
+                            Text(text = bulkErrorMessage ?: "", color = RoseError, fontSize = 11.sp)
                         }
 
                         if (isBatchImportingBulk) {
-                            Card(
-                                colors = CardDefaults.cardColors(containerColor = IndigoLight),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Column(modifier = Modifier.padding(10.dp)) {
-                                    Text(
-                                        text = "Importing article ${bulkImportProgress.first} of ${bulkImportProgress.second}...",
-                                        fontSize = 11.5.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = IndigoPrimary
-                                    )
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    LinearProgressIndicator(
-                                        progress = {
-                                            if (bulkImportProgress.second > 0)
-                                                bulkImportProgress.first.toFloat() / bulkImportProgress.second.toFloat()
-                                            else 0f
-                                        },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        color = IndigoPrimary
-                                    )
-                                }
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Text(
+                                    text = "Importing ${bulkImportProgress.first} of ${bulkImportProgress.second}...",
+                                    fontSize = 11.sp,
+                                    color = IndigoPrimary
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                LinearProgressIndicator(
+                                    progress = {
+                                        if (bulkImportProgress.second > 0)
+                                            bulkImportProgress.first.toFloat() / bulkImportProgress.second.toFloat()
+                                        else 0f
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = IndigoPrimary
+                                )
                             }
                         }
                     }
 
-                    4 -> {
-                        // SYSTEM: Single Article / Manual / File / Single Link / Google Doc
+                    0 -> {
+                        // Single Article
                         if (!isEditing) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Button(
-                                    onClick = {
-                                        filePickerLauncher.launch(arrayOf("text/plain", "text/*", "*/*"))
-                                    },
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(10.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
-                                ) {
-                                    Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(15.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Upload .txt File", fontSize = 11.5.sp)
-                                }
-                            }
-
-                            // Single Web Link Quick Input
-                            OutlinedTextField(
-                                value = singleWebUrl,
-                                onValueChange = {
-                                    singleWebUrl = it
-                                    singleWebErrorMessage = null
-                                },
-                                label = { Text("Single Web Link") },
-                                placeholder = { Text("https://example.com/article...") },
-                                trailingIcon = {
-                                    IconButton(onClick = {
-                                        try {
-                                            val clip = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                                            val txt = clip?.primaryClip?.getItemAt(0)?.text?.toString()
-                                            if (!txt.isNullOrBlank()) {
-                                                singleWebUrl = txt.trim()
-                                                singleWebErrorMessage = null
-                                            }
-                                        } catch (_: Exception) {}
-                                    }) {
-                                        Icon(Icons.Default.ContentPaste, contentDescription = "Paste", tint = IndigoPrimary)
-                                    }
-                                },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            if (singleWebUrl.isNotBlank()) {
-                                Button(
-                                    onClick = {
-                                        isExtractingSingleWeb = true
+                                OutlinedTextField(
+                                    value = singleWebUrl,
+                                    onValueChange = {
+                                        singleWebUrl = it
                                         singleWebErrorMessage = null
-                                        coroutineScope.launch {
-                                            val fetchResult = ArticleParser.fetchWebArticle(singleWebUrl.trim())
-                                            isExtractingSingleWeb = false
-                                            fetchResult.fold(
-                                                onSuccess = { item ->
-                                                    title = item.title
-                                                    author = item.author
-                                                    content = item.content
-                                                    singleWebUrl = ""
-                                                },
-                                                onFailure = { err ->
-                                                    singleWebErrorMessage = err.message ?: "Failed to extract web article."
-                                                }
-                                            )
-                                        }
                                     },
-                                    enabled = !isExtractingSingleWeb,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(8.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
-                                ) {
-                                    if (isExtractingSingleWeb) {
-                                        CircularProgressIndicator(modifier = Modifier.size(14.dp), color = Color.White, strokeWidth = 2.dp)
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Extracting...", fontSize = 11.5.sp)
-                                    } else {
-                                        Text("Extract Web Article", fontSize = 11.5.sp)
+                                    label = { Text("Link") },
+                                    placeholder = { Text("Paste article link") },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f),
+                                    leadingIcon = {
+                                        Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(16.dp), tint = SlateMuted)
+                                    },
+                                    trailingIcon = {
+                                        if (isExtractingSingleWeb) {
+                                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = IndigoPrimary)
+                                        } else if (singleWebUrl.isNotBlank()) {
+                                            IconButton(
+                                                onClick = {
+                                                    isExtractingSingleWeb = true
+                                                    singleWebErrorMessage = null
+                                                    coroutineScope.launch {
+                                                        val fetchResult = ArticleParser.fetchWebArticle(singleWebUrl.trim())
+                                                        isExtractingSingleWeb = false
+                                                        fetchResult.fold(
+                                                            onSuccess = { item ->
+                                                                title = item.title
+                                                                author = item.author
+                                                                content = item.content
+                                                                singleWebUrl = ""
+                                                            },
+                                                            onFailure = { err ->
+                                                                singleWebErrorMessage = err.message ?: "Failed to extract link"
+                                                            }
+                                                        )
+                                                    }
+                                                }
+                                            ) {
+                                                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Fetch", tint = IndigoPrimary, modifier = Modifier.size(18.dp))
+                                            }
+                                        } else {
+                                            IconButton(onClick = {
+                                                try {
+                                                    val clip = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                                    val txt = clip?.primaryClip?.getItemAt(0)?.text?.toString()
+                                                    if (!txt.isNullOrBlank()) {
+                                                        singleWebUrl = txt.trim()
+                                                        singleWebErrorMessage = null
+                                                    }
+                                                } catch (_: Exception) {}
+                                            }) {
+                                                Icon(Icons.Default.ContentPaste, contentDescription = "Paste", tint = IndigoPrimary, modifier = Modifier.size(16.dp))
+                                            }
+                                        }
                                     }
+                                )
+
+                                OutlinedButton(
+                                    onClick = { filePickerLauncher.launch(arrayOf("text/plain", "text/*", "*/*")) },
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.height(52.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp)
+                                ) {
+                                    Icon(Icons.Default.UploadFile, contentDescription = "File", modifier = Modifier.size(17.dp), tint = IndigoPrimary)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("File", fontSize = 11.5.sp, color = IndigoPrimary)
                                 }
                             }
 
@@ -3612,59 +2748,60 @@ private fun ArticleEditorDialog(
                         }
 
                         if (!isEditing && liveParsedArticles.size > 1) {
-                            Card(
-                                colors = CardDefaults.cardColors(containerColor = IndigoLight),
-                                shape = RoundedCornerShape(10.dp),
-                                border = BorderStroke(1.dp, IndigoPrimary.copy(alpha = 0.35f))
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = IndigoLight
                             ) {
-                                Column(modifier = Modifier.padding(10.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("${liveParsedArticles.size} Articles Detected in Text!", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = IndigoPrimary)
-                                    }
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    liveParsedArticles.take(3).forEachIndexed { idx, item ->
-                                        Text("${idx + 1}. ${item.title} (by ${item.author})", fontSize = 10.5.sp, color = SlateText, maxLines = 1)
-                                    }
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("${liveParsedArticles.size} articles found in text", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = IndigoPrimary)
                                 }
                             }
                         } else {
-                            OutlinedTextField(
-                                value = title,
-                                onValueChange = { title = it },
-                                label = { Text("Article Title") },
-                                placeholder = { Text("Enter article title") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = title,
+                                    onValueChange = { title = it },
+                                    label = { Text("Title") },
+                                    placeholder = { Text("Title") },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1.3f)
+                                )
 
-                            OutlinedTextField(
-                                value = author,
-                                onValueChange = { author = it },
-                                label = { Text("Author Name") },
-                                placeholder = { Text("Author (optional)") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
-                            )
+                                OutlinedTextField(
+                                    value = author,
+                                    onValueChange = { author = it },
+                                    label = { Text("Author") },
+                                    placeholder = { Text("Author") },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
                         }
 
                         OutlinedTextField(
                             value = content,
                             onValueChange = { content = it },
-                            label = { Text("Article Content *") },
-                            placeholder = { Text("Paste article content or passage here...") },
+                            label = { Text("Content *") },
+                            placeholder = { Text("Paste or type text...") },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(160.dp),
-                            maxLines = 12
+                            maxLines = 10
                         )
                     }
                 }
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
                 // Footer Row with Cancel and Primary action
                 Row(
@@ -3674,136 +2811,16 @@ private fun ArticleEditorDialog(
                 ) {
                     OutlinedButton(
                         onClick = onDismiss,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(10.dp),
                         border = BorderStroke(1.dp, SlateBorder.copy(alpha = 0.8f)),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = SlateMuted),
-                        modifier = Modifier.weight(0.75f)
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Text("Cancel", fontSize = 12.5.sp)
+                        Text("Cancel", fontSize = 12.sp)
                     }
 
                     when (selectedTab) {
-                        0 -> {
-                            Button(
-                                onClick = {
-                                    if (selectedScannedUrls.isNotEmpty()) {
-                                        isBatchImportingScan = true
-                                        val urls = selectedScannedUrls.toList()
-                                        scanImportProgress = 0 to urls.size
-                                        coroutineScope.launch {
-                                            val fetched = ArticleParser.fetchBulkWebArticles(urls) { cur, tot, _ ->
-                                                scanImportProgress = cur to tot
-                                            }
-                                            isBatchImportingScan = false
-                                            if (fetched.isNotEmpty()) {
-                                                onSaveBatch(fetched)
-                                            } else {
-                                                scanErrorMessage = "Could not extract articles from selected links."
-                                            }
-                                        }
-                                    }
-                                },
-                                enabled = selectedScannedUrls.isNotEmpty() && !isBatchImportingScan,
-                                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.weight(1.25f)
-                            ) {
-                                Text(
-                                    if (isBatchImportingScan) "Importing..."
-                                    else "Import Selected (${selectedScannedUrls.size})",
-                                    fontSize = 12.5.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
                         1 -> {
-                            Button(
-                                onClick = {
-                                    if (selectedRssUrls.isNotEmpty() && rssResult != null) {
-                                        isBatchImportingRss = true
-                                        val chosen = rssResult!!.items.filter { selectedRssUrls.contains(it.link) }
-                                        rssImportProgress = 0 to chosen.size
-                                        coroutineScope.launch {
-                                            if (fetchFullRssWebText) {
-                                                val urls = chosen.map { it.link }
-                                                val fetched = ArticleParser.fetchBulkWebArticles(urls) { cur, tot, _ ->
-                                                    rssImportProgress = cur to tot
-                                                }
-                                                val combined = chosen.mapIndexed { idx, item ->
-                                                    val webItem = fetched.getOrNull(idx)
-                                                    if (webItem != null && webItem.content.isNotBlank()) {
-                                                        webItem
-                                                    } else {
-                                                        ParsedArticleItem(
-                                                            title = item.title,
-                                                            author = item.author.ifBlank { rssResult!!.feedTitle },
-                                                            content = item.description
-                                                        )
-                                                    }
-                                                }
-                                                isBatchImportingRss = false
-                                                onSaveBatch(combined)
-                                            } else {
-                                                isBatchImportingRss = false
-                                                val directItems = chosen.map {
-                                                    ParsedArticleItem(
-                                                        title = it.title,
-                                                        author = it.author.ifBlank { rssResult!!.feedTitle },
-                                                        content = it.description
-                                                    )
-                                                }
-                                                onSaveBatch(directItems)
-                                            }
-                                        }
-                                    }
-                                },
-                                enabled = selectedRssUrls.isNotEmpty() && !isBatchImportingRss,
-                                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.weight(1.25f)
-                            ) {
-                                Text(
-                                    if (isBatchImportingRss) "Importing..."
-                                    else "Import Selected (${selectedRssUrls.size})",
-                                    fontSize = 12.5.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
-                        2 -> {
-                            Button(
-                                onClick = {
-                                    if (selectedSitemapUrls.isNotEmpty()) {
-                                        isBatchImportingSitemap = true
-                                        val urls = selectedSitemapUrls.toList()
-                                        sitemapImportProgress = 0 to urls.size
-                                        coroutineScope.launch {
-                                            val fetched = ArticleParser.fetchBulkWebArticles(urls) { cur, tot, _ ->
-                                                sitemapImportProgress = cur to tot
-                                            }
-                                            isBatchImportingSitemap = false
-                                            if (fetched.isNotEmpty()) {
-                                                onSaveBatch(fetched)
-                                            } else {
-                                                sitemapErrorMessage = "Could not extract articles from selected links."
-                                            }
-                                        }
-                                    }
-                                },
-                                enabled = selectedSitemapUrls.isNotEmpty() && !isBatchImportingSitemap,
-                                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.weight(1.25f)
-                            ) {
-                                Text(
-                                    if (isBatchImportingSitemap) "Importing..."
-                                    else "Import Selected (${selectedSitemapUrls.size})",
-                                    fontSize = 12.5.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
-                        3 -> {
                             Button(
                                 onClick = {
                                     if (detectedBulkUrls.isNotEmpty()) {
@@ -3825,13 +2842,13 @@ private fun ArticleEditorDialog(
                                 },
                                 enabled = detectedBulkUrls.isNotEmpty() && !isBatchImportingBulk,
                                 colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.weight(1.25f)
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.weight(1.2f)
                             ) {
                                 Text(
                                     if (isBatchImportingBulk) "Importing..."
-                                    else "Import All (${detectedBulkUrls.size})",
-                                    fontSize = 12.5.sp,
+                                    else "Import (${detectedBulkUrls.size})",
+                                    fontSize = 12.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
                             }
@@ -3857,12 +2874,12 @@ private fun ArticleEditorDialog(
                                 },
                                 enabled = content.isNotBlank(),
                                 colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier.weight(1.25f)
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.weight(1.2f)
                             ) {
                                 Text(
-                                    if (isEditing) "Save Changes" else "Save & Read",
-                                    fontSize = 12.5.sp,
+                                    if (isEditing) "Save" else "Save & Read",
+                                    fontSize = 12.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
                             }
@@ -4476,485 +3493,3 @@ private fun CourseFilterDialog(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ArticleFlashcardExtractorBottomSheet(
-    activeArticle: ArticleEntity?,
-    targetWords: List<VocabularyWordEntity>,
-    onDismiss: () -> Unit,
-    onSaved: (Int) -> Unit
-) {
-    val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
-    var urlInput by remember { mutableStateOf("") }
-    var useActiveArticle by remember { mutableStateOf(activeArticle != null) }
-    var isScraping by remember { mutableStateOf(false) }
-    var isSaving by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var extractedCards by remember { mutableStateOf<List<GeneratedFlashcard>>(emptyList()) }
-    var selectedIndices by remember { mutableStateOf<Set<Int>>(emptySet()) }
-    var scrapedInfo by remember { mutableStateOf<String?>(null) }
-
-    val clipboardManager = remember {
-        context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-    }
-
-    fun doScrapeAndExtract() {
-        errorMessage = null
-        isScraping = true
-        extractedCards = emptyList()
-        selectedIndices = emptySet()
-        scrapedInfo = null
-
-        coroutineScope.launch {
-            try {
-                val service = ArticleFlashcardScraperService.getInstance()
-                val targetArticleContent: ScrapedArticleContent = if (useActiveArticle && activeArticle != null) {
-                    val body = activeArticle.content
-                    val paragraphs = body.split(Regex("""\n{2,}""")).map { it.trim() }.filter { it.length > 25 }
-                    val wordCount = body.split(Regex("""\s+""")).size
-                    ScrapedArticleContent(
-                        url = "",
-                        title = activeArticle.title,
-                        author = activeArticle.author,
-                        mainBodyText = body,
-                        paragraphs = if (paragraphs.isNotEmpty()) paragraphs else listOf(body),
-                        wordCount = wordCount,
-                        readingTimeMinutes = maxOf(1, wordCount / 200),
-                        domain = "current_article"
-                    )
-                } else {
-                    val cleanUrl = urlInput.trim()
-                    if (cleanUrl.isBlank()) {
-                        isScraping = false
-                        errorMessage = "Please enter a valid article URL."
-                        return@launch
-                    }
-                    val scrapeResult = service.scrapeArticle(cleanUrl)
-                    if (scrapeResult.isFailure) {
-                        isScraping = false
-                        errorMessage = scrapeResult.exceptionOrNull()?.message ?: "Failed to scrape URL."
-                        return@launch
-                    }
-                    scrapeResult.getOrThrow()
-                }
-
-                val cards = service.extractFlashcards(
-                    article = targetArticleContent,
-                    targetVocabulary = targetWords,
-                    maxCards = 25
-                )
-
-                isScraping = false
-                if (cards.isEmpty()) {
-                    errorMessage = "No flashcard patterns or keywords could be extracted from this text."
-                } else {
-                    extractedCards = cards
-                    selectedIndices = cards.indices.toSet()
-                    scrapedInfo = "Extracted ${cards.size} flashcards from \"${targetArticleContent.title}\" (${targetArticleContent.wordCount} words)"
-                }
-            } catch (e: Exception) {
-                isScraping = false
-                errorMessage = e.message ?: "An unexpected error occurred during scraping."
-            }
-        }
-    }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = Color.White,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-        dragHandle = {
-            Box(
-                modifier = Modifier
-                    .padding(top = 10.dp, bottom = 8.dp)
-                    .width(42.dp)
-                    .height(4.dp)
-                    .clip(CircleShape)
-                    .background(SlateBorder)
-            )
-        }
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.88f)
-                .padding(horizontal = 20.dp, vertical = 8.dp)
-                .navigationBarsPadding()
-        ) {
-            // Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(IndigoLight),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Default.Style,
-                        contentDescription = null,
-                        tint = IndigoPrimary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(12.dp))
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Scrape & Generate Flashcards",
-                        fontFamily = PoppinsFontFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 17.sp,
-                        color = SlateText
-                    )
-                    Text(
-                        text = "Extracts main body text with Jsoup & generates cards",
-                        fontFamily = PoppinsFontFamily,
-                        fontSize = 11.5.sp,
-                        color = SlateMuted
-                    )
-                }
-
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Default.Close, contentDescription = "Close", tint = SlateMuted)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Source Switch (Current Article vs New URL)
-            if (activeArticle != null) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(SlateLight)
-                        .padding(3.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Surface(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { useActiveArticle = true },
-                        color = if (useActiveArticle) Color.White else Color.Transparent,
-                        shadowElevation = if (useActiveArticle) 1.dp else 0.dp
-                    ) {
-                        Text(
-                            text = "Current Article",
-                            fontFamily = PoppinsFontFamily,
-                            fontWeight = if (useActiveArticle) FontWeight.Bold else FontWeight.Medium,
-                            fontSize = 12.sp,
-                            color = if (useActiveArticle) IndigoPrimary else SlateMuted,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
-                    }
-
-                    Surface(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { useActiveArticle = false },
-                        color = if (!useActiveArticle) Color.White else Color.Transparent,
-                        shadowElevation = if (!useActiveArticle) 1.dp else 0.dp
-                    ) {
-                        Text(
-                            text = "Scrape from Web URL",
-                            fontFamily = PoppinsFontFamily,
-                            fontWeight = if (!useActiveArticle) FontWeight.Bold else FontWeight.Medium,
-                            fontSize = 12.sp,
-                            color = if (!useActiveArticle) IndigoPrimary else SlateMuted,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(10.dp))
-            }
-
-            if (!useActiveArticle || activeArticle == null) {
-                // URL Input Field
-                OutlinedTextField(
-                    value = urlInput,
-                    onValueChange = { urlInput = it },
-                    label = { Text("Article URL to scrape", fontFamily = PoppinsFontFamily, fontSize = 12.sp) },
-                    placeholder = { Text("https://example.com/article...", fontFamily = PoppinsFontFamily, fontSize = 12.sp) },
-                    trailingIcon = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (urlInput.isNotBlank()) {
-                                IconButton(onClick = { urlInput = "" }, modifier = Modifier.size(32.dp)) {
-                                    Icon(Icons.Default.Clear, contentDescription = "Clear", tint = SlateMuted, modifier = Modifier.size(16.dp))
-                                }
-                            }
-                            IconButton(
-                                onClick = {
-                                    val clip = clipboardManager?.primaryClip?.getItemAt(0)?.text?.toString()
-                                    if (!clip.isNullOrBlank()) {
-                                        urlInput = clip.trim()
-                                    }
-                                },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(Icons.Default.ContentPaste, contentDescription = "Paste", tint = IndigoPrimary, modifier = Modifier.size(16.dp))
-                            }
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = IndigoPrimary,
-                        unfocusedBorderColor = SlateBorder
-                    ),
-                    singleLine = true
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-            } else {
-                // Active Article summary card
-                Surface(
-                    color = SlateLight,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.Article, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = activeArticle.title,
-                                fontFamily = PoppinsFontFamily,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp,
-                                color = SlateText,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "${activeArticle.content.split(Regex("""\s+""")).size} words • ${activeArticle.author}",
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 11.sp,
-                                color = SlateMuted
-                            )
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(10.dp))
-            }
-
-            // Extract Button
-            Button(
-                onClick = { doScrapeAndExtract() },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isScraping && (!useActiveArticle && urlInput.isNotBlank() || useActiveArticle && activeArticle != null),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
-            ) {
-                if (isScraping) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Scraping with Jsoup...", fontFamily = PoppinsFontFamily, fontSize = 13.sp)
-                } else {
-                    Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Scrape & Extract Flashcards", fontFamily = PoppinsFontFamily, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                }
-            }
-
-            if (errorMessage != null) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = errorMessage ?: "",
-                    fontFamily = PoppinsFontFamily,
-                    fontSize = 12.sp,
-                    color = RoseError
-                )
-            }
-
-            if (scrapedInfo != null) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Surface(
-                    color = EmeraldLight,
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, EmeraldBorder)
-                ) {
-                    Text(
-                        text = scrapedInfo ?: "",
-                        fontFamily = PoppinsFontFamily,
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = EmeraldSuccess,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Cards Preview List
-            if (extractedCards.isNotEmpty()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Candidate Flashcards (${selectedIndices.size}/${extractedCards.size})",
-                        fontFamily = PoppinsFontFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        color = SlateText
-                    )
-
-                    TextButton(
-                        onClick = {
-                            selectedIndices = if (selectedIndices.size == extractedCards.size) emptySet() else extractedCards.indices.toSet()
-                        }
-                    ) {
-                        Text(
-                            text = if (selectedIndices.size == extractedCards.size) "Deselect All" else "Select All",
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 11.5.sp,
-                            color = IndigoPrimary
-                        )
-                    }
-                }
-
-                LazyColumn(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(extractedCards.size) { idx ->
-                        val card = extractedCards[idx]
-                        val isSelected = selectedIndices.contains(idx)
-                        Surface(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable {
-                                    selectedIndices = if (isSelected) selectedIndices - idx else selectedIndices + idx
-                                },
-                            color = if (isSelected) IndigoLight.copy(alpha = 0.4f) else Color.White,
-                            border = BorderStroke(1.dp, if (isSelected) IndigoPrimary else SlateBorder),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    // Card type badge
-                                    val (typeLabel, typeColor) = when (card.type) {
-                                        FlashcardType.VOCABULARY_CONTEXT -> "Vocab in Context" to EmeraldSuccess
-                                        FlashcardType.TERM_DEFINITION -> "Term & Definition" to IndigoPrimary
-                                        FlashcardType.CLOZE_DELETION -> "Cloze Blank" to AmberWarning
-                                        FlashcardType.KEY_SENTENCE -> "Key Insight" to SlateText
-                                    }
-                                    Surface(
-                                        color = typeColor.copy(alpha = 0.12f),
-                                        shape = RoundedCornerShape(6.dp)
-                                    ) {
-                                        Text(
-                                            text = typeLabel,
-                                            fontFamily = PoppinsFontFamily,
-                                            fontSize = 10.5.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = typeColor,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                        )
-                                    }
-
-                                    Checkbox(
-                                        checked = isSelected,
-                                        onCheckedChange = { chk ->
-                                            selectedIndices = if (chk) selectedIndices + idx else selectedIndices - idx
-                                        },
-                                        modifier = Modifier.size(20.dp),
-                                        colors = CheckboxDefaults.colors(checkedColor = IndigoPrimary)
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.height(6.dp))
-
-                                Text(
-                                    text = card.word,
-                                    fontFamily = PoppinsFontFamily,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp,
-                                    color = IndigoPrimary
-                                )
-
-                                Spacer(modifier = Modifier.height(2.dp))
-
-                                Text(
-                                    text = card.front,
-                                    fontFamily = PoppinsFontFamily,
-                                    fontSize = 12.sp,
-                                    color = SlateText,
-                                    maxLines = 3,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-
-                                Spacer(modifier = Modifier.height(4.dp))
-
-                                Text(
-                                    text = card.back,
-                                    fontFamily = PoppinsFontFamily,
-                                    fontSize = 11.5.sp,
-                                    color = SlateMuted,
-                                    maxLines = 3,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Save Button
-                Button(
-                    onClick = {
-                        val cardsToSave = extractedCards.filterIndexed { idx, _ -> selectedIndices.contains(idx) }
-                        if (cardsToSave.isNotEmpty()) {
-                            isSaving = true
-                            coroutineScope.launch {
-                                val service = ArticleFlashcardScraperService.getInstance()
-                                service.saveToFlashcardDatabase(context, cardsToSave)
-                                service.saveToVocabularyDatabase(context, cardsToSave)
-                                isSaving = false
-                                onSaved(cardsToSave.size)
-                            }
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !isSaving && selectedIndices.isNotEmpty(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess)
-                ) {
-                    if (isSaving) {
-                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Saving...", fontFamily = PoppinsFontFamily, fontSize = 13.sp)
-                    } else {
-                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Save ${selectedIndices.size} Flashcards", fontFamily = PoppinsFontFamily, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    }
-                }
-            } else {
-                Spacer(modifier = Modifier.weight(1f))
-            }
-        }
-    }
-}
