@@ -172,12 +172,6 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         } else if (activeCourseId.value.isBlank() && current.isNotEmpty()) {
             selectCourse(current.first())
         }
-
-        // Trigger backup refresh so only selected course data is backed up
-        viewModelScope.launch {
-            val uid = _currentUser.value?.userId ?: "1235"
-            repository.backupManager.saveBackupFiles(uid)
-        }
     }
 
     fun selectAllCourses() {
@@ -191,10 +185,6 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         if (activeCourseId.value.isBlank() && allIds.isNotEmpty()) {
             selectCourse(allIds.first())
         }
-        viewModelScope.launch {
-            val uid = _currentUser.value?.userId ?: "1235"
-            repository.backupManager.saveBackupFiles(uid)
-        }
     }
 
     fun deselectAllCourses() {
@@ -206,11 +196,6 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
 
         activeCourseId.value = ""
         coursePrefs.edit().putString("saved_active_course_id", "").apply()
-
-        viewModelScope.launch {
-            val uid = _currentUser.value?.userId ?: "1235"
-            repository.backupManager.saveBackupFiles(uid)
-        }
     }
 
     fun setCourseSelected(courseId: String, selected: Boolean) {
@@ -231,10 +216,6 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
             selectCourse(fallback)
         } else if (activeCourseId.value.isBlank() && current.isNotEmpty()) {
             selectCourse(current.first())
-        }
-        viewModelScope.launch {
-            val uid = _currentUser.value?.userId ?: "1235"
-            repository.backupManager.saveBackupFiles(uid)
         }
     }
 

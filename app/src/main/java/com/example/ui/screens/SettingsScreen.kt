@@ -2214,8 +2214,9 @@ private fun BackupSettingsTab(
                 ) {
                     Icon(Icons.Default.CloudDone, contentDescription = null, tint = EmeraldSuccess, modifier = Modifier.size(24.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Backup Status", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = palette.textPrimary)
-                        Text("Last backup: $lastBackupStr", fontSize = 11.sp, color = palette.textMuted)
+                        Text("Backup & Sync Status", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = palette.textPrimary)
+                        Text("Auto-Backup: Daily at 02:00 AM (রাত ২:০০ টায়)", fontSize = 11.sp, color = IndigoPrimary, fontWeight = FontWeight.Medium)
+                        Text("Last backup: $lastBackupStr", fontSize = 10.sp, color = palette.textMuted)
                     }
                     IconButton(
                         onClick = {
@@ -2225,6 +2226,37 @@ private fun BackupSettingsTab(
                         modifier = Modifier.size(32.dp).clip(CircleShape).background(IndigoLight)
                     ) {
                         Icon(Icons.Default.Save, contentDescription = "Save", tint = IndigoPrimary, modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+        }
+
+        // Informational Notice on Schedule & Deduplication
+        item {
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = IndigoLight.copy(alpha = 0.4f)),
+                border = BorderStroke(1.dp, IndigoPrimary.copy(alpha = 0.2f))
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Default.Schedule, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(18.dp))
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "অটো ব্যাকআপ শিডিউল",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            color = IndigoPrimary
+                        )
+                        Text(
+                            text = "• অটো ব্যাকআপ শুধুমাত্র রাত ০২:০০ AM এ স্বয়ংক্রিয়ভাবে হবে।\n• যেকোনো সময় 'Back up to Drive' বাটনে ক্লিক করে লিংকড ফোল্ডারে ব্যাকআপ করতে পারবেন।\n• রিস্টোরের সময় একই নামের একাধিক কোর্স থাকলে সর্বোচ্চ প্রগ্রেস ওয়ালা কোর্সটি রাখা হবে (কোন কোর্স দুইবার দেখা যাবে না)।",
+                            fontSize = 10.sp,
+                            lineHeight = 14.sp,
+                            color = palette.textSecondary
+                        )
                     }
                 }
             }
@@ -2273,7 +2305,7 @@ private fun BackupSettingsTab(
                         Button(
                             onClick = {
                                 onBackupToDriveDirect()
-                                Toast.makeText(context, "Saved to linked folder", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Backing up to linked Drive folder...", Toast.LENGTH_SHORT).show()
                             },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(10.dp),
@@ -2282,7 +2314,7 @@ private fun BackupSettingsTab(
                         ) {
                             Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Save to Drive", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Back up to Drive", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                         }
 
                         OutlinedButton(

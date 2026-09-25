@@ -229,6 +229,9 @@ class BackupManager(private val context: Context, private val database: AppDatab
             qObj.put("filter1", q.filter1 ?: "")
             qObj.put("filter2", q.filter2 ?: "")
             qObj.put("filter3", q.filter3 ?: "")
+            qObj.put("filter1Label", q.filter1Label ?: "Category")
+            qObj.put("filter2Label", q.filter2Label ?: "Difficulty")
+            qObj.put("filter3Label", q.filter3Label ?: "Source")
             qbArray.put(qObj)
         }
         jsonRoot.put("questionBank", qbArray)
@@ -479,6 +482,9 @@ class BackupManager(private val context: Context, private val database: AppDatab
                 qObj.put("filter1", q.filter1 ?: "")
                 qObj.put("filter2", q.filter2 ?: "")
                 qObj.put("filter3", q.filter3 ?: "")
+                qObj.put("filter1Label", q.filter1Label ?: "Category")
+                qObj.put("filter2Label", q.filter2Label ?: "Difficulty")
+                qObj.put("filter3Label", q.filter3Label ?: "Source")
                 qbArray.put(qObj)
             }
             jsonRoot.put("questionBank", qbArray)
@@ -1213,9 +1219,12 @@ class BackupManager(private val context: Context, private val database: AppDatab
                                         opt4 = o4,
                                         answer = qAns,
                                         explanation = findStr(qObj, "explanation", "Explanation", "exp").ifEmpty { null },
-                                        filter1 = findStr(qObj, "filter1", "filter1Label").ifEmpty { null },
-                                        filter2 = findStr(qObj, "filter2", "filter2Label").ifEmpty { null },
-                                        filter3 = findStr(qObj, "filter3", "filter3Label").ifEmpty { null }
+                                        filter1 = findStr(qObj, "filter1", "cat", "category").ifEmpty { null },
+                                        filter2 = findStr(qObj, "filter2", "diff", "difficulty").ifEmpty { null },
+                                        filter3 = findStr(qObj, "filter3", "src", "source").ifEmpty { null },
+                                        filter1Label = findStr(qObj, "filter1Label", "filter1_label").ifEmpty { "Category" },
+                                        filter2Label = findStr(qObj, "filter2Label", "filter2_label").ifEmpty { "Difficulty" },
+                                        filter3Label = findStr(qObj, "filter3Label", "filter3_label").ifEmpty { "Source" }
                                     )
                                 )
                             }
@@ -1421,29 +1430,6 @@ class BackupManager(private val context: Context, private val database: AppDatab
                 }
             }
 
-            // Clean up any old sample course or Barron's references
-            database.courseDao().deleteCourseById("course_default")
-            database.vocabularyDao().deleteWordsByCourse("course_default")
-            val existing = database.courseDao().getAllCoursesList()
-            existing.filter { it.title.contains("Barron", ignoreCase = true) }.forEach {
-                database.courseDao().deleteCourseById(it.id)
-                database.vocabularyDao().deleteWordsByCourse(it.id)
-            }
-
-            // If words exist but courseId is pointing to course_default or missing, remap to the first restored course
-            if (coursesToInsert.isNotEmpty()) {
-                val validCourseId = coursesToInsert.first().id
-                val remappedWords = wordsToInsert.map { w ->
-                    if (w.courseId == "course_default" || coursesToInsert.none { it.id == w.courseId }) {
-                        w.copy(courseId = validCourseId)
-                    } else {
-                        w
-                    }
-                }
-                wordsToInsert.clear()
-                wordsToInsert.addAll(remappedWords)
-            }
-
             // Restore flagged state if ID matches any flagged word
             if (existingFlaggedMap.isNotEmpty()) {
                 val markedWords = wordsToInsert.map { w ->
@@ -1457,28 +1443,244 @@ class BackupManager(private val context: Context, private val database: AppDatab
                 wordsToInsert.addAll(markedWords)
             }
 
-            val totalRestoredCount = wordsToInsert.size + coursesToInsert.size + articlesToInsert.size + gamesToInsert.size + questionsToInsert.size + archivedToInsert.size
+            // =========================================================================
+            // INTELLIGENT DEDUPLICATION & PROGRESS MERGING
+            // Requirement:
+            // 1. If course name appears multiple times in restore file, keep ONLY ONCE.
+            // 2. The course with HIGHER progress record is kept as winner.
+            // 3. No course should ever appear twice in the app.
+            // 4. Intelligent progress preservation: words and progress from duplicate courses
+            //    are merged safely into the winner course so no data or progress is lost.
+            // =========================================================================
+
+            fun calculateWordProgressScore(w: VocabularyWordEntity): Int {
+                var score = when (w.status.lowercase().trim()) {
+                    "know" -> 100
+                    "confusion" -> 50
+                    "dont_know" -> 25
+                    else -> 0
+                }
+                score += w.timesReviewed * 10
+                score += w.quizCorrectCount * 15
+                if (w.lastQuizStatus.equals("correct", ignoreCase = true)) score += 10
+                else if (w.lastQuizStatus.equals("incorrect", ignoreCase = true)) score += 5
+                return score
+            }
+
+            fun calculateCourseProgressScore(words: List<VocabularyWordEntity>): Int {
+                var score = 0
+                for (w in words) {
+                    score += calculateWordProgressScore(w)
+                    if (w.status.lowercase().trim() != "unrated" || w.timesReviewed > 0 || w.quizCorrectCount > 0) {
+                        score += 30
+                    }
+                }
+                return score
+            }
+
+            // Step 1: Deduplicate courses inside the incoming restore data by course title
+            val rawWordsByCourse = wordsToInsert.groupBy { it.courseId }
+            val coursesGroupedByTitle = coursesToInsert.groupBy { it.title.trim().lowercase() }
+            val deduplicatedIncomingCourses = mutableListOf<CourseEntity>()
+            val incomingIdRemap = mutableMapOf<String, String>() // loserId -> winnerId
+
+            for ((_, groupList) in coursesGroupedByTitle) {
+                if (groupList.size == 1) {
+                    deduplicatedIncomingCourses.add(groupList.first())
+                } else {
+                    // Multiple courses with the exact same title in incoming restore file!
+                    // Select the winner based on higher progress record score
+                    val winner = groupList.maxWithOrNull(compareBy(
+                        { calculateCourseProgressScore(rawWordsByCourse[it.id] ?: emptyList()) },
+                        { (rawWordsByCourse[it.id] ?: emptyList()).size },
+                        { it.createdAt }
+                    )) ?: groupList.first()
+
+                    deduplicatedIncomingCourses.add(winner)
+                    for (loser in groupList) {
+                        if (loser.id != winner.id) {
+                            incomingIdRemap[loser.id] = winner.id
+                        }
+                    }
+                }
+            }
+
+            // Remap words to winner courses and merge duplicate words (preserving higher progress)
+            val wordsGroupedByWinner = mutableMapOf<String, MutableMap<String, VocabularyWordEntity>>()
+            for (w in wordsToInsert) {
+                val targetCourseId = incomingIdRemap[w.courseId] ?: w.courseId
+                val wordMap = wordsGroupedByWinner.getOrPut(targetCourseId) { mutableMapOf() }
+                val normWord = w.word.trim().lowercase()
+                val existingW = wordMap[normWord]
+                if (existingW == null) {
+                    wordMap[normWord] = w.copy(courseId = targetCourseId)
+                } else {
+                    // Same word in duplicate courses: keep the one with higher learning progress!
+                    if (calculateWordProgressScore(w) > calculateWordProgressScore(existingW)) {
+                        wordMap[normWord] = w.copy(id = existingW.id, courseId = targetCourseId)
+                    }
+                }
+            }
+
+            val remappedWordsList = mutableListOf<VocabularyWordEntity>()
+            for ((_, map) in wordsGroupedByWinner) {
+                remappedWordsList.addAll(map.values)
+            }
+
+            // Step 2: Compare with existing courses in the Room database & clean DB duplicates
+            val existingDbCourses = database.courseDao().getAllCoursesList()
+            val existingDbWords = database.vocabularyDao().getAllWordsList()
+            val existingDbWordsByCourse = existingDbWords.groupBy { it.courseId }
+
+            // Deduplicate existing DB courses if any duplicate titles already exist in DB
+            val existingDbByTitle = existingDbCourses.groupBy { it.title.trim().lowercase() }
+            for ((_, dupList) in existingDbByTitle) {
+                if (dupList.size > 1) {
+                    val dbWinner = dupList.maxWithOrNull(compareBy(
+                        { calculateCourseProgressScore(existingDbWordsByCourse[it.id] ?: emptyList()) },
+                        { (existingDbWordsByCourse[it.id] ?: emptyList()).size },
+                        { it.createdAt }
+                    )) ?: dupList.first()
+
+                    for (dbLoser in dupList) {
+                        if (dbLoser.id != dbWinner.id) {
+                            database.courseDao().deleteCourseById(dbLoser.id)
+                            val loserWords = existingDbWordsByCourse[dbLoser.id] ?: emptyList()
+                            val remappedLoserWords = loserWords.map { it.copy(courseId = dbWinner.id) }
+                            database.vocabularyDao().insertWords(remappedLoserWords)
+                        }
+                    }
+                }
+            }
+
+            // Fresh state of DB after DB duplicate cleanup
+            val currentDbCourses = database.courseDao().getAllCoursesList()
+            val currentDbWords = database.vocabularyDao().getAllWordsList()
+            val currentDbWordsByCourse = currentDbWords.groupBy { it.courseId }
+
+            val finalCoursesToInsert = mutableListOf<CourseEntity>()
+            val finalWordsToInsert = mutableListOf<VocabularyWordEntity>()
+            val globalCourseIdRemap = mutableMapOf<String, String>()
+
+            // Compare incoming deduplicated courses with current DB courses
+            for (resCourse in deduplicatedIncomingCourses) {
+                val normTitle = resCourse.title.trim().lowercase()
+                val matchInDb = currentDbCourses.firstOrNull { it.title.trim().lowercase() == normTitle }
+                val incomingCourseWords = remappedWordsList.filter { it.courseId == resCourse.id }
+                val incomingScore = calculateCourseProgressScore(incomingCourseWords)
+
+                if (matchInDb != null) {
+                    // Match found in DB! Compare progress records
+                    val dbWords = currentDbWordsByCourse[matchInDb.id] ?: emptyList()
+                    val dbScore = calculateCourseProgressScore(dbWords)
+
+                    if (dbScore >= incomingScore) {
+                        // DB course has higher or equal progress: preserve DB course ID as sole course!
+                        globalCourseIdRemap[resCourse.id] = matchInDb.id
+                        val dbWordMap = dbWords.associateBy { it.word.trim().lowercase() }.toMutableMap()
+                        for (rw in incomingCourseWords) {
+                            val normW = rw.word.trim().lowercase()
+                            val existingW = dbWordMap[normW]
+                            if (existingW == null) {
+                                finalWordsToInsert.add(rw.copy(courseId = matchInDb.id))
+                            } else {
+                                if (calculateWordProgressScore(rw) > calculateWordProgressScore(existingW)) {
+                                    finalWordsToInsert.add(rw.copy(id = existingW.id, courseId = matchInDb.id))
+                                }
+                            }
+                        }
+                    } else {
+                        // Restored course has higher progress! Restored course replaces lower-progress DB version
+                        database.courseDao().deleteCourseById(matchInDb.id)
+                        database.vocabularyDao().deleteWordsByCourse(matchInDb.id)
+
+                        finalCoursesToInsert.add(resCourse)
+                        globalCourseIdRemap[matchInDb.id] = resCourse.id
+
+                        val restoredWordMap = incomingCourseWords.associateBy { it.word.trim().lowercase() }
+                        for (dbW in dbWords) {
+                            val normW = dbW.word.trim().lowercase()
+                            if (!restoredWordMap.containsKey(normW)) {
+                                finalWordsToInsert.add(dbW.copy(courseId = resCourse.id))
+                            }
+                        }
+                        finalWordsToInsert.addAll(incomingCourseWords)
+                    }
+                } else {
+                    // Brand new unique course
+                    finalCoursesToInsert.add(resCourse)
+                    finalWordsToInsert.addAll(incomingCourseWords)
+                }
+            }
+
+            // Step 3: Articles Remap & Deduplication
+            val finalArticlesToInsert = mutableListOf<ArticleEntity>()
+            val articlesByTitle = articlesToInsert.groupBy { it.title.trim().lowercase() }
+            for ((_, artGroup) in articlesByTitle) {
+                val bestArticle = artGroup.maxByOrNull { it.content.length } ?: artGroup.first()
+                val targetCourseId = globalCourseIdRemap[bestArticle.courseId]
+                    ?: incomingIdRemap[bestArticle.courseId]
+                    ?: bestArticle.courseId
+                finalArticlesToInsert.add(bestArticle.copy(courseId = targetCourseId))
+            }
+
+            // Step 4: Question Bank items deduplication by question text
+            val finalQuestionsToInsert = mutableListOf<QuestionBankEntity>()
+            val questionsByText = questionsToInsert.groupBy { it.question.trim().lowercase() }
+            for ((_, qGroup) in questionsByText) {
+                val bestQ = qGroup.maxByOrNull {
+                    (it.explanation ?: "").length + it.opt1.length + it.opt2.length + it.opt3.length + it.opt4.length
+                } ?: qGroup.first()
+                finalQuestionsToInsert.add(bestQ)
+            }
+
+            // Step 5: Clean up course_default if valid restored courses exist
+            if (finalCoursesToInsert.isNotEmpty() || currentDbCourses.isNotEmpty()) {
+                database.courseDao().deleteCourseById("course_default")
+                database.vocabularyDao().deleteWordsByCourse("course_default")
+                val fallbackCourseId = finalCoursesToInsert.firstOrNull()?.id
+                    ?: currentDbCourses.firstOrNull()?.id
+                    ?: "course_1"
+
+                val safeWords = finalWordsToInsert.map { w ->
+                    if (w.courseId == "course_default") w.copy(courseId = fallbackCourseId) else w
+                }
+                finalWordsToInsert.clear()
+                finalWordsToInsert.addAll(safeWords)
+            }
+
+            val totalRestoredCount = finalWordsToInsert.size + finalCoursesToInsert.size + finalArticlesToInsert.size + gamesToInsert.size + finalQuestionsToInsert.size + archivedToInsert.size
             if (totalRestoredCount > 0) {
-                if (coursesToInsert.isNotEmpty()) {
-                    database.courseDao().insertCourses(coursesToInsert)
+                if (finalCoursesToInsert.isNotEmpty()) {
+                    database.courseDao().insertCourses(finalCoursesToInsert)
                 }
-                if (wordsToInsert.isNotEmpty()) {
-                    database.vocabularyDao().insertWords(wordsToInsert)
+                if (finalWordsToInsert.isNotEmpty()) {
+                    database.vocabularyDao().insertWords(finalWordsToInsert)
                 }
-                if (articlesToInsert.isNotEmpty()) {
-                    database.articleDao().insertArticles(articlesToInsert)
+                if (finalArticlesToInsert.isNotEmpty()) {
+                    database.articleDao().insertArticles(finalArticlesToInsert)
                 }
                 if (gamesToInsert.isNotEmpty()) {
                     database.gamePracticeDao().insertItems(gamesToInsert)
                 }
-                if (questionsToInsert.isNotEmpty()) {
-                    database.questionBankDao().insertQuestions(questionsToInsert)
+                if (finalQuestionsToInsert.isNotEmpty()) {
+                    database.questionBankDao().insertQuestions(finalQuestionsToInsert)
                 }
                 if (archivedToInsert.isNotEmpty()) {
                     database.archivedWordProgressDao().insertAll(archivedToInsert)
                 }
 
-                // Re-sync backup files on device
+                // Update course preference selection to ensure active course exists
+                val coursePrefs = context.getSharedPreferences("memorizer_course_prefs", Context.MODE_PRIVATE)
+                val allRemainingCourses = database.courseDao().getAllCoursesList()
+                val allRemainingIds = allRemainingCourses.map { it.id }.toSet()
+                val currentActive = coursePrefs.getString("saved_active_course_id", "")
+                if (currentActive.isNullOrBlank() || currentActive !in allRemainingIds) {
+                    val newActive = allRemainingCourses.firstOrNull()?.id ?: ""
+                    coursePrefs.edit().putString("saved_active_course_id", newActive).apply()
+                }
+
+                // Auto-sync backup file on disk locally
                 saveBackupFiles(userId)
                 Result.success(totalRestoredCount)
             } else {

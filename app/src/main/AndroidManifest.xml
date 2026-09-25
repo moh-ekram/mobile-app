@@ -55,6 +55,10 @@
             android:exported="false" />
 
         <receiver
+            android:name=".data.backup.AutoBackupReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name=".notification.BootReceiver"
             android:exported="true">
             <intent-filter>

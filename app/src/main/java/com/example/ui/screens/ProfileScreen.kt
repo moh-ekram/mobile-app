@@ -652,7 +652,7 @@ fun ProfileScreen(
                             ) {
                                 Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Backup Drive", fontFamily = PoppinsFontFamily, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                Text("Back up to Drive", fontFamily = PoppinsFontFamily, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             }
 
                             OutlinedButton(

@@ -40,5 +40,12 @@ class MemorizerApplication : Application() {
         } catch (e: Exception) {
             Log.e("MemorizerApplication", "Failed to create notification channel", e)
         }
+
+        try {
+            // Guarantee automatic backup runs strictly at 02:00 AM daily
+            com.example.data.backup.AutoBackupScheduler.scheduleDaily2AMBackup(this)
+        } catch (e: Exception) {
+            Log.e("MemorizerApplication", "Failed to schedule 02:00 AM auto backup", e)
+        }
     }
 }

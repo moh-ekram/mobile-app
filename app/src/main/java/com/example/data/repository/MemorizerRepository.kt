@@ -372,7 +372,7 @@ class MemorizerRepository(
             quizTotalScore = current.quizTotalScore + score
         )
         database.userProgressDao().insertOrUpdate(updated)
-        backupManager.saveBackupFiles(userId)
+        // Auto-backup only occurs strictly at 02:00 AM as scheduled
         supabaseService.syncProgressRecord(updated)
     }
 
@@ -384,15 +384,11 @@ class MemorizerRepository(
             knowCount = words.count { it.status == "know" },
             confusionCount = words.count { it.status == "confusion" },
             dontKnowCount = words.count { it.status == "dont_know" },
-            unratedCount = words.count { it.status == "unrated" },
-            lastBackupTimestamp = System.currentTimeMillis()
+            unratedCount = words.count { it.status == "unrated" }
         )
         database.userProgressDao().insertOrUpdate(updated)
 
-        // Automatic device file backup
-        backupManager.saveBackupFiles(userId)
-
-        // Supabase cloud sync
+        // Supabase cloud sync (file backup runs strictly at 02:00 AM or on manual user request)
         supabaseService.syncProgressRecord(updated)
     }
 
