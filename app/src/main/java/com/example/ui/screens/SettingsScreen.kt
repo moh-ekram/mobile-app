@@ -11,6 +11,7 @@ import android.os.Build
 import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
@@ -32,6 +33,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -124,6 +126,10 @@ fun SettingsScreen(
     onUpdateWord: (VocabularyWordEntity) -> Unit = {},
     onUpdateCourse: (String, String, String?) -> Unit = { _, _, _ -> },
     onDeleteWord: (String) -> Unit = {},
+    onDeleteWords: (List<String>) -> Unit = {},
+    onUpdateGroupForWords: (List<String>, String) -> Unit = { _, _ -> },
+    onMoveWordsToCourse: (List<String>, String) -> Unit = { _, _ -> },
+    onUpdateStatusForWords: (List<String>, String) -> Unit = { _, _ -> },
     onReportWord: (String, Boolean, String?) -> Unit = { _, _, _ -> },
     onDeleteGame: (String) -> Unit = {},
     onDeleteGamesBySection: (String) -> Unit = {},
@@ -138,6 +144,8 @@ fun SettingsScreen(
     isSyncingQB: Boolean = false,
     onImportQBFromUrl: (String, Boolean) -> Unit = { _, _ -> },
     onImportQBBytes: (ByteArray, String, Boolean) -> Unit = { _, _, _ -> },
+    onExportQBProgressToUri: (Uri) -> Unit = {},
+    onRestoreQBProgress: (ByteArray) -> Unit = {},
     onResetData: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -233,6 +241,27 @@ fun SettingsScreen(
         if (uri != null) onRestoreFromUri(uri)
     }
 
+    val qbProgressExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri: Uri? ->
+        if (uri != null) onExportQBProgressToUri(uri)
+    }
+
+    val qbProgressRestoreLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                if (bytes != null && bytes.isNotEmpty()) {
+                    onRestoreQBProgress(bytes)
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "Failed to read file: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     // Settings tabs definition
     val tabs = listOf(
         SettingsTabItem("General", Icons.Default.Tune),
@@ -325,6 +354,7 @@ fun SettingsScreen(
                     onToggleFocusMode = onToggleFocusMode,
                     onToggleHaptic = onToggleHaptic,
                     onEditProfile = { showEditProfileDialog = true },
+                    onUpdateProfile = onUpdateProfile,
                     onLogout = onLogout
                 )
                 1 -> CoursesSettingsTab(
@@ -348,6 +378,10 @@ fun SettingsScreen(
                     onAddWordClick = { showAddWordDialog = true },
                     onEditWordClick = { wordBeingEdited = it },
                     onDeleteWord = onDeleteWord,
+                    onDeleteWords = onDeleteWords,
+                    onUpdateGroupForWords = onUpdateGroupForWords,
+                    onMoveWordsToCourse = onMoveWordsToCourse,
+                    onUpdateStatusForWords = onUpdateStatusForWords,
                     onReportWord = onReportWord,
                     onDeleteQuestion = onDeleteQuestion,
                     onClearAllQB = onClearAllQB,
@@ -376,7 +410,9 @@ fun SettingsScreen(
                     onCloudSync = onCloudSync,
                     onDirectPasteRestore = { showRestoreDialog = true },
                     onResetData = { showResetConfirmDialog = true },
-                    onImportQBClick = { showQbSyncDialog = true }
+                    onImportQBClick = { showQbSyncDialog = true },
+                    onExportQBProgress = { qbProgressExportLauncher.launch("qb_progress_${System.currentTimeMillis()}.json") },
+                    onRestoreQBProgress = { qbProgressRestoreLauncher.launch(arrayOf("application/json", "text/*", "*/*")) }
                 )
             }
         }
@@ -472,14 +508,16 @@ fun SettingsScreen(
     if (showRestoreDialog) {
         AlertDialog(
             onDismissRequest = { showRestoreDialog = false },
-            title = { Text("Paste Backup JSON", fontWeight = FontWeight.Bold) },
+            shape = RoundedCornerShape(20.dp),
+            title = { Text("Paste JSON Backup", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
             text = {
                 OutlinedTextField(
                     value = restoreText,
                     onValueChange = { restoreText = it },
-                    label = { Text("JSON Data") },
-                    modifier = Modifier.fillMaxWidth().height(180.dp),
-                    textStyle = LocalTextStyle.current.copy(fontSize = 11.sp)
+                    placeholder = { Text("Paste JSON string here...", fontSize = 11.sp) },
+                    modifier = Modifier.fillMaxWidth().height(160.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    textStyle = LocalTextStyle.current.copy(fontSize = 11.5.sp)
                 )
             },
             confirmButton = {
@@ -491,6 +529,7 @@ fun SettingsScreen(
                             restoreText = ""
                         }
                     },
+                    shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
                 ) {
                     Text("Restore")
@@ -505,8 +544,9 @@ fun SettingsScreen(
     if (showResetConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showResetConfirmDialog = false },
-            title = { Text("Reset to Sample Data", fontWeight = FontWeight.Bold, color = Color(0xFFE11D48)) },
-            text = { Text("This will reset all courses, vocabulary, and games back to default sample content.") },
+            shape = RoundedCornerShape(20.dp),
+            title = { Text("Reset to Sample Data", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFFE11D48)) },
+            text = { Text("Reset all courses, words, and games back to default sample content? Custom progress will be replaced.", fontSize = 12.5.sp) },
             confirmButton = {
                 Button(
                     onClick = {
@@ -514,6 +554,7 @@ fun SettingsScreen(
                         showResetConfirmDialog = false
                         Toast.makeText(context, "Data reset to sample", Toast.LENGTH_SHORT).show()
                     },
+                    shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48))
                 ) {
                     Text("Reset")
@@ -542,92 +583,252 @@ private fun GeneralSettingsTab(
     onToggleFocusMode: (Boolean) -> Unit,
     onToggleHaptic: (Boolean) -> Unit,
     onEditProfile: () -> Unit,
+    onUpdateProfile: (String, String?, String, Int, String) -> Unit,
     onLogout: () -> Unit
 ) {
     val palette = LocalAppPalette.current
 
+    val photoPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            onUpdateProfile(
+                user?.displayName ?: "User #1235",
+                uri.toString(),
+                user?.targetExam ?: "GRE / IELTS",
+                user?.dailyWordGoal ?: 20,
+                user?.bio ?: ""
+            )
+        }
+    }
+
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // User Profile Header Card
+        // Centered Beautiful Minimal Profile Section
         item {
             Card(
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = palette.surface),
-                border = BorderStroke(1.dp, palette.border)
+                border = BorderStroke(1.dp, palette.border),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("centered_profile_section")
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 20.dp, horizontal = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    // Centered Profile Avatar with Photo Picker overlay
                     Box(
-                        modifier = Modifier
-                            .size(52.dp)
-                            .clip(CircleShape)
-                            .background(IndigoLight)
-                            .border(1.5.dp, IndigoPrimary, CircleShape),
+                        modifier = Modifier.size(94.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (!user?.avatarUri.isNullOrBlank()) {
-                            AsyncImage(
-                                model = user?.avatarUri,
-                                contentDescription = "Avatar",
+                        Surface(
+                            modifier = Modifier
+                                .size(86.dp)
+                                .clip(CircleShape)
+                                .clickable {
+                                    photoPicker.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                    )
+                                },
+                            shape = CircleShape,
+                            color = if (palette.isDark) Color(0xFF1E293B) else IndigoLight,
+                            border = BorderStroke(2.dp, IndigoPrimary)
+                        ) {
+                            Box(
                                 modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
-                        } else {
-                            Text(
-                                text = (user?.displayName?.take(1) ?: "M").uppercase(),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 22.sp,
-                                color = IndigoPrimary
-                            )
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (!user?.avatarUri.isNullOrBlank()) {
+                                    AsyncImage(
+                                        model = user.avatarUri,
+                                        contentDescription = "Profile Photo",
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                } else {
+                                    Text(
+                                        text = (user?.displayName?.take(1) ?: "U").uppercase(),
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 32.sp,
+                                        color = IndigoPrimary
+                                    )
+                                }
+                            }
+                        }
+
+                        // Floating Camera Badge Button
+                        Surface(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .size(30.dp)
+                                .clickable {
+                                    photoPicker.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                    )
+                                },
+                            shape = CircleShape,
+                            color = IndigoPrimary,
+                            border = BorderStroke(2.dp, palette.surface),
+                            shadowElevation = 3.dp
+                        ) {
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                Icon(
+                                    imageVector = Icons.Default.CameraAlt,
+                                    contentDescription = "Add or change profile picture",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
                         }
                     }
 
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(
-                                text = user?.displayName ?: "Learner",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp,
-                                color = palette.textPrimary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (palette.isDark) Color(0xFF312E81) else IndigoLight
+                    // Display Name
+                    Text(
+                        text = user?.displayName ?: "Learner",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        color = palette.textPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    // Target Exam & Goal Badges Centered
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (palette.isDark) Color(0xFF312E81) else IndigoLight
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
+                                Icon(
+                                    imageVector = Icons.Default.School,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(13.dp),
+                                    tint = IndigoPrimary
+                                )
                                 Text(
-                                    text = user?.targetExam ?: "General",
-                                    fontSize = 10.sp,
+                                    text = user?.targetExam ?: "GRE / IELTS",
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = IndigoPrimary,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    color = IndigoPrimary
                                 )
                             }
                         }
 
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.TrackChanges,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(13.dp),
+                                    tint = palette.textMuted
+                                )
+                                Text(
+                                    text = "${user?.dailyWordGoal ?: 20} words/day",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = palette.textMuted
+                                )
+                            }
+                        }
+                    }
+
+                    if (!user?.bio.isNullOrBlank()) {
                         Text(
-                            text = if (user?.bio?.isNotBlank() == true) user.bio else "Goal: ${user?.dailyWordGoal ?: 20} words/day",
-                            fontSize = 11.sp,
+                            text = user?.bio ?: "",
+                            fontSize = 12.sp,
                             color = palette.textMuted,
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
 
-                    IconButton(
-                        onClick = onEditProfile,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(palette.background)
+                    // Centered Action Buttons: Add/Change Photo & Edit Profile
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(top = 4.dp)
                     ) {
-                        Icon(Icons.Default.Edit, contentDescription = "Edit Profile", tint = IndigoPrimary, modifier = Modifier.size(16.dp))
+                        OutlinedButton(
+                            onClick = {
+                                photoPicker.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            border = BorderStroke(1.dp, palette.border),
+                            modifier = Modifier.height(34.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (user?.avatarUri.isNullOrBlank()) Icons.Default.AddPhotoAlternate else Icons.Default.FlipCameraIos,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = IndigoPrimary
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (user?.avatarUri.isNullOrBlank()) "Add Photo" else "Change Photo",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = IndigoPrimary
+                            )
+                        }
+
+                        Button(
+                            onClick = onEditProfile,
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                            modifier = Modifier.height(34.dp)
+                        ) {
+                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Edit Profile", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+
+                    // Photo backup status note
+                    if (!user?.avatarUri.isNullOrBlank()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.padding(top = 2.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = EmeraldSuccess,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Text(
+                                text = "Photo backed up locally & cloud-ready",
+                                fontSize = 10.sp,
+                                color = palette.textMuted
+                            )
+                        }
                     }
                 }
             }
@@ -741,7 +942,8 @@ private fun SwipeableCourseCard(
     palette: AppPalette,
     onClick: () -> Unit,
     onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onManageWords: () -> Unit = {}
 ) {
     val coroutineScope = rememberCoroutineScope()
     val offsetX = remember { Animatable(0f) }
@@ -860,6 +1062,26 @@ private fun SwipeableCourseCard(
                         }
                     }
                 }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    FilledTonalButton(
+                        onClick = onManageWords,
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = IndigoLight,
+                            contentColor = IndigoPrimary
+                        ),
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Icon(Icons.Default.Translate, contentDescription = null, modifier = Modifier.size(13.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Words", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
             }
         }
     }
@@ -890,6 +1112,10 @@ private fun CoursesSettingsTab(
     onAddWordClick: () -> Unit,
     onEditWordClick: (VocabularyWordEntity) -> Unit,
     onDeleteWord: (String) -> Unit,
+    onDeleteWords: (List<String>) -> Unit,
+    onUpdateGroupForWords: (List<String>, String) -> Unit,
+    onMoveWordsToCourse: (List<String>, String) -> Unit,
+    onUpdateStatusForWords: (List<String>, String) -> Unit,
     onReportWord: (String, Boolean, String?) -> Unit,
     onDeleteQuestion: (String) -> Unit,
     onClearAllQB: () -> Unit,
@@ -901,9 +1127,53 @@ private fun CoursesSettingsTab(
     var wordSearchQuery by remember { mutableStateOf("") }
     var qbSearchQuery by remember { mutableStateOf("") }
     var showClearAllQBConfirm by remember { mutableStateOf(false) }
-    var selectedCourseFilterForWords by remember { mutableStateOf("all") }
+    var selectedCourseFilterForWords by remember(activeCourseId, courses) {
+        mutableStateOf(if (activeCourseId.isNotBlank() && courses.any { it.id == activeCourseId }) activeCourseId else "all")
+    }
+    var selectedGroupFilterForWords by remember { mutableStateOf("all") }
     var selectedStatusFilters by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var selectedWordIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var showBulkEditDialog by remember { mutableStateOf(false) }
+    var showBulkDeleteConfirm by remember { mutableStateOf(false) }
+    var showDeleteGroupConfirm by remember { mutableStateOf(false) }
     var courseToDelete by remember { mutableStateOf<CourseEntity?>(null) }
+    var courseDropdownExpanded by remember { mutableStateOf(false) }
+    var groupDropdownExpanded by remember { mutableStateOf(false) }
+
+    val wordsInCourse = remember(words, selectedCourseFilterForWords) {
+        if (selectedCourseFilterForWords == "all") words
+        else words.filter { it.courseId == selectedCourseFilterForWords }
+    }
+
+    val availableGroups = remember(wordsInCourse) {
+        wordsInCourse.mapNotNull { it.group.takeIf { g -> g.isNotBlank() } }
+            .distinct()
+            .sortedWith(compareBy({ it.toIntOrNull() ?: Int.MAX_VALUE }, { it }))
+    }
+
+    LaunchedEffect(availableGroups, selectedGroupFilterForWords) {
+        if (selectedGroupFilterForWords != "all" && selectedGroupFilterForWords !in availableGroups) {
+            selectedGroupFilterForWords = "all"
+        }
+    }
+
+    val filteredWords = remember(wordsInCourse, selectedGroupFilterForWords, wordSearchQuery, selectedStatusFilters) {
+        wordsInCourse.filter { word ->
+            val groupMatch = selectedGroupFilterForWords == "all" || word.group == selectedGroupFilterForWords
+            val textMatch = wordSearchQuery.isBlank() ||
+                word.word.contains(wordSearchQuery, ignoreCase = true) ||
+                word.meaning.contains(wordSearchQuery, ignoreCase = true) ||
+                word.group.contains(wordSearchQuery, ignoreCase = true) ||
+                (word.synonyms?.contains(wordSearchQuery, ignoreCase = true) == true)
+            val statusMatch = selectedStatusFilters.isEmpty() || selectedStatusFilters.any { filter ->
+                when (filter) {
+                    "flagged" -> word.isReported
+                    else -> word.status.equals(filter, ignoreCase = true)
+                }
+            }
+            groupMatch && textMatch && statusMatch
+        }
+    }
 
     if (showClearAllQBConfirm) {
         AlertDialog(
@@ -984,6 +1254,104 @@ private fun CoursesSettingsTab(
             },
             dismissButton = {
                 TextButton(onClick = { courseToDelete = null }) {
+                    Text("Cancel", fontSize = 12.sp)
+                }
+            }
+        )
+    }
+
+    // Bulk Edit Dialog
+    if (showBulkEditDialog && selectedWordIds.isNotEmpty()) {
+        CompactBulkEditModal(
+            selectedCount = selectedWordIds.size,
+            courses = courses,
+            availableGroups = availableGroups,
+            onDismiss = { showBulkEditDialog = false },
+            onApply = { newGroup, newCourseId, newStatus ->
+                val idsList = selectedWordIds.toList()
+                if (!newGroup.isNullOrBlank()) {
+                    onUpdateGroupForWords(idsList, newGroup)
+                }
+                if (!newCourseId.isNullOrBlank()) {
+                    onMoveWordsToCourse(idsList, newCourseId)
+                }
+                if (!newStatus.isNullOrBlank()) {
+                    onUpdateStatusForWords(idsList, newStatus)
+                }
+                selectedWordIds = emptySet()
+                showBulkEditDialog = false
+            }
+        )
+    }
+
+    // Bulk Delete Confirmation Dialog
+    if (showBulkDeleteConfirm && selectedWordIds.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { showBulkDeleteConfirm = false },
+            title = {
+                Text("Delete ${selectedWordIds.size} Words?", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            },
+            text = {
+                Text(
+                    "Are you sure you want to permanently delete these ${selectedWordIds.size} selected words from the course? This action cannot be undone.",
+                    fontSize = 12.sp,
+                    color = palette.textSecondary
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val idsList = selectedWordIds.toList()
+                        showBulkDeleteConfirm = false
+                        selectedWordIds = emptySet()
+                        onDeleteWords(idsList)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48)),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Delete (${selectedWordIds.size})", fontSize = 12.sp, color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBulkDeleteConfirm = false }) {
+                    Text("Cancel", fontSize = 12.sp)
+                }
+            }
+        )
+    }
+
+    // Delete Group Confirmation Dialog
+    if (showDeleteGroupConfirm && selectedGroupFilterForWords != "all") {
+        val wordsInThisGroup = filteredWords.filter { it.group == selectedGroupFilterForWords }
+        AlertDialog(
+            onDismissRequest = { showDeleteGroupConfirm = false },
+            title = {
+                Text("Delete Group $selectedGroupFilterForWords?", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            },
+            text = {
+                Text(
+                    "Are you sure you want to delete all ${wordsInThisGroup.size} words in Group $selectedGroupFilterForWords? This will permanently remove the entire group.",
+                    fontSize = 12.sp,
+                    color = palette.textSecondary
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val idsList = wordsInThisGroup.map { it.id }
+                        showDeleteGroupConfirm = false
+                        selectedWordIds = selectedWordIds - idsList.toSet()
+                        selectedGroupFilterForWords = "all"
+                        onDeleteWords(idsList)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48)),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Delete All ${wordsInThisGroup.size} Words", fontSize = 12.sp, color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteGroupConfirm = false }) {
                     Text("Cancel", fontSize = 12.sp)
                 }
             }
@@ -1106,20 +1474,34 @@ private fun CoursesSettingsTab(
                         onSelectCourse(course.id)
                     },
                     onEdit = { onEditCourseClick(course) },
-                    onDelete = { courseToDelete = course }
+                    onDelete = { courseToDelete = course },
+                    onManageWords = {
+                        selectedCourseFilterForWords = course.id
+                        selectedGroupFilterForWords = "all"
+                        selectedWordIds = emptySet()
+                        contentSubView = "words"
+                    }
                 )
             }
         }
 
         // Sub-View: WORDS
         if (contentSubView == "words") {
+            // Header: Title & Add Word Button
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Vocabulary", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = palette.textPrimary)
+                    Column {
+                        Text("Course Vocabulary", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = palette.textPrimary)
+                        Text(
+                            text = "${filteredWords.size} words listed" + if (selectedGroupFilterForWords != "all") " (Group $selectedGroupFilterForWords)" else "",
+                            fontSize = 11.sp,
+                            color = palette.textMuted
+                        )
+                    }
                     Button(
                         onClick = onAddWordClick,
                         shape = RoundedCornerShape(10.dp),
@@ -1134,20 +1516,243 @@ private fun CoursesSettingsTab(
                 }
             }
 
+            // Dropdown Filter Row (Course Dropdown & Group Dropdown)
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // 1. Course Filter Dropdown
+                    val currentCourse = courses.firstOrNull { it.id == selectedCourseFilterForWords }
+                    val courseTitle = if (selectedCourseFilterForWords == "all") "All Courses" else (currentCourse?.title ?: "Select Course")
+                    Box(modifier = Modifier.weight(1f)) {
+                        Surface(
+                            onClick = { courseDropdownExpanded = true },
+                            shape = RoundedCornerShape(10.dp),
+                            color = palette.surface,
+                            border = BorderStroke(1.dp, if (selectedCourseFilterForWords != "all") IndigoPrimary else palette.border),
+                            modifier = Modifier.fillMaxWidth().height(42.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(
+                                        Icons.Default.School,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(15.dp),
+                                        tint = if (selectedCourseFilterForWords != "all") IndigoPrimary else palette.textMuted
+                                    )
+                                    Text(
+                                        text = courseTitle,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = if (selectedCourseFilterForWords != "all") FontWeight.Bold else FontWeight.Medium,
+                                        color = if (selectedCourseFilterForWords != "all") IndigoPrimary else palette.textPrimary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = palette.textMuted)
+                            }
+                        }
+
+                        DropdownMenu(
+                            expanded = courseDropdownExpanded,
+                            onDismissRequest = { courseDropdownExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        if (selectedCourseFilterForWords == "all") {
+                                            Icon(Icons.Default.Check, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(14.dp))
+                                        }
+                                        Text("All Courses (${words.size})", fontSize = 12.sp, fontWeight = if (selectedCourseFilterForWords == "all") FontWeight.Bold else FontWeight.Normal)
+                                    }
+                                },
+                                onClick = {
+                                    selectedCourseFilterForWords = "all"
+                                    selectedWordIds = emptySet()
+                                    courseDropdownExpanded = false
+                                }
+                            )
+                            HorizontalDivider(color = palette.border)
+                            courses.forEach { course ->
+                                val count = words.count { it.courseId == course.id }
+                                val isSelected = selectedCourseFilterForWords == course.id
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            if (isSelected) {
+                                                Icon(Icons.Default.Check, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(14.dp))
+                                            }
+                                            Text("${course.title} ($count)", fontSize = 12.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
+                                        }
+                                    },
+                                    onClick = {
+                                        selectedCourseFilterForWords = course.id
+                                        selectedWordIds = emptySet()
+                                        courseDropdownExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // 2. Group Filter Dropdown
+                    val groupTitle = if (selectedGroupFilterForWords == "all") "All Groups" else "Group $selectedGroupFilterForWords"
+                    Box(modifier = Modifier.weight(1f)) {
+                        Surface(
+                            onClick = { groupDropdownExpanded = true },
+                            shape = RoundedCornerShape(10.dp),
+                            color = palette.surface,
+                            border = BorderStroke(1.dp, if (selectedGroupFilterForWords != "all") IndigoPrimary else palette.border),
+                            modifier = Modifier.fillMaxWidth().height(42.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Layers,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(15.dp),
+                                        tint = if (selectedGroupFilterForWords != "all") IndigoPrimary else palette.textMuted
+                                    )
+                                    Text(
+                                        text = groupTitle,
+                                        fontSize = 11.5.sp,
+                                        fontWeight = if (selectedGroupFilterForWords != "all") FontWeight.Bold else FontWeight.Medium,
+                                        color = if (selectedGroupFilterForWords != "all") IndigoPrimary else palette.textPrimary,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = palette.textMuted)
+                            }
+                        }
+
+                        DropdownMenu(
+                            expanded = groupDropdownExpanded,
+                            onDismissRequest = { groupDropdownExpanded = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        if (selectedGroupFilterForWords == "all") {
+                                            Icon(Icons.Default.Check, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(14.dp))
+                                        }
+                                        Text("All Groups (${wordsInCourse.size})", fontSize = 12.sp, fontWeight = if (selectedGroupFilterForWords == "all") FontWeight.Bold else FontWeight.Normal)
+                                    }
+                                },
+                                onClick = {
+                                    selectedGroupFilterForWords = "all"
+                                    selectedWordIds = emptySet()
+                                    groupDropdownExpanded = false
+                                }
+                            )
+                            HorizontalDivider(color = palette.border)
+                            availableGroups.forEach { grp ->
+                                val count = wordsInCourse.count { it.group == grp }
+                                val isSelected = selectedGroupFilterForWords == grp
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            if (isSelected) {
+                                                Icon(Icons.Default.Check, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(14.dp))
+                                            }
+                                            Text("Group $grp ($count words)", fontSize = 12.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
+                                        }
+                                    },
+                                    onClick = {
+                                        selectedGroupFilterForWords = grp
+                                        selectedWordIds = emptySet()
+                                        groupDropdownExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Quick Group Filter Horizontal Chips
+            if (availableGroups.isNotEmpty()) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        FilterChip(
+                            selected = selectedGroupFilterForWords == "all",
+                            onClick = {
+                                selectedGroupFilterForWords = "all"
+                                selectedWordIds = emptySet()
+                            },
+                            label = { Text("All (${wordsInCourse.size})", fontSize = 10.5.sp) },
+                            shape = CircleShape,
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = IndigoPrimary,
+                                selectedLabelColor = Color.White
+                            ),
+                            modifier = Modifier.height(28.dp)
+                        )
+                        availableGroups.forEach { grp ->
+                            val count = wordsInCourse.count { it.group == grp }
+                            val isSelected = selectedGroupFilterForWords == grp
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = {
+                                    selectedGroupFilterForWords = if (isSelected) "all" else grp
+                                    selectedWordIds = emptySet()
+                                },
+                                label = { Text("Group $grp ($count)", fontSize = 10.5.sp) },
+                                shape = CircleShape,
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = IndigoPrimary,
+                                    selectedLabelColor = Color.White
+                                ),
+                                modifier = Modifier.height(28.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
             // Search query
             item {
                 OutlinedTextField(
                     value = wordSearchQuery,
                     onValueChange = { wordSearchQuery = it },
-                    placeholder = { Text("Search word or meaning...", fontSize = 11.sp) },
+                    placeholder = { Text("Search word, meaning, or group...", fontSize = 11.sp) },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                    trailingIcon = {
+                        if (wordSearchQuery.isNotEmpty()) {
+                            IconButton(onClick = { wordSearchQuery = "" }, modifier = Modifier.size(24.dp)) {
+                                Icon(Icons.Default.Close, contentDescription = "Clear", modifier = Modifier.size(14.dp))
+                            }
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth().height(46.dp),
                     shape = RoundedCornerShape(10.dp),
                     textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
                 )
             }
 
-            // Word Status Filter with Icons Only (No text, No flagged option)
+            // Word Status Filter with Icons Only
             item {
                 val wordFilterOptions = listOf(
                     Triple("all", "All", Icons.Default.DoneAll),
@@ -1201,89 +1806,264 @@ private fun CoursesSettingsTab(
                 }
             }
 
-            val filteredWords = words.filter { word ->
-                val courseMatch = selectedCourseFilterForWords == "all" || word.courseId == selectedCourseFilterForWords
-                val textMatch = wordSearchQuery.isBlank() || word.word.contains(wordSearchQuery, ignoreCase = true) || word.meaning.contains(wordSearchQuery, ignoreCase = true)
-                val statusMatch = selectedStatusFilters.isEmpty() || selectedStatusFilters.any { filter ->
-                    when (filter) {
-                        "flagged" -> word.isReported
-                        else -> word.status.equals(filter, ignoreCase = true)
-                    }
-                }
-                courseMatch && textMatch && statusMatch
-            }.take(80)
+            // Bulk Action Toolbar Bar
+            item {
+                val allFilteredIds = remember(filteredWords) { filteredWords.map { it.id }.toSet() }
+                val areAllSelected = filteredWords.isNotEmpty() && allFilteredIds.all { it in selectedWordIds }
 
-            items(filteredWords, key = { it.id }) { word ->
-                Card(
-                    shape = RoundedCornerShape(10.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (word.isReported) (if (palette.isDark) Color(0xFF451A1A) else Color(0xFFFFF1F2)) else palette.surface
-                    ),
-                    border = BorderStroke(
-                        if (word.isReported) 1.5.dp else 1.dp,
-                        if (word.isReported) Color(0xFFF43F5E) else palette.border
-                    )
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (selectedWordIds.isNotEmpty()) IndigoPrimary.copy(alpha = 0.08f) else palette.surface,
+                    border = BorderStroke(1.dp, if (selectedWordIds.isNotEmpty()) IndigoPrimary.copy(alpha = 0.5f) else palette.border),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(10.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(word.word, fontWeight = FontWeight.Bold, fontSize = 13.sp, color = palette.textPrimary)
-                                if (!word.synonyms.isNullOrBlank()) {
-                                    Text("(${word.synonyms})", fontSize = 10.sp, color = palette.textMuted, maxLines = 1)
-                                }
-                                if (word.isReported) {
-                                    Surface(
-                                        shape = RoundedCornerShape(4.dp),
-                                        color = Color(0xFFFEE2E2),
-                                        border = BorderStroke(0.5.dp, Color(0xFFEF4444))
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(2.dp)
-                                        ) {
-                                            Icon(Icons.Default.Flag, contentDescription = "Flagged", tint = Color(0xFFE11D48), modifier = Modifier.size(10.dp))
-                                            Text("Flagged", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE11D48))
-                                        }
-                                    }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.clickable {
+                                selectedWordIds = if (areAllSelected) {
+                                    selectedWordIds - allFilteredIds
+                                } else {
+                                    selectedWordIds + allFilteredIds
                                 }
                             }
-                            Text(word.meaning, fontSize = 11.sp, color = palette.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            if (word.isReported && !word.reportReason.isNullOrBlank()) {
-                                Text(
-                                    "Reason: ${word.reportReason}",
-                                    fontSize = 10.sp,
-                                    color = Color(0xFFE11D48),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-
-                        // Toggle flag button directly
-                        IconButton(
-                            onClick = {
-                                onReportWord(word.id, !word.isReported, if (!word.isReported) "User flagged in list" else null)
-                            },
-                            modifier = Modifier.size(26.dp)
                         ) {
-                            Icon(
-                                imageVector = if (word.isReported) Icons.Default.Flag else Icons.Default.OutlinedFlag,
-                                contentDescription = "Toggle Flag",
-                                tint = if (word.isReported) Color(0xFFE11D48) else palette.textMuted,
-                                modifier = Modifier.size(15.dp)
+                            Checkbox(
+                                checked = areAllSelected,
+                                onCheckedChange = { checked ->
+                                    selectedWordIds = if (checked) selectedWordIds + allFilteredIds else selectedWordIds - allFilteredIds
+                                },
+                                modifier = Modifier.size(20.dp),
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = IndigoPrimary,
+                                    uncheckedColor = palette.textMuted
+                                )
+                            )
+                            Text(
+                                text = if (selectedWordIds.isEmpty()) "Select All (${filteredWords.size})" else "${selectedWordIds.size} Selected",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (selectedWordIds.isNotEmpty()) IndigoPrimary else palette.textPrimary
                             )
                         }
 
-                        IconButton(onClick = { onEditWordClick(word) }, modifier = Modifier.size(26.dp)) {
-                            Icon(Icons.Default.Edit, contentDescription = "Edit", tint = palette.textMuted, modifier = Modifier.size(14.dp))
+                        if (selectedWordIds.isNotEmpty()) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Button(
+                                    onClick = { showBulkEditDialog = true },
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier.height(30.dp)
+                                ) {
+                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(13.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Edit (${selectedWordIds.size})", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                }
+
+                                Button(
+                                    onClick = { showBulkDeleteConfirm = true },
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE11D48)),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier.height(30.dp)
+                                ) {
+                                    Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(13.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Delete (${selectedWordIds.size})", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                }
+
+                                IconButton(
+                                    onClick = { selectedWordIds = emptySet() },
+                                    modifier = Modifier.size(26.dp)
+                                ) {
+                                    Icon(Icons.Default.Close, contentDescription = "Clear", tint = palette.textMuted, modifier = Modifier.size(15.dp))
+                                }
+                            }
+                        } else if (selectedGroupFilterForWords != "all" && filteredWords.isNotEmpty()) {
+                            TextButton(
+                                onClick = { showDeleteGroupConfirm = true },
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                modifier = Modifier.height(28.dp)
+                            ) {
+                                Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = Color(0xFFE11D48), modifier = Modifier.size(13.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Delete Group $selectedGroupFilterForWords", color = Color(0xFFE11D48), fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold)
+                            }
                         }
-                        IconButton(onClick = { onDeleteWord(word.id) }, modifier = Modifier.size(26.dp)) {
-                            Icon(Icons.Default.DeleteOutline, contentDescription = "Delete", tint = Color(0xFFE11D48), modifier = Modifier.size(14.dp))
+                    }
+                }
+            }
+
+            // Word Cards List
+            if (filteredWords.isEmpty()) {
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = palette.surface,
+                        border = BorderStroke(1.dp, palette.border),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Default.LayersClear, contentDescription = null, tint = palette.textMuted, modifier = Modifier.size(36.dp))
+                            Text("No words match this filter", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = palette.textPrimary)
+                            Text("Try changing the group filter or search query.", fontSize = 11.sp, color = palette.textMuted)
+                        }
+                    }
+                }
+            } else {
+                items(filteredWords, key = { it.id }) { word ->
+                    val isSelected = word.id in selectedWordIds
+                    Card(
+                        shape = RoundedCornerShape(10.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isSelected) IndigoPrimary.copy(alpha = 0.06f)
+                            else if (word.isReported) (if (palette.isDark) Color(0xFF451A1A) else Color(0xFFFFF1F2))
+                            else palette.surface
+                        ),
+                        border = BorderStroke(
+                            if (isSelected) 1.5.dp else (if (word.isReported) 1.5.dp else 1.dp),
+                            if (isSelected) IndigoPrimary else (if (word.isReported) Color(0xFFF43F5E) else palette.border)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Selection Checkbox
+                            Checkbox(
+                                checked = isSelected,
+                                onCheckedChange = { checked ->
+                                    selectedWordIds = if (checked) selectedWordIds + word.id else selectedWordIds - word.id
+                                },
+                                modifier = Modifier.size(20.dp),
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = IndigoPrimary,
+                                    uncheckedColor = palette.textMuted
+                                )
+                            )
+
+                            // Word Information
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(word.word, fontWeight = FontWeight.Bold, fontSize = 13.5.sp, color = palette.textPrimary)
+
+                                    // Group Pill (clickable to filter by this group)
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = IndigoLight,
+                                        modifier = Modifier.clickable {
+                                            selectedGroupFilterForWords = word.group
+                                        }
+                                    ) {
+                                        Text(
+                                            text = "G${word.group}",
+                                            fontSize = 9.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = IndigoPrimary,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+
+                                    // Status Badge
+                                    val statusColor = when (word.status) {
+                                        "know" -> EmeraldSuccess
+                                        "confusion" -> AmberWarning
+                                        "dont_know" -> Color(0xFFE11D48)
+                                        else -> Color(0xFF64748B)
+                                    }
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = statusColor.copy(alpha = 0.12f)
+                                    ) {
+                                        Text(
+                                            text = word.status.replace("_", " ").uppercase(),
+                                            fontSize = 8.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = statusColor,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                        )
+                                    }
+
+                                    if (word.isReported) {
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = Color(0xFFFEE2E2),
+                                            border = BorderStroke(0.5.dp, Color(0xFFEF4444))
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                            ) {
+                                                Icon(Icons.Default.Flag, contentDescription = "Flagged", tint = Color(0xFFE11D48), modifier = Modifier.size(10.dp))
+                                                Text("Flagged", fontSize = 8.5.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE11D48))
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Text(word.meaning, fontSize = 11.5.sp, color = palette.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+
+                                if (!word.example.isNullOrBlank()) {
+                                    Text(
+                                        word.example,
+                                        fontSize = 10.sp,
+                                        color = palette.textMuted.copy(alpha = 0.8f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
+                                if (word.isReported && !word.reportReason.isNullOrBlank()) {
+                                    Text(
+                                        "Reason: ${word.reportReason}",
+                                        fontSize = 10.sp,
+                                        color = Color(0xFFE11D48),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+
+                            // Actions
+                            IconButton(
+                                onClick = {
+                                    onReportWord(word.id, !word.isReported, if (!word.isReported) "User flagged in list" else null)
+                                },
+                                modifier = Modifier.size(26.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (word.isReported) Icons.Default.Flag else Icons.Default.OutlinedFlag,
+                                    contentDescription = "Toggle Flag",
+                                    tint = if (word.isReported) Color(0xFFE11D48) else palette.textMuted,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+
+                            IconButton(onClick = { onEditWordClick(word) }, modifier = Modifier.size(26.dp)) {
+                                Icon(Icons.Default.Edit, contentDescription = "Edit", tint = palette.textMuted, modifier = Modifier.size(14.dp))
+                            }
+                            IconButton(onClick = { onDeleteWord(word.id) }, modifier = Modifier.size(26.dp)) {
+                                Icon(Icons.Default.DeleteOutline, contentDescription = "Delete", tint = Color(0xFFE11D48), modifier = Modifier.size(14.dp))
+                            }
                         }
                     }
                 }
@@ -1579,11 +2359,18 @@ private fun WidgetAndRemindersTab(
     }
 
     val frequencies = listOf(
-        Pair("1h", "Every 1h"),
-        Pair("2h", "Every 2h"),
-        Pair("3h", "Every 3h"),
-        Pair("4h", "Every 4h"),
-        Pair("6h", "Every 6h"),
+        Pair("10m", "10 min"),
+        Pair("15m", "15 min"),
+        Pair("20m", "20 min"),
+        Pair("30m", "30 min"),
+        Pair("45m", "45 min"),
+        Pair("1h", "1 hour"),
+        Pair("2h", "2 hours"),
+        Pair("3h", "3 hours"),
+        Pair("4h", "4 hours"),
+        Pair("6h", "6 hours"),
+        Pair("8h", "8 hours"),
+        Pair("12h", "12 hours"),
         Pair("daily", "Daily")
     )
 
@@ -2184,7 +2971,9 @@ private fun BackupSettingsTab(
     onCloudSync: () -> Unit,
     onDirectPasteRestore: () -> Unit,
     onResetData: () -> Unit,
-    onImportQBClick: () -> Unit = {}
+    onImportQBClick: () -> Unit = {},
+    onExportQBProgress: () -> Unit = {},
+    onRestoreQBProgress: () -> Unit = {}
 ) {
     val palette = LocalAppPalette.current
     val context = LocalContext.current
@@ -2198,7 +2987,7 @@ private fun BackupSettingsTab(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // Status Card
         item {
@@ -2212,16 +3001,15 @@ private fun BackupSettingsTab(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Icon(Icons.Default.CloudDone, contentDescription = null, tint = EmeraldSuccess, modifier = Modifier.size(24.dp))
+                    Icon(Icons.Default.CloudDone, contentDescription = null, tint = EmeraldSuccess, modifier = Modifier.size(22.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Backup & Sync Status", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = palette.textPrimary)
-                        Text("Auto-Backup: Daily at 02:00 AM (রাত ২:০০ টায়)", fontSize = 11.sp, color = IndigoPrimary, fontWeight = FontWeight.Medium)
-                        Text("Last backup: $lastBackupStr", fontSize = 10.sp, color = palette.textMuted)
+                        Text("Auto-Backup: Daily at 2:00 AM", fontWeight = FontWeight.Bold, fontSize = 12.5.sp, color = palette.textPrimary)
+                        Text("Last: $lastBackupStr", fontSize = 10.5.sp, color = palette.textMuted)
                     }
                     IconButton(
                         onClick = {
                             onManualBackup()
-                            Toast.makeText(context, "Local backup created", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Backup saved", Toast.LENGTH_SHORT).show()
                         },
                         modifier = Modifier.size(32.dp).clip(CircleShape).background(IndigoLight)
                     ) {
@@ -2231,42 +3019,7 @@ private fun BackupSettingsTab(
             }
         }
 
-        // Informational Notice on Schedule & Deduplication
-        item {
-            Card(
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = IndigoLight.copy(alpha = 0.4f)),
-                border = BorderStroke(1.dp, IndigoPrimary.copy(alpha = 0.2f))
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(12.dp),
-                    verticalAlignment = Alignment.Top,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(Icons.Default.Schedule, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(18.dp))
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(
-                            text = "অটো ব্যাকআপ শিডিউল",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp,
-                            color = IndigoPrimary
-                        )
-                        Text(
-                            text = "• অটো ব্যাকআপ শুধুমাত্র রাত ০২:০০ AM এ স্বয়ংক্রিয়ভাবে হবে।\n• যেকোনো সময় 'Back up to Drive' বাটনে ক্লিক করে লিংকড ফোল্ডারে ব্যাকআপ করতে পারবেন।\n• রিস্টোরের সময় একই নামের একাধিক কোর্স থাকলে সর্বোচ্চ প্রগ্রেস ওয়ালা কোর্সটি রাখা হবে (কোন কোর্স দুইবার দেখা যাবে না)।",
-                            fontSize = 10.sp,
-                            lineHeight = 14.sp,
-                            color = palette.textSecondary
-                        )
-                    }
-                }
-            }
-        }
-
         // Google Drive & Linked Folder
-        item {
-            Text("Drive & Folder Sync", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = palette.textPrimary)
-        }
-
         item {
             Card(
                 shape = RoundedCornerShape(16.dp),
@@ -2280,10 +3033,10 @@ private fun BackupSettingsTab(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text("Linked Folder", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = palette.textPrimary)
+                            Text("Google Drive Sync", fontWeight = FontWeight.SemiBold, fontSize = 12.5.sp, color = palette.textPrimary)
                             Text(
-                                text = if (!customBackupTreeUri.isNullOrBlank()) "Custom SAF linked folder" else "Default app storage",
-                                fontSize = 10.sp,
+                                text = if (!customBackupTreeUri.isNullOrBlank()) "Linked folder active" else "App storage (Default)",
+                                fontSize = 10.5.sp,
                                 color = palette.textMuted
                             )
                         }
@@ -2292,11 +3045,9 @@ private fun BackupSettingsTab(
                             shape = RoundedCornerShape(8.dp),
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
                         ) {
-                            Text("Change", fontSize = 11.sp)
+                            Text("Change Folder", fontSize = 11.sp)
                         }
                     }
-
-                    HorizontalDivider(color = palette.border.copy(alpha = 0.5f))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -2305,7 +3056,7 @@ private fun BackupSettingsTab(
                         Button(
                             onClick = {
                                 onBackupToDriveDirect()
-                                Toast.makeText(context, "Backing up to linked Drive folder...", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Saving to Drive...", Toast.LENGTH_SHORT).show()
                             },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(10.dp),
@@ -2314,7 +3065,7 @@ private fun BackupSettingsTab(
                         ) {
                             Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Back up to Drive", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Backup Drive", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                         }
 
                         OutlinedButton(
@@ -2332,94 +3083,120 @@ private fun BackupSettingsTab(
             }
         }
 
-        // Question Bank Link Sync Card
+        // Question Bank Progress Backup Card
         item {
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = palette.surface),
                 border = BorderStroke(1.dp, palette.border)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(
+                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.weight(1f)
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Icon(Icons.Default.HelpOutline, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(22.dp))
-                        Column {
-                            Text("Question Bank (QB) Link Sync", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = palette.textPrimary)
-                            Text("Import questions from Google Drive / Sheets link", fontSize = 10.sp, color = palette.textMuted)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Default.Quiz, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(18.dp))
+                            Text("Question Bank", fontWeight = FontWeight.Bold, fontSize = 12.5.sp, color = palette.textPrimary)
+                        }
+                        TextButton(
+                            onClick = onImportQBClick,
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Sync Link", fontSize = 11.sp)
                         }
                     }
-                    FilledTonalButton(
-                        onClick = onImportQBClick,
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(13.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Add Link", fontSize = 11.sp)
+                        OutlinedButton(
+                            onClick = onExportQBProgress,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Export QB", fontSize = 11.sp)
+                        }
+
+                        OutlinedButton(
+                            onClick = onRestoreQBProgress,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Restore QB", fontSize = 11.sp)
+                        }
                     }
                 }
             }
         }
 
-        // File Export / Import
+        // Full App Backup & Restore
         item {
-            Text("File Export & Import", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = palette.textPrimary)
-        }
-
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = palette.surface),
+                border = BorderStroke(1.dp, palette.border)
             ) {
-                OutlinedButton(
-                    onClick = onExportFile,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(14.dp), tint = IndigoPrimary)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Export JSON", fontSize = 11.sp)
-                }
+                Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Full App Backup (JSON)", fontWeight = FontWeight.Bold, fontSize = 12.5.sp, color = palette.textPrimary)
 
-                OutlinedButton(
-                    onClick = onRestoreFile,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(14.dp), tint = IndigoPrimary)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Import JSON", fontSize = 11.sp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = onExportFile,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(14.dp), tint = IndigoPrimary)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Export JSON", fontSize = 11.sp)
+                        }
+
+                        OutlinedButton(
+                            onClick = onRestoreFile,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(14.dp), tint = IndigoPrimary)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Restore JSON", fontSize = 11.sp)
+                        }
+                    }
+
+                    TextButton(
+                        onClick = onDirectPasteRestore,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Paste Raw JSON", fontSize = 11.sp)
+                    }
                 }
             }
         }
 
-        item {
-            TextButton(
-                onClick = onDirectPasteRestore,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(14.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Paste Raw JSON String", fontSize = 11.sp)
-            }
-        }
-
-        // Danger Zone
+        // Reset
         item {
             TextButton(
                 onClick = onResetData,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Icon(Icons.Default.RestartAlt, contentDescription = null, tint = Color(0xFFE11D48), modifier = Modifier.size(14.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Reset All to Sample Data", fontSize = 11.sp, color = Color(0xFFE11D48))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Reset to Sample Data", fontSize = 11.sp, color = Color(0xFFE11D48))
             }
         }
     }
@@ -2544,47 +3321,114 @@ private fun EditProfileModal(
     onDismiss: () -> Unit,
     onSave: (name: String, avatar: String?, exam: String, goal: Int, bio: String) -> Unit
 ) {
+    val palette = LocalAppPalette.current
     var name by remember { mutableStateOf(currentName) }
+    var avatarUriState by remember { mutableStateOf(currentAvatar) }
     var targetExam by remember { mutableStateOf(currentTargetExam) }
     var dailyGoalStr by remember { mutableStateOf(currentGoal.toString()) }
     var bio by remember { mutableStateOf(currentBio) }
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            avatarUriState = uri.toString()
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Edit Profile", fontWeight = FontWeight.Bold, fontSize = 16.sp) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                // Avatar preview and picker button
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(CircleShape)
+                        .background(if (palette.isDark) Color(0xFF1E293B) else IndigoLight)
+                        .border(1.5.dp, IndigoPrimary, CircleShape)
+                        .clickable {
+                            photoPickerLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (!avatarUriState.isNullOrBlank()) {
+                        AsyncImage(
+                            model = avatarUriState,
+                            contentDescription = "Avatar",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.AddAPhoto,
+                            contentDescription = "Pick Photo",
+                            tint = IndigoPrimary,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                }
+
+                TextButton(
+                    onClick = {
+                        photoPickerLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                    },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(14.dp), tint = IndigoPrimary)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = if (avatarUriState.isNullOrBlank()) "Choose Profile Photo" else "Change Profile Photo",
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = IndigoPrimary
+                    )
+                }
+
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
                     label = { Text("Display Name", fontSize = 11.sp) },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
                 )
                 OutlinedTextField(
                     value = targetExam,
                     onValueChange = { targetExam = it },
                     label = { Text("Target Exam (e.g. GRE, IELTS)", fontSize = 11.sp) },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
                 )
                 OutlinedTextField(
                     value = dailyGoalStr,
                     onValueChange = { dailyGoalStr = it },
                     label = { Text("Daily Word Goal", fontSize = 11.sp) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
                 )
                 OutlinedTextField(
                     value = bio,
                     onValueChange = { bio = it },
                     label = { Text("Short Bio", fontSize = 11.sp) },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 2
                 )
             }
         },
         confirmButton = {
             Button(
                 onClick = {
-                    onSave(name.trim(), currentAvatar, targetExam.trim(), dailyGoalStr.toIntOrNull() ?: 20, bio.trim())
+                    onSave(name.trim(), avatarUriState, targetExam.trim(), dailyGoalStr.toIntOrNull() ?: 20, bio.trim())
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
             ) {
@@ -2694,6 +3538,7 @@ private fun CompactWordModal(
 ) {
     var word by remember { mutableStateOf(initialWord?.word ?: "") }
     var meaning by remember { mutableStateOf(initialWord?.meaning ?: "") }
+    var group by remember { mutableStateOf(initialWord?.group ?: "1") }
     var synonyms by remember { mutableStateOf(initialWord?.synonyms ?: "") }
     var example by remember { mutableStateOf(initialWord?.example ?: "") }
     var selectedCourseId by remember { mutableStateOf(initialWord?.courseId ?: activeCourseId) }
@@ -2713,6 +3558,12 @@ private fun CompactWordModal(
                     value = meaning,
                     onValueChange = { meaning = it },
                     label = { Text("Meaning", fontSize = 11.sp) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = group,
+                    onValueChange = { group = it },
+                    label = { Text("Group (e.g. 1, 2, 3...)", fontSize = 11.sp) },
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
@@ -2736,6 +3587,7 @@ private fun CompactWordModal(
                         val wordEntity = initialWord?.copy(
                             word = word.trim(),
                             meaning = meaning.trim(),
+                            group = group.trim().ifBlank { "1" },
                             synonyms = synonyms.ifBlank { null },
                             example = example.ifBlank { null },
                             courseId = selectedCourseId
@@ -2743,6 +3595,7 @@ private fun CompactWordModal(
                             id = "custom_${System.currentTimeMillis()}",
                             word = word.trim(),
                             meaning = meaning.trim(),
+                            group = group.trim().ifBlank { "1" },
                             synonyms = synonyms.ifBlank { null },
                             example = example.ifBlank { null },
                             courseId = selectedCourseId
@@ -2768,7 +3621,7 @@ private fun CompactDriveSyncModal(
     onDismiss: () -> Unit,
     onSync: (url: String, preserve: Boolean) -> Unit
 ) {
-    var url by remember { mutableStateOf(initialUrl) }
+    var url by remember { mutableStateOf("") }
     var preserve by remember { mutableStateOf(true) }
 
     AlertDialog(
@@ -2814,7 +3667,7 @@ private fun CompactQbSyncModal(
     onDismiss: () -> Unit,
     onSync: (url: String, clearExisting: Boolean) -> Unit
 ) {
-    var url by remember { mutableStateOf(initialUrl) }
+    var url by remember { mutableStateOf("") }
     var clearExisting by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val palette = LocalAppPalette.current
@@ -2827,22 +3680,16 @@ private fun CompactQbSyncModal(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Icon(Icons.Default.Link, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(20.dp))
-                Text("Import Question Bank from Link", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text("Sync Question Bank", fontWeight = FontWeight.Bold, fontSize = 15.sp)
             }
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = "Google Drive (file/folder), Google Sheets, বা সরাসরি CSV/JSON/Excel লিংক দিয়ে প্রশ্ন ইম্পোর্ট করুন।",
-                    fontSize = 11.5.sp,
-                    color = palette.textSecondary
-                )
-
                 OutlinedTextField(
                     value = url,
                     onValueChange = { url = it },
-                    label = { Text("QB Share Link / URL", fontSize = 11.sp) },
-                    placeholder = { Text("https://drive.google.com/... or https://docs.google.com/spreadsheets/...", fontSize = 10.sp) },
+                    label = { Text("Drive / Sheets Public Link", fontSize = 11.sp) },
+                    placeholder = { Text("Paste share link...", fontSize = 10.sp) },
                     leadingIcon = {
                         Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(16.dp), tint = IndigoPrimary)
                     },
@@ -2875,45 +3722,17 @@ private fun CompactQbSyncModal(
                     shape = RoundedCornerShape(10.dp)
                 )
 
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9),
-                    border = BorderStroke(0.5.dp, palette.border)
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Checkbox(
-                            checked = clearExisting,
-                            onCheckedChange = { clearExisting = it },
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text("পূর্বের প্রশ্নগুলো মুছে নতুনগুলো বসান", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = palette.textPrimary)
-                            Text("আনচেক থাকলে বর্তমান প্রশ্নের সাথে যোগ হবে", fontSize = 9.5.sp, color = palette.textMuted)
-                        }
-                    }
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (palette.isDark) Color(0xFF0F172A) else Color(0xFFEFF6FF),
-                    border = BorderStroke(0.5.dp, IndigoPrimary.copy(alpha = 0.3f))
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(Icons.Default.Info, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(16.dp))
-                        Text(
-                            text = "লিংকটি পাবলিক ('Anyone with link can view') হতে হবে। CSV তে Question, Opt1-4, Ans কলাম থাকা আবশ্যক।",
-                            fontSize = 10.sp,
-                            color = palette.textSecondary
-                        )
-                    }
+                    Checkbox(
+                        checked = clearExisting,
+                        onCheckedChange = { clearExisting = it },
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Replace existing questions", fontSize = 11.5.sp, color = palette.textPrimary)
                 }
             }
         },
@@ -2940,6 +3759,248 @@ private fun CompactQbSyncModal(
         dismissButton = {
             TextButton(onClick = onDismiss, enabled = !isSyncing) {
                 Text("Cancel", fontSize = 11.5.sp)
+            }
+        }
+    )
+}
+
+@Composable
+private fun CompactBulkEditModal(
+    selectedCount: Int,
+    courses: List<CourseEntity>,
+    availableGroups: List<String>,
+    onDismiss: () -> Unit,
+    onApply: (newGroup: String?, newCourseId: String?, newStatus: String?) -> Unit
+) {
+    val palette = LocalAppPalette.current
+    var changeGroupEnabled by remember { mutableStateOf(false) }
+    var targetGroup by remember { mutableStateOf("") }
+
+    var changeCourseEnabled by remember { mutableStateOf(false) }
+    var targetCourseId by remember { mutableStateOf(courses.firstOrNull()?.id ?: "") }
+    var courseDropdownOpen by remember { mutableStateOf(false) }
+
+    var changeStatusEnabled by remember { mutableStateOf(false) }
+    var targetStatus by remember { mutableStateOf("know") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(Icons.Default.Edit, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(20.dp))
+                Text("Bulk Edit ($selectedCount items)", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Section 1: Change Group
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF8FAFC),
+                    border = BorderStroke(1.dp, if (changeGroupEnabled) IndigoPrimary else palette.border)
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable { changeGroupEnabled = !changeGroupEnabled }
+                        ) {
+                            Checkbox(
+                                checked = changeGroupEnabled,
+                                onCheckedChange = { changeGroupEnabled = it },
+                                modifier = Modifier.size(20.dp),
+                                colors = CheckboxDefaults.colors(checkedColor = IndigoPrimary)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Change Group", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = palette.textPrimary)
+                        }
+
+                        if (changeGroupEnabled) {
+                            OutlinedTextField(
+                                value = targetGroup,
+                                onValueChange = { targetGroup = it },
+                                placeholder = { Text("e.g. 1, 2, 3...", fontSize = 11.sp) },
+                                label = { Text("Target Group Name / Number", fontSize = 11.sp) },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth().height(48.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                textStyle = LocalTextStyle.current.copy(fontSize = 12.sp)
+                            )
+
+                            if (availableGroups.isNotEmpty()) {
+                                Text("Existing Groups:", fontSize = 10.sp, color = palette.textMuted)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    availableGroups.forEach { grp ->
+                                        Surface(
+                                            onClick = { targetGroup = grp },
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = if (targetGroup == grp) IndigoPrimary else palette.surface,
+                                            border = BorderStroke(1.dp, if (targetGroup == grp) IndigoPrimary else palette.border)
+                                        ) {
+                                            Text(
+                                                text = "Group $grp",
+                                                fontSize = 10.sp,
+                                                color = if (targetGroup == grp) Color.White else palette.textPrimary,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Section 2: Move to Course
+                if (courses.isNotEmpty()) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF8FAFC),
+                        border = BorderStroke(1.dp, if (changeCourseEnabled) IndigoPrimary else palette.border)
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.clickable { changeCourseEnabled = !changeCourseEnabled }
+                            ) {
+                                Checkbox(
+                                    checked = changeCourseEnabled,
+                                    onCheckedChange = { changeCourseEnabled = it },
+                                    modifier = Modifier.size(20.dp),
+                                    colors = CheckboxDefaults.colors(checkedColor = IndigoPrimary)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Move to Another Course", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = palette.textPrimary)
+                            }
+
+                            if (changeCourseEnabled) {
+                                val selectedCourseObj = courses.firstOrNull { it.id == targetCourseId }
+                                Box {
+                                    Surface(
+                                        onClick = { courseDropdownOpen = true },
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = palette.surface,
+                                        border = BorderStroke(1.dp, palette.border),
+                                        modifier = Modifier.fillMaxWidth().height(40.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = selectedCourseObj?.title ?: "Select Course",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = palette.textPrimary
+                                            )
+                                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = palette.textMuted)
+                                        }
+                                    }
+
+                                    DropdownMenu(
+                                        expanded = courseDropdownOpen,
+                                        onDismissRequest = { courseDropdownOpen = false }
+                                    ) {
+                                        courses.forEach { course ->
+                                            DropdownMenuItem(
+                                                text = { Text(course.title, fontSize = 12.sp) },
+                                                onClick = {
+                                                    targetCourseId = course.id
+                                                    courseDropdownOpen = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Section 3: Change Learning Status
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF8FAFC),
+                    border = BorderStroke(1.dp, if (changeStatusEnabled) IndigoPrimary else palette.border)
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable { changeStatusEnabled = !changeStatusEnabled }
+                        ) {
+                            Checkbox(
+                                checked = changeStatusEnabled,
+                                onCheckedChange = { changeStatusEnabled = it },
+                                modifier = Modifier.size(20.dp),
+                                colors = CheckboxDefaults.colors(checkedColor = IndigoPrimary)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Update Learning Status", fontWeight = FontWeight.SemiBold, fontSize = 12.sp, color = palette.textPrimary)
+                        }
+
+                        if (changeStatusEnabled) {
+                            val statuses = listOf(
+                                Triple("know", "Know", EmeraldSuccess),
+                                Triple("confusion", "Confusion", AmberWarning),
+                                Triple("dont_know", "Don't Know", Color(0xFFE11D48)),
+                                Triple("unrated", "Unrated", Color(0xFF64748B))
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                statuses.forEach { (stKey, stLabel, stColor) ->
+                                    val isSelected = targetStatus == stKey
+                                    Surface(
+                                        onClick = { targetStatus = stKey },
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = if (isSelected) stColor else palette.surface,
+                                        border = BorderStroke(1.dp, if (isSelected) stColor else palette.border),
+                                        modifier = Modifier.weight(1f).height(34.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                            Text(
+                                                text = stLabel,
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isSelected) Color.White else stColor
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val finalGroup = if (changeGroupEnabled && targetGroup.isNotBlank()) targetGroup.trim() else null
+                    val finalCourse = if (changeCourseEnabled && targetCourseId.isNotBlank()) targetCourseId else null
+                    val finalStatus = if (changeStatusEnabled && targetStatus.isNotBlank()) targetStatus else null
+                    onApply(finalGroup, finalCourse, finalStatus)
+                },
+                enabled = changeGroupEnabled || changeCourseEnabled || changeStatusEnabled,
+                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("Apply to $selectedCount Words", fontSize = 12.sp)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", fontSize = 12.sp)
             }
         }
     )

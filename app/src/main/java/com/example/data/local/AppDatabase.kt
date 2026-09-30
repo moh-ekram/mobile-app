@@ -18,7 +18,7 @@ import com.example.data.model.*
         Flashcard::class,
         ArchivedWordProgressEntity::class
     ],
-    version = 10,
+    version = 12,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

@@ -1,38 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-
-    <!-- Back Card L-Bracket (White Stroke, Round Caps, Strictly within Safe Zone 21..87) -->
-    <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="4.6"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M 33.5,43.0 L 33.5,70.9 A 3.6,3.6 0 0,0 37.1,74.5 L 65.2,74.5" />
-
-    <!-- Front Card Outline (White Stroke, Rounded Corners) -->
-    <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="4.6"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M 46.5,31.2 L 70.8,31.2 A 6.0,6.0 0 0,1 76.8,37.2 L 76.8,61.5 A 6.0,6.0 0 0,1 70.8,67.5 L 46.5,67.5 A 6.0,6.0 0 0,1 40.5,61.5 L 40.5,37.2 A 6.0,6.0 0 0,1 46.5,31.2 Z" />
-
-    <!-- Top Text Line (Filled White Pill) -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M 51.7,40.5 L 65.4,40.5 A 2.1,2.1 0 0,1 67.5,42.6 A 2.1,2.1 0 0,1 65.4,44.7 L 51.7,44.7 A 2.1,2.1 0 0,1 49.6,42.6 A 2.1,2.1 0 0,1 51.7,40.5 Z" />
-
-    <!-- Middle Text Line (Filled White Pill) -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M 51.7,47.3 L 65.4,47.3 A 2.1,2.1 0 0,1 67.5,49.4 A 2.1,2.1 0 0,1 65.4,51.5 L 51.7,51.5 A 2.1,2.1 0 0,1 49.6,49.4 A 2.1,2.1 0 0,1 51.7,47.3 Z" />
-
-    <!-- Bottom Short Text Line (Filled White Pill) -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M 51.7,54.0 L 56.4,54.0 A 2.1,2.1 0 0,1 58.5,56.1 A 2.1,2.1 0 0,1 56.4,58.2 L 51.7,58.2 A 2.1,2.1 0 0,1 49.6,56.1 A 2.1,2.1 0 0,1 51.7,54.0 Z" />
-</vector>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:width="66dp"
+        android:height="66dp"
+        android:drawable="@drawable/ic_launcher_foreground_image"
+        android:gravity="center" />
+</layer-list>

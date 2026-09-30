@@ -205,6 +205,18 @@ interface VocabularyDao {
     @Query("DELETE FROM vocabulary_words WHERE id = :id")
     suspend fun deleteWordById(id: String)
 
+    @Query("DELETE FROM vocabulary_words WHERE id IN (:ids)")
+    suspend fun deleteWordsByIds(ids: List<String>)
+
+    @Query("UPDATE vocabulary_words SET `group` = :newGroup WHERE id IN (:ids)")
+    suspend fun updateGroupForWords(ids: List<String>, newGroup: String)
+
+    @Query("UPDATE vocabulary_words SET courseId = :newCourseId WHERE id IN (:ids)")
+    suspend fun moveWordsToCourse(ids: List<String>, newCourseId: String)
+
+    @Query("UPDATE vocabulary_words SET status = :newStatus WHERE id IN (:ids)")
+    suspend fun updateStatusForWords(ids: List<String>, newStatus: String)
+
     @Query("DELETE FROM vocabulary_words WHERE courseId = :courseId")
     suspend fun deleteWordsByCourse(courseId: String)
 
@@ -255,6 +267,91 @@ interface QuestionBankDao {
 
     @Query("SELECT * FROM question_bank_items ORDER BY id ASC")
     suspend fun getAllQuestionsList(): List<QuestionBankEntity>
+
+    @Query("SELECT DISTINCT bankName FROM question_bank_items ORDER BY bankName ASC")
+    fun getDistinctBankNames(): Flow<List<String>>
+
+    @Query("SELECT DISTINCT bankName FROM question_bank_items ORDER BY bankName ASC")
+    suspend fun getDistinctBankNamesList(): List<String>
+
+    @Query("SELECT * FROM question_bank_items WHERE bankName = :bankName ORDER BY id ASC")
+    fun getQuestionsByBank(bankName: String): Flow<List<QuestionBankEntity>>
+
+    @Query("SELECT * FROM question_bank_items WHERE id = :id LIMIT 1")
+    suspend fun getQuestionById(id: String): QuestionBankEntity?
+
+    @Query("UPDATE question_bank_items SET status = :status, timesAnswered = :timesAnswered, lastAnsweredAt = :lastAnsweredAt WHERE id = :id")
+    suspend fun updateQuestionProgress(id: String, status: String, timesAnswered: Int, lastAnsweredAt: Long)
+
+    @Transaction
+    suspend fun insertOrMergeQuestions(
+        incoming: List<QuestionBankEntity>,
+        savedProgressMap: Map<String, QbProgressRecord> = emptyMap()
+    ): Pair<Int, Int> {
+        fun normKey(text: String): String {
+            val key = text.lowercase().trim().replace(Regex("[^\\p{L}\\p{Nd}]"), "")
+            return if (key.isNotBlank()) key else text.lowercase().trim()
+        }
+
+        val existingList = getAllQuestionsList()
+        val existingMap = existingList.associateBy { it.id }
+        val existingByPrompt = existingList.associateBy { normKey(it.question) }
+
+        val savedProgressByPrompt = savedProgressMap.values
+            .filter { it.questionPrompt.isNotBlank() }
+            .associateBy { normKey(it.questionPrompt) }
+
+        val savedProgressByRawPrompt = savedProgressMap.values
+            .filter { it.questionPrompt.isNotBlank() }
+            .associateBy { it.questionPrompt.trim().lowercase() }
+
+        var updated = 0
+        var inserted = 0
+        val merged = incoming.map { inc ->
+            val ex = existingMap[inc.id] ?: existingByPrompt[normKey(inc.question)]
+            val incNormPrompt = normKey(inc.question)
+            val incRawPrompt = inc.question.trim().lowercase()
+
+            val savedProg = savedProgressMap[inc.id]
+                ?: savedProgressMap[inc.id.replace("qb_", "")]
+                ?: savedProgressMap["qb_${inc.id}"]
+                ?: (if (incNormPrompt.isNotBlank()) savedProgressByPrompt[incNormPrompt] else null)
+                ?: (if (incRawPrompt.isNotBlank()) savedProgressByRawPrompt[incRawPrompt] else null)
+
+            val matchedProg = when {
+                savedProg != null && savedProg.status.isNotBlank() && savedProg.status != "unrated" -> savedProg
+                ex != null && ex.status.isNotBlank() && ex.status != "unrated" -> QbProgressRecord(ex.id, ex.status, ex.timesAnswered, ex.lastAnsweredAt, ex.bankName, ex.question)
+                savedProg != null && savedProg.timesAnswered > 0 -> savedProg
+                ex != null && ex.timesAnswered > 0 -> QbProgressRecord(ex.id, ex.status, ex.timesAnswered, ex.lastAnsweredAt, ex.bankName, ex.question)
+                savedProg != null -> savedProg
+                ex != null -> QbProgressRecord(ex.id, ex.status, ex.timesAnswered, ex.lastAnsweredAt, ex.bankName, ex.question)
+                else -> null
+            }
+
+            if (matchedProg != null && (matchedProg.status != "unrated" || matchedProg.timesAnswered > 0 || inc.status == "unrated")) {
+                updated++
+                inc.copy(
+                    status = if (matchedProg.status.isNotBlank()) matchedProg.status else inc.status,
+                    timesAnswered = maxOf(matchedProg.timesAnswered, inc.timesAnswered),
+                    lastAnsweredAt = maxOf(matchedProg.lastAnsweredAt, inc.lastAnsweredAt)
+                )
+            } else {
+                inserted++
+                inc
+            }
+        }
+        insertQuestions(merged)
+        return Pair(updated, inserted)
+    }
+
+    @Query("UPDATE question_bank_items SET status = :status, timesAnswered = timesAnswered + 1, lastAnsweredAt = :timestamp WHERE id = :id")
+    suspend fun updateQuestionStatus(id: String, status: String, timestamp: Long = System.currentTimeMillis())
+
+    @Query("DELETE FROM question_bank_items WHERE bankName = :bankName")
+    suspend fun deleteQuestionsByBankName(bankName: String)
+
+    @Query("UPDATE question_bank_items SET bankName = :newBankName WHERE bankName = :oldBankName")
+    suspend fun renameBank(oldBankName: String, newBankName: String)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertQuestions(questions: List<QuestionBankEntity>)

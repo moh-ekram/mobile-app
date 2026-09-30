@@ -28,12 +28,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.example.data.model.CourseEntity
 import com.example.data.model.UserProgressEntity
 import com.example.data.model.UserSession
@@ -185,7 +187,7 @@ fun HomeScreen(
                                             onSelectCourse(course.id)
                                             showCourseDialog = false
                                         },
-                                    shape = RoundedCornerShape(14.dp),
+                                    shape = RoundedCornerShape(12.dp),
                                     colors = CardDefaults.cardColors(
                                         containerColor = if (isSelected) Color(0xFFEEF2FF) else Color(0xFFF8FAFC)
                                     ),
@@ -197,40 +199,18 @@ fun HomeScreen(
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(14.dp),
+                                            .padding(horizontal = 14.dp, vertical = 12.dp),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                            ) {
-                                                Text(
-                                                    text = course.title,
-                                                    fontFamily = PoppinsFontFamily,
-                                                    fontSize = 14.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = if (isSelected) IndigoPrimary else SlateText
-                                                )
-                                                if (isSelected) {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .clip(CircleShape)
-                                                            .background(EmeraldLight)
-                                                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                                                    ) {
-                                                        Text(
-                                                            text = "SELECTED",
-                                                            fontFamily = PoppinsFontFamily,
-                                                            fontSize = 8.sp,
-                                                            fontWeight = FontWeight.ExtraBold,
-                                                            color = EmeraldSuccess
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = course.title,
+                                                fontFamily = PoppinsFontFamily,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (isSelected) IndigoPrimary else SlateText
+                                            )
                                             Text(
                                                 text = "$courseKnown / $courseTotal words ($coursePercent%)",
                                                 fontFamily = PoppinsFontFamily,
@@ -325,28 +305,30 @@ fun HomeScreen(
                             )
                         }
 
-                        // Streak Pill
+                        // User Profile Photo (replaces Streak)
                         Box(
                             modifier = Modifier
+                                .size(46.dp)
                                 .clip(CircleShape)
+                                .border(2.dp, Color.White.copy(alpha = 0.85f), CircleShape)
                                 .background(Color.White.copy(alpha = 0.2f))
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                                .clickable { onNavigate("settings") }
+                                .testTag("home_user_profile_avatar"),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.LocalFireDepartment,
-                                    contentDescription = null,
-                                    tint = Color(0xFFFBBF24),
-                                    modifier = Modifier.size(16.dp)
+                            if (!user?.avatarUri.isNullOrBlank()) {
+                                AsyncImage(
+                                    model = user.avatarUri,
+                                    contentDescription = "User Profile Photo",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
                                 )
+                            } else {
                                 Text(
-                                    text = "${progress?.streakDays ?: 1} Day Streak",
+                                    text = (user?.displayName?.take(1) ?: "U").uppercase(),
                                     fontFamily = PoppinsFontFamily,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 20.sp,
                                     color = Color.White
                                 )
                             }
@@ -479,32 +461,6 @@ fun HomeScreen(
             }
         }
 
-        // Stats Matrix for Selected Course
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "${selectedCourse?.title ?: "Course"} Statistics",
-                    fontFamily = PoppinsFontFamily,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = SlateText
-                )
-                Text(
-                    text = "$animatedKnowCount / $totalWords mastered",
-                    fontFamily = PoppinsFontFamily,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = EmeraldSuccess
-                )
-            }
-        }
-
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -554,47 +510,55 @@ fun HomeScreen(
             Text(
                 text = "Quick Practice",
                 fontFamily = PoppinsFontFamily,
-                fontSize = 16.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
                 color = SlateText,
-                modifier = Modifier.padding(top = 4.dp)
+                modifier = Modifier.padding(top = 2.dp)
             )
         }
 
         item {
-            QuickPracticeTile(
-                title = "Flashcard",
-                icon = Icons.Default.Style,
-                accent = IndigoPrimary,
-                onClick = { onNavigate("flashcard") }
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                QuickPracticeTile(
+                    title = "Flashcard",
+                    icon = Icons.Default.Style,
+                    accent = IndigoPrimary,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onNavigate("flashcard") }
+                )
+                QuickPracticeTile(
+                    title = "Games",
+                    icon = Icons.Default.SportsEsports,
+                    accent = EmeraldSuccess,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onNavigate("games") }
+                )
+            }
         }
 
         item {
-            QuickPracticeTile(
-                title = "Practice",
-                icon = Icons.Default.SportsEsports,
-                accent = EmeraldSuccess,
-                onClick = { onNavigate("games") }
-            )
-        }
-
-        item {
-            QuickPracticeTile(
-                title = "Question Bank",
-                icon = Icons.Default.Quiz,
-                accent = AmberWarning,
-                onClick = { onNavigate("games") }
-            )
-        }
-
-        item {
-            QuickPracticeTile(
-                title = "Read Article",
-                icon = Icons.Default.MenuBook,
-                accent = Color(0xFF7C3AED),
-                onClick = { onNavigate("article_reader") }
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                QuickPracticeTile(
+                    title = "Question Bank",
+                    icon = Icons.Default.Quiz,
+                    accent = AmberWarning,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onNavigate("question_bank") }
+                )
+                QuickPracticeTile(
+                    title = "Read Article",
+                    icon = Icons.Default.MenuBook,
+                    accent = Color(0xFF7C3AED),
+                    modifier = Modifier.weight(1f),
+                    onClick = { onNavigate("article_reader") }
+                )
+            }
         }
 
         // Word Groups Breakdown
@@ -613,13 +577,27 @@ fun HomeScreen(
                     fontWeight = FontWeight.Bold,
                     color = SlateText
                 )
-                Text(
-                    text = "${activeWords.size} words",
-                    fontFamily = PoppinsFontFamily,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = SlateMuted
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "${activeWords.size} words",
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = SlateMuted
+                    )
+                    TextButton(
+                        onClick = { onNavigate("admin") },
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                        modifier = Modifier.height(26.dp)
+                    ) {
+                        Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(13.dp), tint = IndigoPrimary)
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text("Manage", fontSize = 11.sp, color = IndigoPrimary, fontWeight = FontWeight.Bold)
+                    }
+                }
             }
         }
 
@@ -792,26 +770,28 @@ private fun QuickPracticeTile(
     title: String,
     icon: ImageVector,
     accent: Color,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clickable { onClick() },
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(SlateBorder))
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Box(
                 modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(12.dp))
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(10.dp))
                     .background(accent.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center
             ) {
@@ -819,26 +799,18 @@ private fun QuickPracticeTile(
                     imageVector = icon,
                     contentDescription = null,
                     tint = accent,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(20.dp)
                 )
             }
-
-            Spacer(modifier = Modifier.width(14.dp))
 
             Text(
                 text = title,
                 fontFamily = PoppinsFontFamily,
-                fontSize = 15.sp,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = SlateText,
-                modifier = Modifier.weight(1f)
-            )
-
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                contentDescription = null,
-                tint = SlateLight,
-                modifier = Modifier.size(18.dp)
+                modifier = Modifier.weight(1f),
+                maxLines = 1
             )
         }
     }

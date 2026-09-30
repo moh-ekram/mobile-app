@@ -21,7 +21,13 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
 
     private fun loadSavedUserSession(): UserSession {
         val savedName = profilePrefs.getString("display_name", "User #1235") ?: "User #1235"
-        val savedAvatar = profilePrefs.getString("avatar_uri", null)
+        var savedAvatar = profilePrefs.getString("avatar_uri", null)
+        if (savedAvatar.isNullOrBlank()) {
+            val localAvatar = java.io.File(getApplication<Application>().filesDir, "profile_avatar.jpg")
+            if (localAvatar.exists() && localAvatar.length() > 0) {
+                savedAvatar = Uri.fromFile(localAvatar).toString()
+            }
+        }
         val savedExam = profilePrefs.getString("target_exam", "GRE / IELTS") ?: "GRE / IELTS"
         val savedGoal = profilePrefs.getInt("daily_goal", 20)
         val savedBio = profilePrefs.getString("bio", "Aiming for GRE 330+ and IELTS 8.0") ?: "Aiming for GRE 330+ and IELTS 8.0"
@@ -228,7 +234,7 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val syncPrefs = application.getSharedPreferences("memorizer_sync_prefs", android.content.Context.MODE_PRIVATE)
     val driveSyncUrl = MutableStateFlow(
-        syncPrefs.getString("saved_drive_sync_url", "https://drive.google.com/drive/folders/1OBqSlB21FD_-0tpRZE8H6R5VFzDkeX2n") ?: ""
+        syncPrefs.getString("saved_drive_sync_url", "") ?: ""
     )
 
     val qbSyncUrl = MutableStateFlow(
@@ -980,7 +986,7 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
     fun updateProfile(displayName: String, avatarUri: String?, targetExam: String, dailyGoal: Int, bio: String) {
         var finalAvatarUri = avatarUri
         // If avatarUri is an external content:// or file URI, copy it to app internal storage permanently
-        if (!avatarUri.isNullOrBlank() && !avatarUri.contains("profile_avatar.jpg")) {
+        if (!avatarUri.isNullOrBlank() && (!avatarUri.contains("profile_avatar.jpg") || avatarUri.startsWith("content://"))) {
             try {
                 val inputUri = Uri.parse(avatarUri)
                 val targetFile = java.io.File(getApplication<Application>().filesDir, "profile_avatar.jpg")
@@ -990,7 +996,14 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
                     }
                 }
                 if (targetFile.exists() && targetFile.length() > 0) {
-                    finalAvatarUri = Uri.fromFile(targetFile).toString()
+                    // Copy to backup dir as well for redundancy
+                    try {
+                        val backupDir = repository.backupManager.getBackupDirectory()
+                        val backupAvatarFile = java.io.File(backupDir, "profile_avatar.jpg")
+                        targetFile.copyTo(backupAvatarFile, overwrite = true)
+                    } catch (_: Exception) {}
+
+                    finalAvatarUri = "${Uri.fromFile(targetFile)}?v=${System.currentTimeMillis()}"
                 }
             } catch (e: Exception) {
                 android.util.Log.e("MemorizerVM", "Error saving profile avatar: ${e.message}")
@@ -1014,6 +1027,16 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
             bio = bio
         )
         _statusMessage.value = "Profile updated successfully!"
+
+        // Auto-save backup file in background so photo and profile are backed up immediately
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val json = repository.backupManager.generateBackupJsonString(current.userId)
+                repository.backupManager.getJsonBackupFile().writeText(json)
+            } catch (e: Exception) {
+                android.util.Log.e("MemorizerVM", "Auto-backup error: ${e.message}")
+            }
+        }
     }
 
     // Auth Actions
@@ -1185,15 +1208,18 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
                 repository.refreshProgressAndSync(uid)
                 val courses = repository.allCourses.firstOrNull() ?: emptyList()
                 val savedId = coursePrefs.getString("saved_active_course_id", "") ?: ""
+                val words = repository.allWords.firstOrNull() ?: emptyList()
                 if (courses.isNotEmpty()) {
-                    if (savedId.isNotBlank() && courses.any { it.id == savedId }) {
-                        selectCourse(savedId)
-                    } else if (activeCourseId.value.isBlank() || courses.none { it.id == activeCourseId.value }) {
-                        selectCourse(courses.first().id)
+                    val targetCourseId = if (savedId.isNotBlank() && courses.any { it.id == savedId }) {
+                        savedId
+                    } else {
+                        courses.maxByOrNull { c ->
+                            val cWords = words.filter { it.courseId == c.id }
+                            cWords.count { it.status != "unrated" } * 20 + cWords.size
+                        }?.id ?: courses.first().id
                     }
+                    selectCourse(targetCourseId)
                 }
-            }.onFailure { err ->
-                _statusMessage.value = err.message ?: "Drive restore failed"
             }
         }
     }
@@ -1230,12 +1256,17 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
                 repository.refreshProgressAndSync(uid)
                 val courses = repository.allCourses.firstOrNull() ?: emptyList()
                 val savedId = coursePrefs.getString("saved_active_course_id", "") ?: ""
+                val words = repository.allWords.firstOrNull() ?: emptyList()
                 if (courses.isNotEmpty()) {
-                    if (savedId.isNotBlank() && courses.any { it.id == savedId }) {
-                        selectCourse(savedId)
-                    } else if (activeCourseId.value.isBlank() || courses.none { it.id == activeCourseId.value }) {
-                        selectCourse(courses.first().id)
+                    val targetCourseId = if (savedId.isNotBlank() && courses.any { it.id == savedId }) {
+                        savedId
+                    } else {
+                        courses.maxByOrNull { c ->
+                            val cWords = words.filter { it.courseId == c.id }
+                            cWords.count { it.status != "unrated" } * 20 + cWords.size
+                        }?.id ?: courses.first().id
                     }
+                    selectCourse(targetCourseId)
                 }
             }.onFailure { err ->
                 _statusMessage.value = "Restore failed: ${err.message}"
@@ -1266,16 +1297,21 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
             result.onSuccess { count ->
                 reloadProfileFromStorage()
                 reloadAllPreferences()
-                _statusMessage.value = "Successfully restored $count vocabulary words across courses!"
+                _statusMessage.value = "Successfully restored $count items across courses!"
                 repository.refreshProgressAndSync(uid)
                 val courses = repository.allCourses.firstOrNull() ?: emptyList()
                 val savedId = coursePrefs.getString("saved_active_course_id", "") ?: ""
+                val words = repository.allWords.firstOrNull() ?: emptyList()
                 if (courses.isNotEmpty()) {
-                    if (savedId.isNotBlank() && courses.any { it.id == savedId }) {
-                        selectCourse(savedId)
-                    } else if (activeCourseId.value.isBlank() || courses.none { it.id == activeCourseId.value }) {
-                        selectCourse(courses.first().id)
+                    val targetCourseId = if (savedId.isNotBlank() && courses.any { it.id == savedId }) {
+                        savedId
+                    } else {
+                        courses.maxByOrNull { c ->
+                            val cWords = words.filter { it.courseId == c.id }
+                            cWords.count { it.status != "unrated" } * 20 + cWords.size
+                        }?.id ?: courses.first().id
                     }
+                    selectCourse(targetCourseId)
                 }
             }.onFailure { err ->
                 _statusMessage.value = "Restore failed: ${err.message}"
@@ -1321,14 +1357,34 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun importQuestionBankFile(content: String, clearExisting: Boolean = false) {
+    fun importQuestionBankFile(content: String, clearExisting: Boolean = false, bankName: String = "General QB") {
         viewModelScope.launch {
-            val result = repository.importQuestionBankFile(content, clearExisting)
+            val result = repository.importQuestionBankFile(content, clearExisting, bankName)
             result.onSuccess { count ->
-                _statusMessage.value = "Imported $count Question Bank items!"
+                _statusMessage.value = "Imported $count Question Bank items for $bankName!"
             }.onFailure { err ->
                 _statusMessage.value = "QB import failed: ${err.message}"
             }
+        }
+    }
+
+    fun updateQuestionStatus(id: String, status: String) {
+        viewModelScope.launch {
+            repository.updateQuestionStatus(id, status)
+        }
+    }
+
+    fun deleteQuestionsByBankName(bankName: String) {
+        viewModelScope.launch {
+            repository.deleteQuestionsByBankName(bankName)
+            _statusMessage.value = "Deleted Question Bank: $bankName"
+        }
+    }
+
+    fun renameBank(oldBankName: String, newBankName: String) {
+        viewModelScope.launch {
+            repository.renameBank(oldBankName, newBankName)
+            _statusMessage.value = "Renamed bank to: $newBankName"
         }
     }
 
@@ -1369,6 +1425,56 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun backupQbProgress(onComplete: ((Result<String>) -> Unit)? = null) {
+        viewModelScope.launch {
+            val result = repository.backupQbProgress()
+            result.onSuccess { json ->
+                _statusMessage.value = "QB progress backed up to separate file (qb_progress.json)!"
+            }.onFailure { err ->
+                _statusMessage.value = "QB progress backup failed: ${err.message}"
+            }
+            onComplete?.invoke(result)
+        }
+    }
+
+    fun exportQbProgressToUri(uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val json = repository.backupManager.generateQbProgressJsonString()
+                val context = getApplication<Application>()
+                context.contentResolver.openOutputStream(uri)?.use { os ->
+                    os.write(json.toByteArray(Charsets.UTF_8))
+                }
+                _statusMessage.value = "QB progress successfully exported to selected file!"
+            } catch (e: Exception) {
+                _statusMessage.value = "Failed exporting QB progress: ${e.message}"
+            }
+        }
+    }
+
+    fun restoreQbProgress(jsonContent: String, onComplete: ((Result<Int>) -> Unit)? = null) {
+        viewModelScope.launch {
+            val result = repository.restoreQbProgress(jsonContent)
+            result.onSuccess { matchedCount ->
+                _statusMessage.value = "Successfully matched and restored progress for $matchedCount questions!"
+            }.onFailure { err ->
+                _statusMessage.value = "QB progress restore failed: ${err.message}"
+            }
+            onComplete?.invoke(result)
+        }
+    }
+
+    fun restoreQbProgressBytes(bytes: ByteArray, onComplete: ((Result<Int>) -> Unit)? = null) {
+        val text = try {
+            bytes.toString(Charsets.UTF_8)
+        } catch (e: Exception) {
+            _statusMessage.value = "Failed to read progress file bytes: ${e.message}"
+            onComplete?.invoke(Result.failure(e))
+            return
+        }
+        restoreQbProgress(text, onComplete)
+    }
+
     fun resetToSample() {
         viewModelScope.launch {
             val uid = _currentUser.value?.userId ?: "1235"
@@ -1390,6 +1496,42 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
             val uid = _currentUser.value?.userId ?: "1235"
             repository.deleteWord(id, uid)
             _statusMessage.value = "Word removed"
+        }
+    }
+
+    fun deleteWords(ids: List<String>) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            val uid = _currentUser.value?.userId ?: "1235"
+            repository.deleteWords(ids, uid)
+            _statusMessage.value = "${ids.size} words deleted"
+        }
+    }
+
+    fun updateGroupForWords(ids: List<String>, newGroup: String) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            val uid = _currentUser.value?.userId ?: "1235"
+            repository.updateGroupForWords(ids, newGroup, uid)
+            _statusMessage.value = "${ids.size} words moved to group '$newGroup'"
+        }
+    }
+
+    fun moveWordsToCourse(ids: List<String>, newCourseId: String) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            val uid = _currentUser.value?.userId ?: "1235"
+            repository.moveWordsToCourse(ids, newCourseId, uid)
+            _statusMessage.value = "${ids.size} words moved to selected course"
+        }
+    }
+
+    fun updateStatusForWords(ids: List<String>, newStatus: String) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            val uid = _currentUser.value?.userId ?: "1235"
+            repository.updateStatusForWords(ids, newStatus, uid)
+            _statusMessage.value = "Status updated for ${ids.size} words"
         }
     }
 

@@ -276,8 +276,10 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
         val isArticleReading = activeArticle != null
         val hideTopBar = (currentRoute == "flashcard" && isFocusMode) ||
                          currentRoute == "article_reader" ||
+                         currentRoute == "question_bank" ||
                          (currentRoute == "games" && selectedGameSection != null)
         val hideBottomBar = currentRoute == "flashcard" ||
+                            currentRoute == "question_bank" ||
                             isArticleReading ||
                             (currentRoute == "games" && selectedGameSection != null)
 
@@ -516,11 +518,12 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                                 }
                             )
                         }
-                        "games" -> GamePracticeScreen(
+                        "games", "question_bank" -> GamePracticeScreen(
                             games = allGames,
                             questions = allQuestions,
                             courses = allCourses,
                             activeCourseId = activeCourseId,
+                            initialSection = if (currentRoute == "question_bank") "question_bank" else null,
                             onCompleteQuiz = { score, total ->
                                 viewModel.recordQuizCompletion(score, total)
                             },
@@ -530,6 +533,23 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             onRecordWordQuizAnswer = { wId, isCorrect ->
                                 viewModel.recordWordQuizAnswer(wId, isCorrect)
                             },
+                            onUpdateQuestionStatus = { id, st ->
+                                viewModel.updateQuestionStatus(id, st)
+                            },
+                            onDeleteQuestionsByBank = { bName ->
+                                viewModel.deleteQuestionsByBankName(bName)
+                            },
+                            onRenameBank = { old, new ->
+                                viewModel.renameBank(old, new)
+                            },
+                            onImportQBBytes = { bytes, fileName, clear ->
+                                viewModel.importQuestionBankBytes(bytes, fileName, clear)
+                            },
+                            onAddSampleData = {
+                                viewModel.addSampleData(force = true)
+                            },
+                            onBackupQBProgress = { viewModel.backupQbProgress() },
+                            onRestoreQBProgress = { bytes -> viewModel.restoreQbProgressBytes(bytes) },
                             articles = allArticles,
                             activeArticle = activeArticle,
                             words = allWords,
@@ -620,6 +640,10 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             onUpdateWord = { word -> viewModel.updateWord(word) },
                             onUpdateCourse = { cId, title, desc -> viewModel.updateCourse(cId, title, desc) },
                             onDeleteWord = { id -> viewModel.deleteWord(id) },
+                            onDeleteWords = { ids -> viewModel.deleteWords(ids) },
+                            onUpdateGroupForWords = { ids, newGroup -> viewModel.updateGroupForWords(ids, newGroup) },
+                            onMoveWordsToCourse = { ids, newCourseId -> viewModel.moveWordsToCourse(ids, newCourseId) },
+                            onUpdateStatusForWords = { ids, newStatus -> viewModel.updateStatusForWords(ids, newStatus) },
                             onReportWord = { id, isReported, reason -> viewModel.reportWord(id, isReported, reason) },
                             onDeleteGame = { id -> viewModel.deleteGameItem(id) },
                             onDeleteGamesBySection = { sec -> viewModel.deleteGamesBySection(sec) },
@@ -634,6 +658,8 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             isSyncingQB = isSyncingQB,
                             onImportQBFromUrl = { url, clearExisting -> viewModel.importQuestionBankFromUrl(url, clearExisting) },
                             onImportQBBytes = { bytes, fileName, clearExisting -> viewModel.importQuestionBankBytes(bytes, fileName, clearExisting) },
+                            onExportQBProgressToUri = { uri -> viewModel.exportQbProgressToUri(uri) },
+                            onRestoreQBProgress = { bytes -> viewModel.restoreQbProgressBytes(bytes) },
                             onResetData = { viewModel.resetToSample() }
                         )
                     }

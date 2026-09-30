@@ -90,7 +90,7 @@ object NotificationHelper {
     const val KEY_ENABLED = "notifications_enabled"
     const val KEY_HOUR = "notification_hour"
     const val KEY_MINUTE = "notification_minute"
-    const val KEY_FREQUENCY = "notification_frequency" // "1h", "2h", "3h", "4h", "6h", "daily"
+    const val KEY_FREQUENCY = "notification_frequency" // "10m", "15m", "20m", "30m", "45m", "1h", "2h", "3h", "4h", "6h", "8h", "12h", "daily"
     const val KEY_SHOW_WORD = "show_word_meaning" // boolean
     const val KEY_STREAK_ALERT = "streak_alert_enabled"
     const val KEY_SOUND_ENABLED = "sound_enabled"
@@ -240,11 +240,18 @@ object NotificationHelper {
     private fun calculateNextTriggerTime(frequency: String, hour: Int, minute: Int): Long {
         val now = System.currentTimeMillis()
         return when (frequency) {
+            "10m" -> now + 10 * 60 * 1000L
+            "15m" -> now + 15 * 60 * 1000L
+            "20m" -> now + 20 * 60 * 1000L
+            "30m" -> now + 30 * 60 * 1000L
+            "45m" -> now + 45 * 60 * 1000L
             "1h" -> now + 60 * 60 * 1000L
             "2h" -> now + 2 * 60 * 60 * 1000L
             "3h" -> now + 3 * 60 * 60 * 1000L
             "4h" -> now + 4 * 60 * 60 * 1000L
             "6h" -> now + 6 * 60 * 60 * 1000L
+            "8h" -> now + 8 * 60 * 60 * 1000L
+            "12h" -> now + 12 * 60 * 60 * 1000L
             else -> { // "daily"
                 val calendar = Calendar.getInstance().apply {
                     timeInMillis = now

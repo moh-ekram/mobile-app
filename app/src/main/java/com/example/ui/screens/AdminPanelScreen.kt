@@ -452,8 +452,8 @@ fun AdminPanelScreen(
     if (showUploadQBDialog) {
         UploadFileDialog(
             title = "Upload Question Bank File (Excel / CSV)",
-            subtitle = "Columns format: Id*, Question*, Opt1-4*, Ans*, Explanation, Filter1:label, Filter2:label, Filter3:label\nSupports Excel (.xlsx) and CSV files from device.",
-            defaultContent = "Id,Question,Opt1,Opt2,Opt3,Opt4,Ans,Explanation,Filter1:Category,Filter2:Difficulty,Filter3:Source\n\"qb_101\",\"Identify the appropriate synonym for 'Ephemeral':\",\"Transient#\",\"Eternal\",\"Persistent\",\"Enduring\",\"Transient\",\"Ephemeral means fleeting or transient.\",\"Vocabulary Mastery\",\"Medium\",\"Exam Prep\"",
+            subtitle = "Columns format: Id*, Question*, Opt1-4*, Ans*, Explanation, Filter1:Course, Filter2: Q.type, Filter3: Session\nSupports Excel (.xlsx), CSV, and JSON files from device.",
+            defaultContent = "Id,Question,Opt1,Opt2,Opt3,Opt4,Ans,Explanation,Filter1:Course,Filter2: Q.type,Filter3: Session\n\"qb_101\",\"Identify the appropriate synonym for 'Ephemeral':\",\"Transient#\",\"Eternal\",\"Persistent\",\"Enduring\",\"Transient\",\"Ephemeral means fleeting or transient.\",\"Vocabulary Mastery\",\"MCQ\",\"45th BCS\"",
             onDismiss = { showUploadQBDialog = false },
             onImport = { content, _, _ ->
                 onImportQB(content)

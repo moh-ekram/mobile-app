@@ -74,6 +74,7 @@ fun ProfileScreen(
     onRestoreBackup: (String, Boolean) -> Unit,
     onUpdateProfile: (displayName: String, avatarUri: String?, targetExam: String, dailyGoal: Int, bio: String) -> Unit = { _, _, _, _, _ -> },
     onLogout: () -> Unit,
+    onNavigate: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -490,12 +491,10 @@ fun ProfileScreen(
             }
         }
 
-        // 1. Unified Minimal Backup & Restore Card (Google Drive & Local Storage in one container)
+        // Unified Backup & Restore Navigation Card (Consolidated into Settings)
         item {
-            var selectedBackupTab by remember { mutableIntStateOf(0) } // 0: Google Drive, 1: Local Device
-            val isDriveLinked = customBackupTreeUri != null && customBackupTreeUri.contains("com.google.android.apps.docs.storage", ignoreCase = true)
-
             Card(
+                onClick = { onNavigate("settings") },
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = if (palette.isDark) palette.surface else Color.White),
                 border = CardDefaults.outlinedCardBorder().copy(
@@ -503,241 +502,52 @@ fun ProfileScreen(
                 ),
                 modifier = Modifier.testTag("unified_backup_restore_card")
             ) {
-                Column(
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    // Header with minimal tabs
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(CircleShape)
-                                    .background(if (palette.isDark) Color(0xFF1E3A8A) else Color(0xFFE0F2FE)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.CloudSync,
-                                    contentDescription = null,
-                                    tint = Color(0xFF0284C7),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                            Column {
-                                Text(
-                                    text = "Backup & Restore",
-                                    fontFamily = PoppinsFontFamily,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = palette.textPrimary
-                                )
-                                Text(
-                                    text = "Cloud & Local Storage",
-                                    fontFamily = PoppinsFontFamily,
-                                    fontSize = 11.sp,
-                                    color = palette.textSecondary
-                                )
-                            }
-                        }
-
-                        // Compact Segmented Switcher
-                        Row(
+                        Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (palette.isDark) Color(0xFF334155) else Color(0xFFF1F5F9))
-                                .padding(2.dp)
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(IndigoLight),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (selectedBackupTab == 0) (if (palette.isDark) Color(0xFF1E293B) else Color.White) else Color.Transparent)
-                                    .clickable { selectedBackupTab = 0 }
-                                    .padding(horizontal = 9.dp, vertical = 5.dp)
-                            ) {
-                                Text(
-                                    text = "Drive",
-                                    fontSize = 11.sp,
-                                    fontWeight = if (selectedBackupTab == 0) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (selectedBackupTab == 0) Color(0xFF0284C7) else palette.textSecondary
-                                )
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (selectedBackupTab == 1) (if (palette.isDark) Color(0xFF1E293B) else Color.White) else Color.Transparent)
-                                    .clickable { selectedBackupTab = 1 }
-                                    .padding(horizontal = 9.dp, vertical = 5.dp)
-                            ) {
-                                Text(
-                                    text = "Device",
-                                    fontSize = 11.sp,
-                                    fontWeight = if (selectedBackupTab == 1) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (selectedBackupTab == 1) IndigoPrimary else palette.textSecondary
-                                )
-                            }
+                            Icon(
+                                imageVector = Icons.Default.CloudSync,
+                                contentDescription = null,
+                                tint = IndigoPrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Column {
+                            Text(
+                                text = "ব্যাকআপ ও রিস্টোর (Backup & Sync)",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                color = palette.textPrimary
+                            )
+                            Text(
+                                text = "গুগল ড্রাইভ ও ফাইল ব্যাকআপ/রিস্টোর সব এখন সেটিংস পেজে",
+                                fontSize = 11.sp,
+                                color = palette.textMuted
+                            )
                         }
                     }
-
-                    if (selectedBackupTab == 0) {
-                        // Google Drive View
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF8FAFC))
-                                .border(1.dp, if (palette.isDark) Color(0xFF334155) else Color(0xFFE2E8F0), RoundedCornerShape(10.dp))
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Icon(
-                                    imageVector = if (isDriveLinked) Icons.Default.CheckCircle else Icons.Default.FolderOpen,
-                                    contentDescription = null,
-                                    tint = if (isDriveLinked) EmeraldSuccess else Color(0xFF0284C7),
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Text(
-                                    text = if (isDriveLinked) "Drive folder linked" else "No Drive folder set",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = palette.textPrimary
-                                )
-                            }
-                            Text(
-                                text = if (isDriveLinked) "Change" else "Link Folder",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0284C7),
-                                modifier = Modifier.clickable {
-                                    try {
-                                        folderPickerLauncher.launch(Uri.parse("content://com.google.android.apps.docs.storage/document/root"))
-                                    } catch (_: Exception) {
-                                        folderPickerLauncher.launch(null)
-                                    }
-                                }
-                            )
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = {
-                                    if (customBackupTreeUri != null) {
-                                        onBackupToDriveDirect()
-                                    } else {
-                                        try {
-                                            folderPickerLauncher.launch(Uri.parse("content://com.google.android.apps.docs.storage/document/root"))
-                                        } catch (_: Exception) {
-                                            folderPickerLauncher.launch(null)
-                                        }
-                                    }
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
-                                modifier = Modifier.weight(1f),
-                                contentPadding = PaddingValues(vertical = 10.dp)
-                            ) {
-                                Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Back up to Drive", fontFamily = PoppinsFontFamily, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            }
-
-                            OutlinedButton(
-                                onClick = {
-                                    if (customBackupTreeUri != null) {
-                                        onRestoreFromDriveDirect()
-                                    } else {
-                                        driveRestoreLauncher.launch(arrayOf("application/json", "text/*"))
-                                    }
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = EmeraldSuccess),
-                                border = BorderStroke(1.dp, EmeraldSuccess),
-                                modifier = Modifier.weight(1f),
-                                contentPadding = PaddingValues(vertical = 10.dp)
-                            ) {
-                                Icon(Icons.Default.SettingsBackupRestore, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Restore Drive", fontFamily = PoppinsFontFamily, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            }
-                        }
-                    } else {
-                        // Local Device View
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF8FAFC))
-                                .border(1.dp, if (palette.isDark) Color(0xFF334155) else Color(0xFFE2E8F0), RoundedCornerShape(10.dp))
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Last: $lastBackupStr",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = palette.textPrimary
-                                )
-                                Text(
-                                    text = if (customBackupTreeUri != null) "Folder: ${Uri.decode(customBackupTreeUri).takeLast(25)}" else "Default Storage",
-                                    fontSize = 10.sp,
-                                    color = palette.textSecondary,
-                                    maxLines = 1
-                                )
-                            }
-                            Text(
-                                text = "Change",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = IndigoPrimary,
-                                modifier = Modifier.clickable { folderPickerLauncher.launch(null) }
-                            )
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = onManualBackup,
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
-                                modifier = Modifier.weight(1f),
-                                contentPadding = PaddingValues(vertical = 10.dp)
-                            ) {
-                                Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Backup Device", fontFamily = PoppinsFontFamily, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            }
-
-                            OutlinedButton(
-                                onClick = { showRestoreDialog = true },
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = EmeraldSuccess),
-                                border = BorderStroke(1.dp, EmeraldSuccess),
-                                modifier = Modifier.weight(1f),
-                                contentPadding = PaddingValues(vertical = 10.dp)
-                            ) {
-                                Icon(Icons.Default.FileOpen, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Restore File", fontFamily = PoppinsFontFamily, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            }
-                        }
+                    FilledTonalButton(
+                        onClick = { onNavigate("settings") },
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                    ) {
+                        Text("Open", fontSize = 11.sp)
                     }
                 }
             }

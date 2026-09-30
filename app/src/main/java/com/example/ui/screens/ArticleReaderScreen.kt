@@ -59,6 +59,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.text.font.FontSynthesis
 import org.json.JSONObject
+import org.json.JSONArray
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -260,6 +261,17 @@ fun ArticleReaderView(
     var showReadingControlsSheet by remember { mutableStateOf(false) }
     var showChaptersDropdown by remember { mutableStateOf(false) }
 
+    // Word Match Filter State (Persisted in SharedPreferences)
+    // matchMode: "full" (পূর্ণ শব্দ) vs "partial" (শব্দাংশ)
+    var readerMatchMode by remember {
+        mutableStateOf(readerPrefs.getString("reader_match_mode", "full") ?: "full")
+    }
+    // minWordLength: "3", "4", "5", "5+"
+    var readerMinWordLength by remember {
+        mutableStateOf(readerPrefs.getString("reader_min_word_length", "3") ?: "3")
+    }
+    var showWordMatchFilterDialog by remember { mutableStateOf(false) }
+
     // TTS engine for audio pronunciation
     var tts: TextToSpeech? by remember { mutableStateOf(null) }
     DisposableEffect(Unit) {
@@ -298,13 +310,20 @@ fun ArticleReaderView(
             try {
                 val json = JSONObject(w.customPlacesJson)
                 val keys = json.keys()
+                val entries = mutableListOf<Pair<String, String>>()
                 while (keys.hasNext()) {
                     val k = keys.next()
+                    val v = json.optString(k, "").trim()
+                    if (v.isNotBlank()) entries.add(k to v)
+                }
+                for ((k, v) in entries) {
                     val kClean = k.lowercase().replace("_", "").replace(" ", "").replace("-", "")
                     if (kClean == "place1" || kClean.startsWith("place1") || kClean == "word") {
-                        val v = json.optString(k, "").trim()
-                        if (v.isNotBlank()) return v
+                        return v
                     }
+                }
+                if (entries.isNotEmpty()) {
+                    return entries[0].second
                 }
             } catch (_: Exception) {}
         }
@@ -316,19 +335,166 @@ fun ArticleReaderView(
             try {
                 val json = JSONObject(w.customPlacesJson)
                 val keys = json.keys()
+                val entries = mutableListOf<Pair<String, String>>()
                 while (keys.hasNext()) {
                     val k = keys.next()
+                    val v = json.optString(k, "").trim()
+                    if (v.isNotBlank()) entries.add(k to v)
+                }
+                for ((k, v) in entries) {
                     val kClean = k.lowercase().replace("_", "").replace(" ", "").replace("-", "")
                     if (kClean == "place2" || kClean.startsWith("place2") ||
-                        kClean == "meaning" || kClean.contains("meaning") || kClean.contains("definition") || kClean.contains("translation")
+                        kClean.contains("meaning") || kClean.contains("definition") || kClean.contains("translation")
                     ) {
-                        val v = json.optString(k, "").trim()
-                        if (v.isNotBlank()) return v
+                        return v
                     }
+                }
+                if (entries.size >= 2) {
+                    return entries[1].second
                 }
             } catch (_: Exception) {}
         }
         return w.meaning.trim()
+    }
+
+    fun getPlace3(w: VocabularyWordEntity): String {
+        if (!w.customPlacesJson.isNullOrBlank()) {
+            try {
+                val json = JSONObject(w.customPlacesJson)
+                val keys = json.keys()
+                val entries = mutableListOf<Pair<String, String>>()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    val v = json.optString(k, "").trim()
+                    if (v.isNotBlank()) entries.add(k to v)
+                }
+                // 1. Explicit key: place3 or place 3
+                for ((k, v) in entries) {
+                    val kClean = k.lowercase().replace("_", "").replace(" ", "").replace("-", "")
+                    if (kClean == "place3" || kClean.startsWith("place3")) {
+                        return v
+                    }
+                }
+                // 2. Semantic key: synonym, example, sentence
+                for ((k, v) in entries) {
+                    val kLower = k.lowercase()
+                    if (kLower.contains("synonym") || kLower.contains("example") || kLower.contains("sentence")) {
+                        return v
+                    }
+                }
+                // 3. Positional fallback: 3rd column
+                if (entries.size >= 3) {
+                    return entries[2].second
+                }
+            } catch (_: Exception) {}
+        }
+        // Entity fields fallback
+        return (w.synonyms?.ifBlank { null } ?: w.example?.ifBlank { null } ?: w.extraMeaning ?: "").trim()
+    }
+
+    fun getPlaceLabelAndValue(w: VocabularyWordEntity, placeNumber: Int, course: CourseEntity?): Pair<String, String> {
+        var courseHeaderLabel: String? = null
+        if (!course?.columnHeadersJson.isNullOrBlank()) {
+            try {
+                val arr = JSONArray(course.columnHeadersJson)
+                for (i in 0 until arr.length()) {
+                    val h = arr.getString(i).trim()
+                    val hClean = h.lowercase().replace("_", "").replace(" ", "").replace("-", "")
+                    if (hClean.startsWith("place$placeNumber")) {
+                        courseHeaderLabel = h
+                        break
+                    }
+                }
+                if (courseHeaderLabel == null && placeNumber - 1 in 0 until arr.length()) {
+                    courseHeaderLabel = arr.getString(placeNumber - 1).trim()
+                }
+            } catch (_: Exception) {}
+        }
+
+        var rawKey: String? = null
+        var foundVal: String? = null
+
+        if (!w.customPlacesJson.isNullOrBlank()) {
+            try {
+                val json = JSONObject(w.customPlacesJson)
+                val entries = mutableListOf<Pair<String, String>>()
+                val keys = json.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    val v = json.optString(k, "").trim()
+                    if (v.isNotBlank()) entries.add(k to v)
+                }
+
+                // 1. Explicit key match for place$placeNumber
+                for ((k, v) in entries) {
+                    val kClean = k.lowercase().replace("_", "").replace(" ", "").replace("-", "")
+                    if (kClean.startsWith("place$placeNumber")) {
+                        rawKey = k
+                        foundVal = v
+                        break
+                    }
+                }
+
+                // 2. Semantic key match
+                if (foundVal == null) {
+                    for ((k, v) in entries) {
+                        val kLower = k.lowercase()
+                        val match = when (placeNumber) {
+                            1 -> kLower == "word" || kLower.contains("term") || kLower.contains("vocabulary") || kLower.contains("headword")
+                            2 -> kLower.contains("meaning") || kLower.contains("definition") || kLower.contains("translation") || kLower.contains("bangla") || kLower.contains("অর্থ")
+                            3 -> kLower.contains("synonym") || kLower.contains("example") || kLower.contains("sentence") || kLower.contains("notes")
+                            else -> false
+                        }
+                        if (match) {
+                            rawKey = k
+                            foundVal = v
+                            break
+                        }
+                    }
+                }
+
+                // 3. Positional fallback from customPlacesJson entries
+                if (foundVal == null && placeNumber - 1 in entries.indices) {
+                    rawKey = entries[placeNumber - 1].first
+                    foundVal = entries[placeNumber - 1].second
+                }
+            } catch (_: Exception) {}
+        }
+
+        val finalValue = if (!foundVal.isNullOrBlank()) {
+            foundVal
+        } else {
+            when (placeNumber) {
+                1 -> w.word.trim()
+                2 -> w.meaning.trim()
+                3 -> (w.synonyms?.ifBlank { null } ?: w.example?.ifBlank { null } ?: w.extraMeaning ?: "").trim()
+                else -> ""
+            }
+        }
+
+        val effectiveRawLabel = rawKey ?: courseHeaderLabel ?: ""
+        val defaultFallbackLabel = when (placeNumber) {
+            1 -> "Word"
+            2 -> "Meaning"
+            3 -> if (!w.synonyms.isNullOrBlank()) "Synonyms" else if (!w.example.isNullOrBlank()) "Example" else "Synonyms"
+            else -> "Place $placeNumber"
+        }
+
+        val finalLabel = run {
+            var cl = effectiveRawLabel.trim()
+            if (cl.contains(":")) {
+                cl = cl.substringAfter(":").trim()
+            }
+            cl = cl.replace(Regex("""(?i)^place\s*\d+\s*[-_:]?\s*"""), "").trim()
+            cl = cl.replace(Regex("""(?i)\s*\(place\s*\d+\)"""), "").trim()
+            if (cl.isBlank() || cl.equals("place$placeNumber", ignoreCase = true)) {
+                defaultFallbackLabel
+            } else {
+                cl
+            }
+        }
+
+        return finalLabel to finalValue
     }
 
     // Filter vocabulary words based on selected courses AND blocked words
@@ -341,7 +507,10 @@ fun ArticleReaderView(
         courseFiltered.filter { w ->
             val w1 = w.word.trim().lowercase(Locale.ROOT)
             val p1 = getPlace1(w).trim().lowercase(Locale.ROOT)
-            !blockedWordsSet.contains(w1) && !blockedWordsSet.contains(p1)
+            val p2 = getPlace2(w).trim().lowercase(Locale.ROOT)
+            val p3 = getPlace3(w).trim().lowercase(Locale.ROOT)
+            !blockedWordsSet.contains(w1) && !blockedWordsSet.contains(p1) &&
+            !blockedWordsSet.contains(p2) && !blockedWordsSet.contains(p3)
         }
     }
 
@@ -359,6 +528,12 @@ fun ArticleReaderView(
             if (p1Key.isNotBlank()) {
                 val list = map.getOrPut(p1Key) { mutableListOf() }
                 if (list.none { it.id == w.id }) list.add(w)
+
+                val parts = p1Key.split("[,;/]+".toRegex()).map { it.trim() }.filter { it.isNotBlank() }
+                parts.forEach { part ->
+                    val pList = map.getOrPut(part) { mutableListOf() }
+                    if (pList.none { it.id == w.id }) pList.add(w)
+                }
             }
         }
         map
@@ -373,7 +548,7 @@ fun ArticleReaderView(
                 val list = map.getOrPut(trimmedMeaning) { mutableListOf() }
                 if (list.none { it.id == w.id }) list.add(w)
 
-                val parts = trimmedMeaning.split("[,;/]+".toRegex()).map { it.trim() }.filter { it.isNotBlank() }
+                val parts = trimmedMeaning.split("[,;/|।]+".toRegex()).map { it.trim() }.filter { it.isNotBlank() }
                 parts.forEach { part ->
                     val pList = map.getOrPut(part) { mutableListOf() }
                     if (pList.none { it.id == w.id }) pList.add(w)
@@ -385,8 +560,36 @@ fun ArticleReaderView(
                 val list = map.getOrPut(trimmedP2) { mutableListOf() }
                 if (list.none { it.id == w.id }) list.add(w)
 
-                val parts = trimmedP2.split("[,;/]+".toRegex()).map { it.trim() }.filter { it.isNotBlank() }
+                val parts = trimmedP2.split("[,;/|।]+".toRegex()).map { it.trim() }.filter { it.isNotBlank() }
                 parts.forEach { part ->
+                    val pList = map.getOrPut(part) { mutableListOf() }
+                    if (pList.none { it.id == w.id }) pList.add(w)
+                }
+            }
+        }
+        map
+    }
+
+    // Multi-map for Place3 (Synonyms / Example / Custom Place3) - stores all matching words across selected courses
+    val place3MultiMap = remember(activeWords) {
+        val map = mutableMapOf<String, MutableList<VocabularyWordEntity>>()
+        activeWords.forEach { w ->
+            val p3 = getPlace3(w)
+            if (p3.isNotBlank()) {
+                val trimmedP3 = p3.trim().lowercase(Locale.ROOT)
+                val list = map.getOrPut(trimmedP3) { mutableListOf() }
+                if (list.none { it.id == w.id }) list.add(w)
+
+                val parts = trimmedP3.split("[,;/|।]+".toRegex()).map { it.trim() }.filter { it.isNotBlank() }
+                parts.forEach { part ->
+                    val pList = map.getOrPut(part) { mutableListOf() }
+                    if (pList.none { it.id == w.id }) pList.add(w)
+                }
+            }
+            if (!w.synonyms.isNullOrBlank()) {
+                val synTrimmed = w.synonyms.trim().lowercase(Locale.ROOT)
+                val synParts = synTrimmed.split("[,;/|।]+".toRegex()).map { it.trim() }.filter { it.isNotBlank() }
+                synParts.forEach { part ->
                     val pList = map.getOrPut(part) { mutableListOf() }
                     if (pList.none { it.id == w.id }) pList.add(w)
                 }
@@ -1119,6 +1322,19 @@ fun ArticleReaderView(
                                     )
                                 }
 
+                                // Word Match Filter
+                                IconButton(
+                                    onClick = { showWordMatchFilterDialog = true },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.FilterAlt,
+                                        contentDescription = "Word Match Filter",
+                                        tint = if (readerMatchMode == "partial" || readerMinWordLength != "3") IndigoPrimary else subtleMuted,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+
                                 // Reading Controls Sheet
                                 IconButton(
                                     onClick = { showReadingControlsSheet = true },
@@ -1144,13 +1360,22 @@ fun ArticleReaderView(
                         }
                         val isExtraBold = (readerHighlightBold == "extra_bold")
 
-                        val annotatedText = remember(currentArticle.content, place1MultiMap, place2MultiMap, isExtraBold, isReaderNightMode) {
+                        val tokenToWordsMap = remember(currentArticle.content, place1MultiMap, place2MultiMap, place3MultiMap, readerMatchMode, readerMinWordLength) {
+                            mutableMapOf<String, List<VocabularyWordEntity>>()
+                        }
+
+                        val annotatedText = remember(currentArticle.content, place1MultiMap, place2MultiMap, place3MultiMap, readerMatchMode, readerMinWordLength, isExtraBold, isReaderNightMode) {
+                            tokenToWordsMap.clear()
                             buildPlaceHighlightedAnnotatedString(
                                 content = currentArticle.content,
                                 place1MultiMap = place1MultiMap,
                                 place2MultiMap = place2MultiMap,
+                                place3MultiMap = place3MultiMap,
+                                matchMode = readerMatchMode,
+                                minWordLengthSetting = readerMinWordLength,
                                 isExtraBold = isExtraBold,
-                                isNightMode = isReaderNightMode
+                                isNightMode = isReaderNightMode,
+                                tokenToWordsMap = tokenToWordsMap
                             )
                         }
 
@@ -1277,7 +1502,11 @@ fun ArticleReaderView(
                                             end = offset
                                         ).firstOrNull()?.let { annotation ->
                                             val key = annotation.item.lowercase(Locale.ROOT)
-                                            val matchedList = place1MultiMap[key] ?: place2MultiMap[key] ?: emptyList()
+                                            val matchedList = tokenToWordsMap[key]
+                                                ?: place1MultiMap[key]
+                                                ?: place2MultiMap[key]
+                                                ?: place3MultiMap[key]
+                                                ?: emptyList()
                                             if (matchedList.isNotEmpty()) {
                                                 matchedWordsForPopup = matchedList
                                                 popupWordIndex = 0
@@ -1364,54 +1593,36 @@ fun ArticleReaderView(
                                     .fillMaxWidth()
                                     .padding(horizontal = 16.dp, vertical = 12.dp)
                             ) {
-                                // Header: Word, Pronounce, Group badge, Match Navigator, Block & Close
+                                val (p1Label, p1Value) = getPlaceLabelAndValue(word, 1, currentCourse)
+                                val (p2Label, p2Value) = getPlaceLabelAndValue(word, 2, currentCourse)
+                                val (p3Label, p3Value) = getPlaceLabelAndValue(word, 3, currentCourse)
+                                val courseTitle = currentCourse?.title ?: courses.firstOrNull { it.id == word.courseId }?.title ?: ""
+
+                                // Header: Small Course Name badge (No group name), Match Navigator & Actions
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    // Left: Word + Audio + Group
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        modifier = Modifier.weight(1f, fill = false)
-                                    ) {
-                                        val displayWord = getPlace1(word).ifBlank { word.word }
-                                        Text(
-                                            text = displayWord,
-                                            fontFamily = selectArticleFontForText(displayWord),
-                                            fontSize = 17.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = primaryTextColor,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-
-                                        IconButton(
-                                            onClick = { tts?.speak(displayWord, TextToSpeech.QUEUE_FLUSH, null, "tts_article") },
-                                            modifier = Modifier.size(24.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Default.VolumeUp,
-                                                contentDescription = "Pronounce word",
-                                                tint = IndigoPrimary,
-                                                modifier = Modifier.size(15.dp)
-                                            )
-                                        }
-
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(6.dp))
-                                                .background(badgeBg)
-                                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                                    // Left: Course Name in small font (group name is NOT displayed)
+                                    if (courseTitle.isNotBlank()) {
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = if (isReaderNightMode) Color(0xFF312E81).copy(alpha = 0.45f) else Color(0xFFEEF2FF)
                                         ) {
                                             Text(
-                                                text = "G${word.group}",
-                                                fontSize = 10.sp,
-                                                color = badgeText,
-                                                fontWeight = FontWeight.Bold
+                                                text = courseTitle,
+                                                fontFamily = PoppinsFontFamily,
+                                                fontSize = 10.5.sp,
+                                                color = if (isReaderNightMode) Color(0xFFA5B4FC) else IndigoPrimary,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp)
                                             )
                                         }
+                                    } else {
+                                        Spacer(modifier = Modifier.width(1.dp))
                                     }
 
                                     // Right: Multi-match switcher + Block + Close
@@ -1490,62 +1701,109 @@ fun ArticleReaderView(
                                     }
                                 }
 
-                                // Optional Course badge sub-line
-                                if (currentCourse != null) {
-                                    Text(
-                                        text = currentCourse.title,
-                                        fontSize = 10.5.sp,
-                                        color = IndigoPrimary,
-                                        fontWeight = FontWeight.Medium,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.padding(top = 1.dp, bottom = 2.dp)
-                                    )
-                                }
+                                Spacer(modifier = Modifier.height(4.dp))
 
-                                // Place 2: Meaning / Definition
-                                val displayMeaning = getPlace2(word).ifBlank { word.meaning }
-                                Text(
-                                    text = displayMeaning,
-                                    fontFamily = selectArticleFontForText(displayMeaning),
-                                    fontSize = 13.5.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = meaningTextColor,
-                                    modifier = Modifier.padding(vertical = 2.dp)
-                                )
-
-                                if (!word.example.isNullOrBlank()) {
-                                    Text(
-                                        text = "“${word.example}”",
-                                        fontFamily = selectArticleFontForText(word.example),
-                                        fontSize = 11.5.sp,
-                                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
-                                        color = secondaryTextColor,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.padding(bottom = 2.dp)
-                                    )
-                                }
-
-                                if (!word.synonyms.isNullOrBlank()) {
-                                    Text(
-                                        text = "Synonyms: ${word.synonyms}",
-                                        fontSize = 10.5.sp,
-                                        color = secondaryTextColor.copy(alpha = 0.85f),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.padding(bottom = 6.dp)
-                                    )
-                                } else {
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                }
-
-                                // Minimal, Iconized Rating Buttons: Know, Review, Learn
+                                // Place 1: e.g. Word: Protect (with TTS speak button)
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 2.dp)
                                 ) {
-                                    // 1. Know
+                                    Text(
+                                        text = "$p1Label: ",
+                                        fontFamily = PoppinsFontFamily,
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isReaderNightMode) Color(0xFF94A3B8) else Color(0xFF475569)
+                                    )
+                                    Text(
+                                        text = p1Value,
+                                        fontFamily = selectArticleFontForText(p1Value),
+                                        fontSize = 16.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = primaryTextColor,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    IconButton(
+                                        onClick = { tts?.speak(p1Value, TextToSpeech.QUEUE_FLUSH, null, "tts_article") },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.VolumeUp,
+                                            contentDescription = "Pronounce word",
+                                            tint = IndigoPrimary,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                    }
+                                }
+
+                                // Place 2: e.g. Meaning: রক্ষা করা
+                                Row(
+                                    verticalAlignment = Alignment.Top,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "$p2Label: ",
+                                        fontFamily = PoppinsFontFamily,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isReaderNightMode) Color(0xFF94A3B8) else Color(0xFF475569)
+                                    )
+                                    Text(
+                                        text = p2Value,
+                                        fontFamily = selectArticleFontForText(p2Value),
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = meaningTextColor
+                                    )
+                                }
+
+                                // Place 3: e.g. Synonyms: [place3 column data]
+                                val displayP3 = if (p3Value.isNotBlank()) {
+                                    p3Value
+                                } else if (!currentCourse?.columnHeadersJson.isNullOrBlank() || !word.customPlacesJson.isNullOrBlank()) {
+                                    "—"
+                                } else {
+                                    null
+                                }
+                                if (displayP3 != null) {
+                                    Row(
+                                        verticalAlignment = Alignment.Top,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = "$p3Label: ",
+                                            fontFamily = PoppinsFontFamily,
+                                            fontSize = 12.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isReaderNightMode) Color(0xFF94A3B8) else Color(0xFF475569)
+                                        )
+                                        Text(
+                                            text = displayP3,
+                                            fontFamily = selectArticleFontForText(displayP3),
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = if (isReaderNightMode) Color(0xFFFBBF24) else Color(0xFFD97706)
+                                        )
+                                    }
+                                }
+
+                                // Rating Action Buttons: ONLY Icons (Know, Review, Don't Know)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 10.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    // 1. Know (Icon only)
                                     val isKnow = latestStatus.equals("know", ignoreCase = true)
                                     Button(
                                         onClick = {
@@ -1557,21 +1815,25 @@ fun ArticleReaderView(
                                                 popupWordIndex = 0
                                             }
                                         },
-                                        modifier = Modifier.weight(1f).height(34.dp),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(38.dp),
                                         shape = RoundedCornerShape(10.dp),
                                         colors = ButtonDefaults.buttonColors(
-                                            containerColor = if (isKnow) Color(0xFF10B981) else if (isReaderNightMode) Color(0xFF064E3B).copy(alpha = 0.4f) else Color(0xFFECFDF5),
+                                            containerColor = if (isKnow) Color(0xFF10B981) else if (isReaderNightMode) Color(0xFF064E3B).copy(alpha = 0.45f) else Color(0xFFECFDF5),
                                             contentColor = if (isKnow) Color.White else if (isReaderNightMode) Color(0xFF6EE7B7) else Color(0xFF047857)
                                         ),
                                         border = if (isKnow) null else BorderStroke(1.dp, if (isReaderNightMode) Color(0xFF047857) else Color(0xFFA7F3D0)),
-                                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                                        contentPadding = PaddingValues(0.dp)
                                     ) {
-                                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(13.dp))
-                                        Spacer(modifier = Modifier.width(3.dp))
-                                        Text("Know", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = "Know",
+                                            modifier = Modifier.size(20.dp)
+                                        )
                                     }
 
-                                    // 2. Review
+                                    // 2. Review (Icon only)
                                     val isConfused = latestStatus.equals("confusion", ignoreCase = true)
                                     Button(
                                         onClick = {
@@ -1583,21 +1845,25 @@ fun ArticleReaderView(
                                                 popupWordIndex = 0
                                             }
                                         },
-                                        modifier = Modifier.weight(1f).height(34.dp),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(38.dp),
                                         shape = RoundedCornerShape(10.dp),
                                         colors = ButtonDefaults.buttonColors(
-                                            containerColor = if (isConfused) Color(0xFFF59E0B) else if (isReaderNightMode) Color(0xFF78350F).copy(alpha = 0.4f) else Color(0xFFFFFBEB),
+                                            containerColor = if (isConfused) Color(0xFFF59E0B) else if (isReaderNightMode) Color(0xFF78350F).copy(alpha = 0.45f) else Color(0xFFFFFBEB),
                                             contentColor = if (isConfused) Color.White else if (isReaderNightMode) Color(0xFFFCD34D) else Color(0xFFB45309)
                                         ),
                                         border = if (isConfused) null else BorderStroke(1.dp, if (isReaderNightMode) Color(0xFFB45309) else Color(0xFFFDE68A)),
-                                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                                        contentPadding = PaddingValues(0.dp)
                                     ) {
-                                        Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(12.dp))
-                                        Spacer(modifier = Modifier.width(3.dp))
-                                        Text("Review", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                                        Icon(
+                                            imageVector = Icons.Default.Sync,
+                                            contentDescription = "Review",
+                                            modifier = Modifier.size(19.dp)
+                                        )
                                     }
 
-                                    // 3. Learn
+                                    // 3. Don't Know (Icon only)
                                     val isDontKnow = latestStatus.equals("dont_know", ignoreCase = true)
                                     Button(
                                         onClick = {
@@ -1609,18 +1875,22 @@ fun ArticleReaderView(
                                                 popupWordIndex = 0
                                             }
                                         },
-                                        modifier = Modifier.weight(1f).height(34.dp),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(38.dp),
                                         shape = RoundedCornerShape(10.dp),
                                         colors = ButtonDefaults.buttonColors(
-                                            containerColor = if (isDontKnow) Color(0xFFF43F5E) else if (isReaderNightMode) Color(0xFF881337).copy(alpha = 0.4f) else Color(0xFFFFF1F2),
+                                            containerColor = if (isDontKnow) Color(0xFFF43F5E) else if (isReaderNightMode) Color(0xFF881337).copy(alpha = 0.45f) else Color(0xFFFFF1F2),
                                             contentColor = if (isDontKnow) Color.White else if (isReaderNightMode) Color(0xFFFDA4AF) else Color(0xFFBE123C)
                                         ),
                                         border = if (isDontKnow) null else BorderStroke(1.dp, if (isReaderNightMode) Color(0xFFBE123C) else Color(0xFFFECDD3)),
-                                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                                        contentPadding = PaddingValues(0.dp)
                                     ) {
-                                        Icon(Icons.Default.School, contentDescription = null, modifier = Modifier.size(12.dp))
-                                        Spacer(modifier = Modifier.width(3.dp))
-                                        Text("Learn", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Don't Know",
+                                            modifier = Modifier.size(19.dp)
+                                        )
                                     }
                                 }
                             }
@@ -1959,10 +2229,11 @@ fun ArticleReaderView(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 8.dp)
+                    .verticalScroll(rememberScrollState())
                     .navigationBarsPadding(),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // 1. Top Circular/Pill Action Buttons (Headphones, Theme, Bookmark, Font)
+                // 1. Top Circular/Pill Action Buttons (Headphones, Theme, Bookmark, Font, Filter)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly,
@@ -2042,6 +2313,22 @@ fun ArticleReaderView(
                             Icons.Default.FontDownload,
                             contentDescription = "Toggle Font",
                             tint = if (readerFontFamily == "serif") IndigoPrimary else (if (isReaderNightMode) Color(0xFFE2E8F0) else Color(0xFF475569)),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    // Word Match Filter (Full vs Partial, Min length: 3, 4, 5, 5+)
+                    IconButton(
+                        onClick = { showWordMatchFilterDialog = true },
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(CircleShape)
+                            .background(if (readerMatchMode == "partial" || readerMinWordLength != "3") IndigoLight else (if (isReaderNightMode) Color(0xFF334155) else Color(0xFFF1F5F9)))
+                    ) {
+                        Icon(
+                            Icons.Default.FilterAlt,
+                            contentDescription = "Word Match Filter",
+                            tint = if (readerMatchMode == "partial" || readerMinWordLength != "3") IndigoPrimary else (if (isReaderNightMode) Color(0xFFE2E8F0) else Color(0xFF475569)),
                             modifier = Modifier.size(22.dp)
                         )
                     }
@@ -2210,6 +2497,21 @@ fun ArticleReaderView(
                     }
                 }
 
+                // 3.5 Word Match Filter Section (Place 1, 2, 3 / Full vs Partial / Min Length: 3, 4, 5, 5+)
+                WordMatchFilterSection(
+                    matchMode = readerMatchMode,
+                    minWordLength = readerMinWordLength,
+                    isNightMode = isReaderNightMode,
+                    onMatchModeChange = { newMode ->
+                        readerMatchMode = newMode
+                        readerPrefs.edit().putString("reader_match_mode", newMode).apply()
+                    },
+                    onMinWordLengthChange = { newLen ->
+                        readerMinWordLength = newLen
+                        readerPrefs.edit().putString("reader_min_word_length", newLen).apply()
+                    }
+                )
+
                 // 4. Fine-tuning Slider with Sun and Moon icons
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -2297,10 +2599,35 @@ fun ArticleReaderView(
             onDismiss = { showCourseFilterDialog = false }
         )
     }
+
+    // Word Match Filter Dialog (Full vs Partial, Min length 3, 4, 5, 5+)
+    if (showWordMatchFilterDialog) {
+        WordMatchFilterDialog(
+            matchMode = readerMatchMode,
+            minWordLength = readerMinWordLength,
+            isNightMode = isReaderNightMode,
+            onMatchModeChange = { newMode ->
+                readerMatchMode = newMode
+                readerPrefs.edit().putString("reader_match_mode", newMode).apply()
+            },
+            onMinWordLengthChange = { newLen ->
+                readerMinWordLength = newLen
+                readerPrefs.edit().putString("reader_min_word_length", newLen).apply()
+            },
+            onDismiss = { showWordMatchFilterDialog = false }
+        )
+    }
 }
 
+private data class ReaderTokenMatch(
+    val place: Int, // 1, 2, or 3
+    val words: List<VocabularyWordEntity>
+)
+
 /**
- * Builds an AnnotatedString that highlights words matching Place 1 (Word) or Place 2 (Meaning).
+ * Builds an AnnotatedString that highlights words matching Place 1 (Word), Place 2 (Meaning), or Place 3 (Synonym/Example).
+ * Supports Full Word (পূর্ণ শব্দ) vs Partial Word / Substring (শব্দাংশ) matching.
+ * Enforces minimum character count requirement (3, 4, 5, 5+).
  * Normal text with color - no background highlight, no underline. Bolded for high visibility.
  * Prevents duplicate highlighting of the same word in the same article.
  * Uses Aikya font for Bengali text.
@@ -2309,9 +2636,74 @@ private fun buildPlaceHighlightedAnnotatedString(
     content: String,
     place1MultiMap: Map<String, List<VocabularyWordEntity>>,
     place2MultiMap: Map<String, List<VocabularyWordEntity>>,
+    place3MultiMap: Map<String, List<VocabularyWordEntity>>,
+    matchMode: String = "full", // "full" or "partial"
+    minWordLengthSetting: String = "3", // "3", "4", "5", "5+"
     isExtraBold: Boolean = false,
-    isNightMode: Boolean = false
+    isNightMode: Boolean = false,
+    tokenToWordsMap: MutableMap<String, List<VocabularyWordEntity>> = mutableMapOf()
 ): AnnotatedString {
+    val minLen = when (minWordLengthSetting) {
+        "3" -> 3
+        "4" -> 4
+        "5" -> 5
+        "5+" -> 6
+        else -> 3
+    }
+
+    // Pre-filter eligible keys for substring matching sorted by descending length
+    val eligiblePlace1 = if (matchMode == "partial") {
+        place1MultiMap.keys.filter { it.length >= minLen }.sortedByDescending { it.length }
+    } else emptyList()
+
+    val eligiblePlace2 = if (matchMode == "partial") {
+        place2MultiMap.keys.filter { it.length >= minLen }.sortedByDescending { it.length }
+    } else emptyList()
+
+    val eligiblePlace3 = if (matchMode == "partial") {
+        place3MultiMap.keys.filter { it.length >= minLen }.sortedByDescending { it.length }
+    } else emptyList()
+
+    val matchMemo = mutableMapOf<String, ReaderTokenMatch?>()
+
+    fun findMatch(cleanToken: String): ReaderTokenMatch? {
+        if (cleanToken.length < minLen) return null
+        return matchMemo.getOrPut(cleanToken) {
+            // 1. Exact match check across Place 1, Place 2, Place 3
+            if (place1MultiMap.containsKey(cleanToken)) {
+                ReaderTokenMatch(1, place1MultiMap[cleanToken] ?: emptyList())
+            } else if (place2MultiMap.containsKey(cleanToken)) {
+                ReaderTokenMatch(2, place2MultiMap[cleanToken] ?: emptyList())
+            } else if (place3MultiMap.containsKey(cleanToken)) {
+                ReaderTokenMatch(3, place3MultiMap[cleanToken] ?: emptyList())
+            } else if (matchMode == "partial") {
+                // 2. Partial / Substring match: Place 1 -> Place 2 -> Place 3
+                val p1Key = eligiblePlace1.firstOrNull { k ->
+                    cleanToken.contains(k) || k.contains(cleanToken)
+                }
+                if (p1Key != null) {
+                    ReaderTokenMatch(1, place1MultiMap[p1Key] ?: emptyList())
+                } else {
+                    val p2Key = eligiblePlace2.firstOrNull { k ->
+                        cleanToken.contains(k) || k.contains(cleanToken)
+                    }
+                    if (p2Key != null) {
+                        ReaderTokenMatch(2, place2MultiMap[p2Key] ?: emptyList())
+                    } else {
+                        val p3Key = eligiblePlace3.firstOrNull { k ->
+                            cleanToken.contains(k) || k.contains(cleanToken)
+                        }
+                        if (p3Key != null) {
+                            ReaderTokenMatch(3, place3MultiMap[p3Key] ?: emptyList())
+                        } else null
+                    }
+                }
+            } else {
+                null
+            }
+        }
+    }
+
     return buildAnnotatedString {
         val regex = Regex("""[\w\u0980-\u09FF]+|[^\w\s\u0980-\u09FF]+|\s+""")
         val matches = regex.findAll(content)
@@ -2319,6 +2711,7 @@ private fun buildPlaceHighlightedAnnotatedString(
         val targetWeight = if (isExtraBold) FontWeight.Black else FontWeight.ExtraBold
         val place1Color = if (isNightMode) Color(0xFF60A5FA) else Color(0xFF1D4ED8)
         val place2Color = if (isNightMode) Color(0xFF34D399) else Color(0xFF047857)
+        val place3Color = if (isNightMode) Color(0xFFFBBF24) else Color(0xFFD97706)
 
         // Set to ensure a word is only highlighted ONCE per article
         val seenKeys = mutableSetOf<String>()
@@ -2326,32 +2719,22 @@ private fun buildPlaceHighlightedAnnotatedString(
         for (m in matches) {
             val token = m.value
             val cleanToken = token.trim().lowercase(Locale.ROOT)
-            val isPlace1 = place1MultiMap.containsKey(cleanToken)
-            val isPlace2 = place2MultiMap.containsKey(cleanToken)
+            val matchInfo = findMatch(cleanToken)
             val isAlreadySeen = seenKeys.contains(cleanToken)
 
-            if (isPlace1 && !isAlreadySeen) {
+            if (matchInfo != null && !isAlreadySeen) {
                 seenKeys.add(cleanToken)
+                tokenToWordsMap[cleanToken] = matchInfo.words
                 val isBengali = isBengaliText(token)
-                pushStringAnnotation(tag = "VOCAB_MATCH", annotation = cleanToken)
-                withStyle(
-                    SpanStyle(
-                        color = place1Color,
-                        fontWeight = targetWeight,
-                        fontFamily = if (isBengali) AikyaFontFamily else PoppinsFontFamily,
-                        fontSynthesis = FontSynthesis.All
-                    )
-                ) {
-                    append(token)
+                val highlightColor = when (matchInfo.place) {
+                    1 -> place1Color
+                    2 -> place2Color
+                    else -> place3Color
                 }
-                pop()
-            } else if (isPlace2 && !isAlreadySeen) {
-                seenKeys.add(cleanToken)
-                val isBengali = isBengaliText(token)
                 pushStringAnnotation(tag = "VOCAB_MATCH", annotation = cleanToken)
                 withStyle(
                     SpanStyle(
-                        color = place2Color,
+                        color = highlightColor,
                         fontWeight = targetWeight,
                         fontFamily = if (isBengali) AikyaFontFamily else PoppinsFontFamily,
                         fontSynthesis = FontSynthesis.All
@@ -3487,6 +3870,441 @@ private fun CourseFilterDialog(
                     ) {
                         Text("Apply", fontFamily = PoppinsFontFamily, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WordMatchFilterSection(
+    matchMode: String,
+    minWordLength: String,
+    isNightMode: Boolean,
+    onMatchModeChange: (String) -> Unit,
+    onMinWordLengthChange: (String) -> Unit,
+    showCard: Boolean = true,
+    showHeader: Boolean = true
+) {
+    val cardBg = if (isNightMode) Color(0xFF1E293B) else Color(0xFFF8FAFC)
+    val cardBorder = if (isNightMode) Color(0xFF334155) else Color(0xFFE2E8F0)
+    val titleColor = if (isNightMode) Color(0xFFF1F5F9) else Color(0xFF0F172A)
+    val subColor = if (isNightMode) Color(0xFF94A3B8) else Color(0xFF64748B)
+
+    val content = @Composable {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            // Optional Header (used when embedded in sheets without an external title)
+            if (showHeader) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(if (isNightMode) Color(0xFF312E81) else IndigoLight),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.FilterAlt,
+                            contentDescription = null,
+                            tint = if (isNightMode) Color(0xFFA5B4FC) else IndigoPrimary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = "Word Match Filter",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = titleColor
+                        )
+                        Text(
+                            text = "Matches Place 1, 2, or 3",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 11.sp,
+                            color = if (isNightMode) Color(0xFFA5B4FC) else IndigoPrimary
+                        )
+                    }
+                }
+            }
+
+            // 1. Match Mode: Full Word vs Partial (Iconized & Minimal)
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Tune,
+                        contentDescription = null,
+                        tint = subColor,
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Text(
+                        text = "Match Mode",
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = subColor
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Full Word
+                    val isFull = matchMode == "full"
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isFull) IndigoPrimary else (if (isNightMode) Color(0xFF334155) else Color(0xFFF1F5F9)),
+                        border = if (isFull) null else BorderStroke(1.dp, if (isNightMode) Color(0xFF475569) else Color(0xFFE2E8F0)),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { onMatchModeChange("full") }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(vertical = 10.dp, horizontal = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                Icons.Default.TextFields,
+                                contentDescription = null,
+                                tint = if (isFull) Color.White else subColor,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "Full Word",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 12.5.sp,
+                                    fontWeight = if (isFull) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isFull) Color.White else (if (isNightMode) Color(0xFFCBD5E1) else Color(0xFF334155))
+                                )
+                                Text(
+                                    text = "Exact",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 10.sp,
+                                    color = if (isFull) Color.White.copy(alpha = 0.8f) else subColor
+                                )
+                            }
+                        }
+                    }
+
+                    // Partial Word
+                    val isPartial = matchMode == "partial"
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isPartial) IndigoPrimary else (if (isNightMode) Color(0xFF334155) else Color(0xFFF1F5F9)),
+                        border = if (isPartial) null else BorderStroke(1.dp, if (isNightMode) Color(0xFF475569) else Color(0xFFE2E8F0)),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable { onMatchModeChange("partial") }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(vertical = 10.dp, horizontal = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                Icons.Default.LinearScale,
+                                contentDescription = null,
+                                tint = if (isPartial) Color.White else subColor,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = "Partial",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 12.5.sp,
+                                    fontWeight = if (isPartial) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isPartial) Color.White else (if (isNightMode) Color(0xFFCBD5E1) else Color(0xFF334155))
+                                )
+                                Text(
+                                    text = "Substring",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 10.sp,
+                                    color = if (isPartial) Color.White.copy(alpha = 0.8f) else subColor
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. Minimum Word Length: 3, 4, 5, 5+
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        Icons.Default.FormatSize,
+                        contentDescription = null,
+                        tint = subColor,
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Text(
+                        text = "Min Word Length",
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = subColor
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val lengthOptions = listOf(
+                        "3" to "3+",
+                        "4" to "4+",
+                        "5" to "5+",
+                        "5+" to "6+"
+                    )
+                    lengthOptions.forEach { (key, displayLabel) ->
+                        val isSelected = minWordLength == key
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isSelected) IndigoPrimary else (if (isNightMode) Color(0xFF334155) else Color(0xFFF1F5F9)),
+                            border = if (isSelected) null else BorderStroke(1.dp, if (isNightMode) Color(0xFF475569) else Color(0xFFE2E8F0)),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { onMinWordLengthChange(key) }
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(vertical = 8.dp, horizontal = 2.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = displayLabel,
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isSelected) Color.White else (if (isNightMode) Color(0xFFCBD5E1) else Color(0xFF334155))
+                                )
+                                Text(
+                                    text = "chars",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 9.sp,
+                                    color = if (isSelected) Color.White.copy(alpha = 0.8f) else subColor
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. Covered Places Scope (Iconized & Minimal)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (isNightMode) Color(0xFF0F172A) else Color(0xFFF1F5F9))
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Layers,
+                        contentDescription = null,
+                        tint = subColor,
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Text(
+                        text = "Scope:",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = subColor
+                    )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    // Place 1
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(if (isNightMode) Color(0xFF1E3A8A) else Color(0xFFDBEAFE))
+                            .padding(horizontal = 5.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "P1 Word",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (isNightMode) Color(0xFF93C5FD) else Color(0xFF1D4ED8)
+                        )
+                    }
+                    // Place 2
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(if (isNightMode) Color(0xFF064E3B) else Color(0xFFD1FAE5))
+                            .padding(horizontal = 5.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "P2 Meaning",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (isNightMode) Color(0xFF6EE7B7) else Color(0xFF047857)
+                        )
+                    }
+                    // Place 3
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(if (isNightMode) Color(0xFF78350F) else Color(0xFFFEF3C7))
+                            .padding(horizontal = 5.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "P3 Other",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (isNightMode) Color(0xFFFDE68A) else Color(0xFFD97706)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    if (showCard) {
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = cardBg),
+            border = BorderStroke(1.dp, cardBorder),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Box(modifier = Modifier.padding(14.dp)) {
+                content()
+            }
+        }
+    } else {
+        content()
+    }
+}
+
+@Composable
+private fun WordMatchFilterDialog(
+    matchMode: String,
+    minWordLength: String,
+    isNightMode: Boolean,
+    onMatchModeChange: (String) -> Unit,
+    onMinWordLengthChange: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 20.dp)
+                .widthIn(max = 380.dp),
+            shape = RoundedCornerShape(22.dp),
+            color = if (isNightMode) Color(0xFF1E293B) else Color.White,
+            shadowElevation = 12.dp,
+            border = BorderStroke(1.dp, if (isNightMode) Color(0xFF334155) else Color(0xFFE2E8F0))
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Header with icon and Close
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(if (isNightMode) Color(0xFF312E81) else IndigoLight),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.FilterAlt,
+                                contentDescription = null,
+                                tint = if (isNightMode) Color(0xFFA5B4FC) else IndigoPrimary,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        }
+                        Text(
+                            text = "Word Match Filter",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isNightMode) Color.White else Color(0xFF0F172A)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .background(if (isNightMode) Color(0xFF334155) else SlateLight)
+                    ) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = if (isNightMode) Color(0xFF94A3B8) else SlateMuted,
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
+                }
+
+                // Filter options (single container, no nested card, no duplicate header)
+                WordMatchFilterSection(
+                    matchMode = matchMode,
+                    minWordLength = minWordLength,
+                    isNightMode = isNightMode,
+                    onMatchModeChange = onMatchModeChange,
+                    onMinWordLengthChange = onMinWordLengthChange,
+                    showCard = false,
+                    showHeader = false
+                )
+
+                // Apply action button (English, minimal, iconized)
+                Button(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        Icons.Default.Check,
+                        contentDescription = null,
+                        modifier = Modifier.size(17.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Apply",
+                        fontFamily = PoppinsFontFamily,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.5.sp
+                    )
                 }
             }
         }

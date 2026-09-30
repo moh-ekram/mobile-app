@@ -95,6 +95,7 @@ data class GamePracticeEntity(
     val opt2: String,
     val opt3: String,
     val opt4: String,
+    val opt5: String = "",
     val answer: String,
     val explanation: String? = null,
     val lastAttemptStatus: String? = "not_studied", // "correct", "incorrect", "not_studied"
@@ -110,14 +111,30 @@ data class QuestionBankEntity(
     val opt2: String,
     val opt3: String,
     val opt4: String,
+    val opt5: String = "",
     val answer: String,
     val explanation: String? = null,
+    val stem: String? = null,
+    val stemId: String? = null,
     val filter1: String? = null,
     val filter2: String? = null,
     val filter3: String? = null,
     val filter1Label: String? = "Category",
     val filter2Label: String? = "Difficulty",
-    val filter3Label: String? = "Source"
+    val filter3Label: String? = "Source",
+    val bankName: String = "General QB",
+    val status: String = "unrated", // 'know', 'confusion', 'dont_know', 'unrated'
+    val timesAnswered: Int = 0,
+    val lastAnsweredAt: Long = 0L
+)
+
+data class QbProgressRecord(
+    val id: String,
+    val status: String = "unrated",
+    val timesAnswered: Int = 0,
+    val lastAnsweredAt: Long = 0L,
+    val bankName: String? = null,
+    val questionPrompt: String = ""
 )
 
 @Entity(tableName = "user_progress")

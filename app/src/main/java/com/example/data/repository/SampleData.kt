@@ -467,7 +467,8 @@ To any perceptive observer, metropolitan life illustrates just how poignant and 
             filter3 = "Exam Prep",
             filter1Label = "Category",
             filter2Label = "Difficulty",
-            filter3Label = "Source"
+            filter3Label = "Source",
+            bankName = "GRE QB"
         ),
         QuestionBankEntity(
             id = "qb_2",
@@ -483,7 +484,8 @@ To any perceptive observer, metropolitan life illustrates just how poignant and 
             filter3 = "Manhattan 500",
             filter1Label = "Category",
             filter2Label = "Difficulty",
-            filter3Label = "Source"
+            filter3Label = "Source",
+            bankName = "GRE QB"
         ),
         QuestionBankEntity(
             id = "qb_3",
@@ -499,7 +501,8 @@ To any perceptive observer, metropolitan life illustrates just how poignant and 
             filter3 = "Exam Prep",
             filter1Label = "Category",
             filter2Label = "Difficulty",
-            filter3Label = "Source"
+            filter3Label = "Source",
+            bankName = "GRE QB"
         ),
         QuestionBankEntity(
             id = "qb_4",
@@ -515,7 +518,8 @@ To any perceptive observer, metropolitan life illustrates just how poignant and 
             filter3 = "Oxford Core",
             filter1Label = "Category",
             filter2Label = "Difficulty",
-            filter3Label = "Source"
+            filter3Label = "Source",
+            bankName = "GRE QB"
         ),
         QuestionBankEntity(
             id = "qb_5",
@@ -531,7 +535,8 @@ To any perceptive observer, metropolitan life illustrates just how poignant and 
             filter3 = "Manhattan 500",
             filter1Label = "Category",
             filter2Label = "Difficulty",
-            filter3Label = "Source"
+            filter3Label = "Source",
+            bankName = "GRE QB"
         ),
         QuestionBankEntity(
             id = "qb_6",
@@ -547,7 +552,110 @@ To any perceptive observer, metropolitan life illustrates just how poignant and 
             filter3 = "Exam Prep",
             filter1Label = "Category",
             filter2Label = "Difficulty",
-            filter3Label = "Source"
+            filter3Label = "Source",
+            bankName = "GRE QB"
+        ),
+        QuestionBankEntity(
+            id = "qb_bcs_1",
+            question = "What is the antonym of the word 'BENEVOLENT'?",
+            opt1 = "Kind",
+            opt2 = "Malevolent#",
+            opt3 = "Generous",
+            opt4 = "Affectionate",
+            answer = "Malevolent",
+            explanation = "'Benevolent' means well-meaning and kindly; 'Malevolent' means wishing evil or harm to others.",
+            filter1 = "English Vocabulary",
+            filter2 = "Easy",
+            filter3 = "BCS 44th",
+            filter1Label = "Topic",
+            filter2Label = "Difficulty",
+            filter3Label = "Exam",
+            bankName = "BCS QB"
+        ),
+        QuestionBankEntity(
+            id = "qb_bcs_2",
+            question = "Choose the correct preposition: 'He died ______ cholera.'",
+            opt1 = "from",
+            opt2 = "of#",
+            opt3 = "by",
+            opt4 = "for",
+            answer = "of",
+            explanation = "In English grammar, one dies 'of' a disease (e.g., died of cholera, cancer).",
+            filter1 = "Appropriate Preposition",
+            filter2 = "Medium",
+            filter3 = "BCS 43rd",
+            filter1Label = "Topic",
+            filter2Label = "Difficulty",
+            filter3Label = "Exam",
+            bankName = "BCS QB"
+        ),
+        QuestionBankEntity(
+            id = "qb_bcs_3",
+            question = "Identify the correct passive voice: 'Who taught you French?'",
+            opt1 = "By whom were you taught French?#",
+            opt2 = "By whom you were taught French?",
+            opt3 = "Who was taught French by you?",
+            opt4 = "By who was French taught to you?",
+            answer = "By whom were you taught French?",
+            explanation = "'Who' transforms into 'By whom', followed by interrogative word order: auxiliary 'were' + subject 'you' + past participle 'taught'.",
+            filter1 = "Voice Change",
+            filter2 = "Medium",
+            filter3 = "BCS 41st",
+            filter1Label = "Topic",
+            filter2Label = "Difficulty",
+            filter3Label = "Exam",
+            bankName = "BCS QB"
+        ),
+        QuestionBankEntity(
+            id = "qb_bcs_4",
+            question = "Which one is the correct spelling?",
+            opt1 = "Liaison#",
+            opt2 = "Liasion",
+            opt3 = "Liason",
+            opt4 = "Liaisone",
+            answer = "Liaison",
+            explanation = "The standard English spelling is 'Liaison' (L-I-A-I-S-O-N).",
+            filter1 = "Spelling",
+            filter2 = "Easy",
+            filter3 = "BCS 40th",
+            filter1Label = "Topic",
+            filter2Label = "Difficulty",
+            filter3Label = "Exam",
+            bankName = "BCS QB"
+        ),
+        QuestionBankEntity(
+            id = "qb_bcs_5",
+            question = "The idiom 'A pipe dream' means:",
+            opt1 = "A realistic target",
+            opt2 = "An illusory or impossible hope#",
+            opt3 = "A fearful nightmare",
+            opt4 = "A scientific hypothesis",
+            answer = "An illusory or impossible hope",
+            explanation = "'A pipe dream' refers to an unattainable or fanciful hope or scheme.",
+            filter1 = "Idioms & Phrases",
+            filter2 = "Hard",
+            filter3 = "BCS 38th",
+            filter1Label = "Topic",
+            filter2Label = "Difficulty",
+            filter3Label = "Exam",
+            bankName = "BCS QB"
+        ),
+        QuestionBankEntity(
+            id = "qb_bcs_6",
+            question = "What is the abstract noun form of 'Humble'?",
+            opt1 = "Humbly",
+            opt2 = "Humility#",
+            opt3 = "Humbleness",
+            opt4 = "Humiliate",
+            answer = "Humility",
+            explanation = "The primary abstract noun form corresponding to the adjective 'Humble' is 'Humility'.",
+            filter1 = "Parts of Speech",
+            filter2 = "Easy",
+            filter3 = "BCS 37th",
+            filter1Label = "Topic",
+            filter2Label = "Difficulty",
+            filter3Label = "Exam",
+            bankName = "BCS QB"
         )
     )
 }

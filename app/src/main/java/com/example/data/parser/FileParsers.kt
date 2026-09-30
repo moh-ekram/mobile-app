@@ -42,9 +42,8 @@ object FileParsers {
      * Or standard headers: word, meaning, example, synonyms, extra, mnemonic
      */
     fun parseCourseCsv(content: String, courseId: String = "course_default"): List<VocabularyWordEntity> {
-        val lines = content.lines().filter { it.isNotBlank() }
-        if (lines.size < 2) return emptyList()
-        val rows = lines.map { parseCsvLine(it) }
+        val rows = parseCsv(content)
+        if (rows.size < 2) return emptyList()
         return parseCourseRows(rows, courseId)
     }
 
@@ -220,8 +219,7 @@ object FileParsers {
      * Validates and parses Game/Practice data from CSV text with detailed anomaly reporting.
      */
     fun validateAndParseGameCsv(content: String, defaultSheetType: String = "practice"): GameValidationSummary {
-        val lines = content.lines().filter { it.isNotBlank() }
-        val rows = lines.map { parseCsvLine(it) }
+        val rows = parseCsv(content)
         return validateAndParseGameSheets(listOf(ParsedSheet(defaultSheetType, rows)))
     }
 
@@ -237,7 +235,7 @@ object FileParsers {
 
         for (sheet in sheets) {
             if (sheet.rows.size < 2) continue
-            val headers = sheet.rows[0].map { it.trim().lowercase() }
+            val headers = sheet.rows[0].map { it.trim().replace("\uFEFF", "").replace("\u200B", "").lowercase() }
 
             var qIdx = headers.indexOfFirst {
                 it.contains("question") || it.contains("ques") || it.contains("prompt") || it.contains("sentence")
@@ -253,6 +251,9 @@ object FileParsers {
             }
             var opt4Idx = headers.indexOfFirst {
                 it.contains("opt4") || it.contains("opt 4") || it.contains("option 4") || it.contains("choice 4") || it == "d" || it == "opt_4"
+            }
+            var opt5Idx = headers.indexOfFirst {
+                it.contains("opt5") || it.contains("opt 5") || it.contains("option 5") || it.contains("choice 5") || it == "e" || it == "opt_5"
             }
             var ansIdx = headers.indexOfFirst {
                 it.contains("ans") || it.contains("answer") || it.contains("correct") || it.contains("solution") || it.contains("key")
@@ -272,6 +273,7 @@ object FileParsers {
                 opt2Idx = qIdx + 2
                 opt3Idx = qIdx + 3
                 opt4Idx = qIdx + 4
+                if (headers.size >= 6) opt5Idx = qIdx + 5
             }
 
             var sheetValidCount = 0
@@ -289,15 +291,17 @@ object FileParsers {
                 var opt2 = if (opt2Idx in row.indices) row[opt2Idx].trim() else ""
                 var opt3 = if (opt3Idx in row.indices) row[opt3Idx].trim() else ""
                 var opt4 = if (opt4Idx in row.indices) row[opt4Idx].trim() else ""
+                var opt5 = if (opt5Idx in row.indices) row[opt5Idx].trim() else ""
                 var answer = if (ansIdx in row.indices) row[ansIdx].trim() else ""
                 val explanation = if (expIdx in row.indices && row[expIdx].isNotBlank()) row[expIdx].trim() else null
                 val sheetType = if (typeIdx in row.indices && row[typeIdx].isNotBlank()) row[typeIdx].trim() else sheet.sheetName
 
-                val resolved = QuestionAnswerResolver.resolve(opt1, opt2, opt3, opt4, answer)
+                val resolved = QuestionAnswerResolver.resolve(opt1, opt2, opt3, opt4, opt5, answer)
                 opt1 = resolved.cleanOpt1
                 opt2 = resolved.cleanOpt2
                 opt3 = resolved.cleanOpt3
                 opt4 = resolved.cleanOpt4
+                opt5 = resolved.cleanOpt5
                 answer = resolved.correctAnswer
 
                 // Anomaly Detection
@@ -305,7 +309,7 @@ object FileParsers {
                 if (question.isBlank()) {
                     rowAnomalies.add("Row $rowNum [${sheet.sheetName}]: Question is empty")
                 }
-                val validOptions = listOf(opt1, opt2, opt3, opt4).filter { it.isNotBlank() }
+                val validOptions = listOf(opt1, opt2, opt3, opt4, opt5).filter { it.isNotBlank() }
                 if (validOptions.size < 2) {
                     rowAnomalies.add("Row $rowNum [${sheet.sheetName}]: At least 2 options required (found ${validOptions.size})")
                 }
@@ -327,6 +331,7 @@ object FileParsers {
                             opt2 = opt2,
                             opt3 = opt3,
                             opt4 = opt4,
+                            opt5 = opt5,
                             answer = answer,
                             explanation = explanation
                         )
@@ -353,74 +358,226 @@ object FileParsers {
      * Parses Question Bank from 2D rows (CSV or Excel sheets).
      * Columns: Id*, Question*, Opt1-4*, Ans*, Explanation, Filter1:label, Filter2:label, Filter3:label
      */
-    fun parseQuestionBankRows(rows: List<List<String>>): List<QuestionBankEntity> {
+    fun parseQuestionBankRows(rows: List<List<String>>, defaultBankName: String = "General QB"): List<QuestionBankEntity> {
         if (rows.size < 2) return emptyList()
 
-        val rawHeaders = rows[0].map { it.trim() }
+        val rawHeaders = rows[0].map { it.trim().replace("\uFEFF", "").replace("\u200B", "") }
         val headers = rawHeaders.map { it.lowercase() }
 
-        val idIdx = headers.indexOfFirst { it == "id" || it == "id*" }
-        val qIdx = headers.indexOfFirst { it.contains("question") }
-        val opt1Idx = headers.indexOfFirst { it.contains("opt1") || it == "option 1" || it == "option1" }
-        val opt2Idx = headers.indexOfFirst { it.contains("opt2") || it == "option 2" || it == "option2" }
-        val opt3Idx = headers.indexOfFirst { it.contains("opt3") || it == "option 3" || it == "option3" }
-        val opt4Idx = headers.indexOfFirst { it.contains("opt4") || it == "option 4" || it == "option4" }
+        val idIdx = headers.indexOfFirst { it == "id" || it == "id*" || it == "#" || it.contains("qid") }
+        val qIdx = headers.indexOfFirst { it.contains("question") || it.contains("ques") || it.contains("prompt") || it.contains("sentence") }
+        fun findOptionIdx(optNum: Int, letter: Char): Int {
+            return headers.indexOfFirst { h ->
+                val norm = h.replace(" ", "").replace("_", "").replace("-", "")
+                norm == "opt$optNum" ||
+                        norm == "option$optNum" ||
+                        norm == "choice$optNum" ||
+                        norm == "opt($optNum)" ||
+                        norm == letter.toString() ||
+                        norm == "($letter)" ||
+                        norm == "$letter." ||
+                        h.contains("opt$optNum") ||
+                        h.contains("option $optNum") ||
+                        h.contains("option_$optNum") ||
+                        h.contains("choice $optNum") ||
+                        h.contains("choice_$optNum")
+            }
+        }
+        var opt1Idx = findOptionIdx(1, 'a')
+        var opt2Idx = findOptionIdx(2, 'b')
+        var opt3Idx = findOptionIdx(3, 'c')
+        var opt4Idx = findOptionIdx(4, 'd')
+        var opt5Idx = findOptionIdx(5, 'e')
+
+        if (opt1Idx == -1 && qIdx != -1 && headers.size >= qIdx + 5) {
+            opt1Idx = qIdx + 1
+            opt2Idx = qIdx + 2
+            opt3Idx = qIdx + 3
+            opt4Idx = qIdx + 4
+            if (headers.size >= qIdx + 6) opt5Idx = qIdx + 5
+        }
         val ansIdx = headers.indexOfFirst { it.contains("ans") || it.contains("correct") }
         val expIdx = headers.indexOfFirst { it.contains("explanation") || it.contains("explain") }
+        val bankIdx = headers.indexOfFirst { it == "bank" || it == "bankname" || it == "bank name" || it == "bank_name" || it == "qb" || it == "qb name" || it == "qb_name" }
+        val statusIdx = headers.indexOfFirst { it == "status" || it == "state" }
+        val stemIdx = headers.indexOfFirst {
+            it == "stem" || it.startsWith("stem") || it == "passage" || it.startsWith("passage") ||
+                    it == "scenario" || it.startsWith("scenario") || it == "case" || it.startsWith("case") ||
+                    it.contains("stem") || it.contains("passage") || it.contains("scenario") || it.contains("stimulus")
+        }
 
         // Filter columns with labels
         var f1Idx = -1
         var f2Idx = -1
         var f3Idx = -1
-        var f1Label = "Category"
-        var f2Label = "Difficulty"
-        var f3Label = "Source"
+        var f1Label = "Course"
+        var f2Label = "Q.type"
+        var f3Label = "Session"
+        var f1Explicit = false
+        var f2Explicit = false
+        var f3Explicit = false
 
-        rawHeaders.forEachIndexed { index, header ->
-            val lower = header.lowercase()
-            if (lower.startsWith("filter1") || lower.startsWith("fiter1") || lower == "category") {
+        rawHeaders.forEachIndexed { index, rawH ->
+            val clean = rawH.trim().replace("\uFEFF", "").replace("\u00A0", " ")
+            val lower = clean.lowercase()
+            val norm = lower.replace(" ", "").replace("_", "").replace("-", "")
+
+            // 1. Check Filter 1 (Course / Category / Topic / Subject)
+            val isExplicitF1 = norm.startsWith("filter1") || norm.startsWith("fiter1") ||
+                    norm.startsWith("f1:") || norm.startsWith("f1：") || norm == "f1" ||
+                    norm.startsWith("filter(1)") || norm.startsWith("filter_1") || norm.startsWith("filter-1")
+
+            val isGeneralF1 = isExplicitF1 ||
+                    norm.startsWith("course") || norm.startsWith("category") ||
+                    norm.startsWith("topic") || norm.startsWith("subject")
+
+            // 2. Check Filter 2 (Q.type / Difficulty / Type)
+            val isExplicitF2 = norm.startsWith("filter2") || norm.startsWith("fiter2") ||
+                    norm.startsWith("f2:") || norm.startsWith("f2：") || norm == "f2" ||
+                    norm.startsWith("filter(2)") || norm.startsWith("filter_2") || norm.startsWith("filter-2")
+
+            val isGeneralF2 = isExplicitF2 ||
+                    norm.startsWith("q.type") || norm.startsWith("qtype") ||
+                    norm.startsWith("difficulty") || norm == "type" || norm.startsWith("questiontype")
+
+            // 3. Check Filter 3 (Session / Source / Exam / Year)
+            val isExplicitF3 = norm.startsWith("filter3") || norm.startsWith("fiter3") ||
+                    norm.startsWith("f3:") || norm.startsWith("f3：") || norm == "f3" ||
+                    norm.startsWith("filter(3)") || norm.startsWith("filter_3") || norm.startsWith("filter-3")
+
+            val isGeneralF3 = isExplicitF3 ||
+                    norm.startsWith("session") || norm.startsWith("source") ||
+                    norm.startsWith("exam") || norm.startsWith("year")
+
+            if (isExplicitF1 || (!f1Explicit && isGeneralF1 && f1Idx == -1)) {
                 f1Idx = index
-                val p = header.split(":", limit = 2)
-                if (p.size > 1) f1Label = p[1].trim()
-                else if (lower == "category") f1Label = "Category"
-            } else if (lower.startsWith("filter2") || lower.startsWith("fiter2") || lower == "difficulty") {
+                if (isExplicitF1) f1Explicit = true
+
+                val extracted = when {
+                    clean.contains(":") -> clean.substringAfter(":").trim()
+                    clean.contains("：") -> clean.substringAfter("：").trim()
+                    clean.contains("(") && clean.contains(")") -> clean.substringAfter("(").substringBefore(")").trim()
+                    clean.contains("[") && clean.contains("]") -> clean.substringAfter("[").substringBefore("]").trim()
+                    clean.contains(" - ") -> clean.substringAfter(" - ").trim()
+                    norm.startsWith("course") -> "Course"
+                    norm.startsWith("topic") -> "Topic"
+                    norm.startsWith("subject") -> "Subject"
+                    norm.startsWith("category") -> "Category"
+                    else -> ""
+                }
+                if (extracted.isNotBlank()) {
+                    f1Label = extracted
+                }
+            } else if (isExplicitF2 || (!f2Explicit && isGeneralF2 && f2Idx == -1)) {
                 f2Idx = index
-                val p = header.split(":", limit = 2)
-                if (p.size > 1) f2Label = p[1].trim()
-                else if (lower == "difficulty") f2Label = "Difficulty"
-            } else if (lower.startsWith("filter3") || lower.startsWith("fiter3") || lower == "source") {
+                if (isExplicitF2) f2Explicit = true
+
+                val extracted = when {
+                    clean.contains(":") -> clean.substringAfter(":").trim()
+                    clean.contains("：") -> clean.substringAfter("：").trim()
+                    clean.contains("(") && clean.contains(")") -> clean.substringAfter("(").substringBefore(")").trim()
+                    clean.contains("[") && clean.contains("]") -> clean.substringAfter("[").substringBefore("]").trim()
+                    clean.contains(" - ") -> clean.substringAfter(" - ").trim()
+                    norm.startsWith("q.type") || norm.startsWith("qtype") -> "Q.type"
+                    norm.startsWith("difficulty") -> "Difficulty"
+                    else -> ""
+                }
+                if (extracted.isNotBlank()) {
+                    f2Label = extracted
+                }
+            } else if (isExplicitF3 || (!f3Explicit && isGeneralF3 && f3Idx == -1)) {
                 f3Idx = index
-                val p = header.split(":", limit = 2)
-                if (p.size > 1) f3Label = p[1].trim()
-                else if (lower == "source") f3Label = "Source"
+                if (isExplicitF3) f3Explicit = true
+
+                val extracted = when {
+                    clean.contains(":") -> clean.substringAfter(":").trim()
+                    clean.contains("：") -> clean.substringAfter("：").trim()
+                    clean.contains("(") && clean.contains(")") -> clean.substringAfter("(").substringBefore(")").trim()
+                    clean.contains("[") && clean.contains("]") -> clean.substringAfter("[").substringBefore("]").trim()
+                    clean.contains(" - ") -> clean.substringAfter(" - ").trim()
+                    norm.startsWith("session") -> "Session"
+                    norm.startsWith("source") -> "Source"
+                    norm.startsWith("exam") -> "Exam"
+                    norm.startsWith("year") -> "Year"
+                    else -> ""
+                }
+                if (extracted.isNotBlank()) {
+                    f3Label = extracted
+                }
             }
         }
 
         val result = mutableListOf<QuestionBankEntity>()
+        val stemCache = mutableMapOf<String, String>()
+
         for (i in 1 until rows.size) {
             val values = rows[i]
             if (values.size <= maxOf(opt1Idx, qIdx)) continue
 
-            val id = if (idIdx in values.indices && values[idIdx].isNotBlank()) values[idIdx].trim() else "qb_${System.currentTimeMillis()}_$i"
             val question = if (qIdx in values.indices) values[qIdx].trim() else ""
+            val stableSlug = question.lowercase().trim().replace(Regex("[^a-z0-9]"), "_").take(24).trim('_')
+            val id = if (idIdx in values.indices && values[idIdx].isNotBlank()) {
+                values[idIdx].trim()
+            } else {
+                "qb_${defaultBankName.lowercase().trim().replace(Regex("[^a-z0-9]"), "_").take(16)}_r${i}_${stableSlug.ifEmpty { i.toString() }}"
+            }
             var opt1 = if (opt1Idx in values.indices) values[opt1Idx].trim() else ""
             var opt2 = if (opt2Idx in values.indices) values[opt2Idx].trim() else ""
             var opt3 = if (opt3Idx in values.indices) values[opt3Idx].trim() else ""
             var opt4 = if (opt4Idx in values.indices) values[opt4Idx].trim() else ""
+            var opt5 = if (opt5Idx in values.indices) values[opt5Idx].trim() else ""
             var answer = if (ansIdx in values.indices) values[ansIdx].trim() else ""
             val explanation = if (expIdx in values.indices) values[expIdx].trim().ifEmpty { null } else null
 
+            // Resolve Stem & Stem ID (e.g. "stem1: Details..." or "stem1" reuse)
+            var resolvedStem: String? = null
+            var resolvedStemId: String? = null
+
+            val rawStemCell = if (stemIdx in values.indices) values[stemIdx].trim() else ""
+            if (rawStemCell.isNotBlank()) {
+                val colonIdx = rawStemCell.indexOfAny(charArrayOf(':', '：'))
+                if (colonIdx > 0 && colonIdx < 30) {
+                    val possibleId = rawStemCell.substring(0, colonIdx).trim()
+                    val textAfter = rawStemCell.substring(colonIdx + 1).trim()
+                    val cleanedId = possibleId.lowercase().replace(" ", "").replace("_", "").replace("-", "")
+                    if (textAfter.isNotBlank()) {
+                        resolvedStemId = possibleId
+                        resolvedStem = textAfter
+                        stemCache[possibleId.lowercase().trim()] = textAfter
+                        stemCache[cleanedId] = textAfter
+                    } else {
+                        resolvedStemId = possibleId
+                        resolvedStem = stemCache[cleanedId] ?: stemCache[possibleId.lowercase().trim()] ?: rawStemCell
+                    }
+                } else {
+                    val key = rawStemCell.lowercase().trim()
+                    val keyClean = key.replace(" ", "").replace("_", "").replace("-", "")
+                    val cached = stemCache[key] ?: stemCache[keyClean]
+                    if (cached != null) {
+                        resolvedStemId = rawStemCell
+                        resolvedStem = cached
+                    } else {
+                        resolvedStem = rawStemCell
+                        resolvedStemId = null
+                    }
+                }
+            }
+
             // Resolve answer according to the 3 rules (exact match, '#', A/B/C/D)
-            val resolved = QuestionAnswerResolver.resolve(opt1, opt2, opt3, opt4, answer)
+            val resolved = QuestionAnswerResolver.resolve(opt1, opt2, opt3, opt4, opt5, answer)
             opt1 = resolved.cleanOpt1
             opt2 = resolved.cleanOpt2
             opt3 = resolved.cleanOpt3
             opt4 = resolved.cleanOpt4
+            opt5 = resolved.cleanOpt5
             answer = resolved.correctAnswer
 
             val filter1 = if (f1Idx in values.indices) values[f1Idx].trim().ifEmpty { null } else null
             val filter2 = if (f2Idx in values.indices) values[f2Idx].trim().ifEmpty { null } else null
             val filter3 = if (f3Idx in values.indices) values[f3Idx].trim().ifEmpty { null } else null
+
+            val rowBankName = if (bankIdx in values.indices && values[bankIdx].isNotBlank()) values[bankIdx].trim() else defaultBankName
+            val rowStatus = if (statusIdx in values.indices && values[statusIdx].isNotBlank()) values[statusIdx].trim().lowercase() else "unrated"
 
             if (question.isNotBlank()) {
                 result.add(
@@ -431,14 +588,19 @@ object FileParsers {
                         opt2 = opt2,
                         opt3 = opt3,
                         opt4 = opt4,
+                        opt5 = opt5,
                         answer = answer,
                         explanation = explanation,
+                        stem = resolvedStem,
+                        stemId = resolvedStemId,
                         filter1 = filter1,
                         filter2 = filter2,
                         filter3 = filter3,
                         filter1Label = f1Label,
                         filter2Label = f2Label,
-                        filter3Label = f3Label
+                        filter3Label = f3Label,
+                        bankName = rowBankName,
+                        status = rowStatus
                     )
                 )
             }
@@ -450,17 +612,16 @@ object FileParsers {
      * Parses Question Bank CSV.
      * Columns: Id*, Question*, Opt1-4*, Ans*, Explanation, Filter1:label, Filter2:label, Filter3:label
      */
-    fun parseQuestionBankCsv(content: String): List<QuestionBankEntity> {
-        val lines = content.lines().filter { it.isNotBlank() }
-        if (lines.size < 2) return emptyList()
-        val rows = lines.map { parseCsvLine(it) }
-        return parseQuestionBankRows(rows)
+    fun parseQuestionBankCsv(content: String, defaultBankName: String = "General QB"): List<QuestionBankEntity> {
+        val rows = parseCsv(content)
+        if (rows.size < 2) return emptyList()
+        return parseQuestionBankRows(rows, defaultBankName)
     }
 
     /**
      * Parses Question Bank JSON (Array of objects or Object with questions/questionBank key).
      */
-    fun parseQuestionBankJson(jsonStr: String): List<QuestionBankEntity> {
+    fun parseQuestionBankJson(jsonStr: String, defaultBankName: String = "General QB"): List<QuestionBankEntity> {
         val result = mutableListOf<QuestionBankEntity>()
         try {
             val trimmed = jsonStr.trim()
@@ -487,25 +648,83 @@ object FileParsers {
                 var o2 = obj.optString("opt2", obj.optString("Opt2", obj.optString("option2", obj.optString("b", "")))).trim()
                 var o3 = obj.optString("opt3", obj.optString("Opt3", obj.optString("option3", obj.optString("c", "")))).trim()
                 var o4 = obj.optString("opt4", obj.optString("Opt4", obj.optString("option4", obj.optString("d", "")))).trim()
+                var o5 = obj.optString("opt5", obj.optString("Opt5", obj.optString("option5", obj.optString("e", "")))).trim()
                 var ans = obj.optString("answer", obj.optString("Answer", obj.optString("ans", obj.optString("correctAnswer", "")))).trim()
 
-                val resolved = QuestionAnswerResolver.resolve(o1, o2, o3, o4, ans)
+                val resolved = QuestionAnswerResolver.resolve(o1, o2, o3, o4, o5, ans)
                 o1 = resolved.cleanOpt1
                 o2 = resolved.cleanOpt2
                 o3 = resolved.cleanOpt3
                 o4 = resolved.cleanOpt4
+                o5 = resolved.cleanOpt5
                 ans = resolved.correctAnswer
 
                 val exp = obj.optString("explanation", obj.optString("Explanation", obj.optString("exp", ""))).trim().ifEmpty { null }
-                val f1 = obj.optString("filter1", obj.optString("category", obj.optString("Category", ""))).trim().ifEmpty { null }
-                val f2 = obj.optString("filter2", obj.optString("difficulty", obj.optString("Difficulty", ""))).trim().ifEmpty { null }
-                val f3 = obj.optString("filter3", obj.optString("source", obj.optString("Source", ""))).trim().ifEmpty { null }
+                var f1: String? = null
+                var f1Label = "Course"
+                var f2: String? = null
+                var f2Label = "Q.type"
+                var f3: String? = null
+                var f3Label = "Session"
 
-                val f1Label = obj.optString("filter1Label", "Category").ifBlank { "Category" }
-                val f2Label = obj.optString("filter2Label", "Difficulty").ifBlank { "Difficulty" }
-                val f3Label = obj.optString("filter3Label", "Source").ifBlank { "Source" }
+                val keys = obj.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    val kClean = k.trim().replace("\uFEFF", "").replace("\u00A0", " ")
+                    val kNorm = kClean.lowercase().replace(" ", "").replace("_", "").replace("-", "")
+
+                    if (f1 == null && (kNorm.startsWith("filter1") || kNorm.startsWith("f1:") || kNorm == "f1" || kNorm.startsWith("course") || kNorm.startsWith("category") || kNorm.startsWith("topic") || kNorm.startsWith("subject"))) {
+                        val v = obj.optString(k, "").trim()
+                        if (v.isNotBlank()) f1 = v
+                        val lbl = when {
+                            kClean.contains(":") -> kClean.substringAfter(":").trim()
+                            kClean.contains("：") -> kClean.substringAfter("：").trim()
+                            kClean.contains("(") && kClean.contains(")") -> kClean.substringAfter("(").substringBefore(")").trim()
+                            kNorm.startsWith("course") -> "Course"
+                            kNorm.startsWith("topic") -> "Topic"
+                            kNorm.startsWith("subject") -> "Subject"
+                            kNorm.startsWith("category") -> "Category"
+                            else -> "Course"
+                        }
+                        if (lbl.isNotBlank()) f1Label = lbl
+                    } else if (f2 == null && (kNorm.startsWith("filter2") || kNorm.startsWith("f2:") || kNorm == "f2" || kNorm.startsWith("q.type") || kNorm.startsWith("qtype") || kNorm.startsWith("difficulty") || kNorm == "type")) {
+                        val v = obj.optString(k, "").trim()
+                        if (v.isNotBlank()) f2 = v
+                        val lbl = when {
+                            kClean.contains(":") -> kClean.substringAfter(":").trim()
+                            kClean.contains("：") -> kClean.substringAfter("：").trim()
+                            kClean.contains("(") && kClean.contains(")") -> kClean.substringAfter("(").substringBefore(")").trim()
+                            kNorm.startsWith("q.type") || kNorm.startsWith("qtype") -> "Q.type"
+                            kNorm.startsWith("difficulty") -> "Difficulty"
+                            else -> "Q.type"
+                        }
+                        if (lbl.isNotBlank()) f2Label = lbl
+                    } else if (f3 == null && (kNorm.startsWith("filter3") || kNorm.startsWith("f3:") || kNorm == "f3" || kNorm.startsWith("session") || kNorm.startsWith("source") || kNorm.startsWith("exam") || kNorm.startsWith("year"))) {
+                        val v = obj.optString(k, "").trim()
+                        if (v.isNotBlank()) f3 = v
+                        val lbl = when {
+                            kClean.contains(":") -> kClean.substringAfter(":").trim()
+                            kClean.contains("：") -> kClean.substringAfter("：").trim()
+                            kClean.contains("(") && kClean.contains(")") -> kClean.substringAfter("(").substringBefore(")").trim()
+                            kNorm.startsWith("session") -> "Session"
+                            kNorm.startsWith("source") -> "Source"
+                            kNorm.startsWith("exam") -> "Exam"
+                            kNorm.startsWith("year") -> "Year"
+                            else -> "Session"
+                        }
+                        if (lbl.isNotBlank()) f3Label = lbl
+                    }
+                }
+                if (obj.has("filter1Label") && obj.optString("filter1Label").isNotBlank()) f1Label = obj.optString("filter1Label")
+                if (obj.has("filter2Label") && obj.optString("filter2Label").isNotBlank()) f2Label = obj.optString("filter2Label")
+                if (obj.has("filter3Label") && obj.optString("filter3Label").isNotBlank()) f3Label = obj.optString("filter3Label")
+
+                val bankName = obj.optString("bankName", obj.optString("bank_name", obj.optString("bank", defaultBankName))).ifBlank { defaultBankName }
+                val status = obj.optString("status", "unrated").ifBlank { "unrated" }
 
                 val id = obj.optString("id", obj.optString("qbId", "qb_${System.currentTimeMillis()}_$i"))
+                val stemText = obj.optString("stem", obj.optString("Stem", obj.optString("passage", obj.optString("scenario", "")))).trim().ifEmpty { null }
+                val stemId = obj.optString("stemId", obj.optString("stem_id", obj.optString("StemId", ""))).trim().ifEmpty { null }
 
                 result.add(
                     QuestionBankEntity(
@@ -515,14 +734,19 @@ object FileParsers {
                         opt2 = o2,
                         opt3 = o3,
                         opt4 = o4,
+                        opt5 = o5,
                         answer = ans,
                         explanation = exp,
+                        stem = stemText,
+                        stemId = stemId,
                         filter1 = f1,
                         filter2 = f2,
                         filter3 = f3,
                         filter1Label = f1Label,
                         filter2Label = f2Label,
-                        filter3Label = f3Label
+                        filter3Label = f3Label,
+                        bankName = bankName,
+                        status = status
                     )
                 )
             }
@@ -533,35 +757,54 @@ object FileParsers {
     /**
      * Parses Question Bank from any content (auto-detecting JSON vs CSV).
      */
-    fun parseQuestionBankAny(content: String): List<QuestionBankEntity> {
+    fun parseQuestionBankAny(content: String, defaultBankName: String = "General QB"): List<QuestionBankEntity> {
         val trimmed = content.trim()
         if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-            val jsonItems = parseQuestionBankJson(trimmed)
+            val jsonItems = parseQuestionBankJson(trimmed, defaultBankName)
             if (jsonItems.isNotEmpty()) return jsonItems
         }
-        return parseQuestionBankCsv(trimmed)
+        return parseQuestionBankCsv(trimmed, defaultBankName)
     }
 
     /**
      * Parses Question Bank from raw bytes, auto-detecting Excel (.xlsx), JSON, or CSV.
      */
     fun parseQuestionBankFromBytes(bytes: ByteArray, fileName: String = ""): List<QuestionBankEntity> {
+        val defaultBankName = if (fileName.isNotBlank()) {
+            val base = fileName.substringBeforeLast(".").trim()
+            if (base.isNotBlank()) base else "General QB"
+        } else {
+            "General QB"
+        }
+
         val isZipOrXlsx = (bytes.size > 4 && bytes[0] == 0x50.toByte() && bytes[1] == 0x4B.toByte()) ||
                 fileName.endsWith(".xlsx", ignoreCase = true)
-        if (isZipOrXlsx) {
+        if (isZipOrXlsx && !fileName.endsWith(".csv", ignoreCase = true) && !fileName.endsWith(".tsv", ignoreCase = true) && !fileName.endsWith(".txt", ignoreCase = true)) {
             try {
                 val rows = parseXlsx(java.io.ByteArrayInputStream(bytes))
-                val items = parseQuestionBankRows(rows)
+                val items = parseQuestionBankRows(rows, defaultBankName)
                 if (items.isNotEmpty()) return items
             } catch (_: Exception) {}
         }
         val content = try {
-            bytes.toString(Charsets.UTF_8)
+            if (bytes.size >= 2 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xFE.toByte()) {
+                String(bytes, 2, bytes.size - 2, Charsets.UTF_16LE)
+            } else if (bytes.size >= 2 && bytes[0] == 0xFE.toByte() && bytes[1] == 0xFF.toByte()) {
+                String(bytes, 2, bytes.size - 2, Charsets.UTF_16BE)
+            } else if (bytes.size >= 3 && bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte()) {
+                String(bytes, 3, bytes.size - 3, Charsets.UTF_8)
+            } else {
+                String(bytes, Charsets.UTF_8)
+            }
         } catch (_: Exception) {
-            ""
+            try {
+                String(bytes, Charsets.ISO_8859_1)
+            } catch (_: Exception) {
+                ""
+            }
         }
         if (content.isNotBlank()) {
-            return parseQuestionBankAny(content)
+            return parseQuestionBankAny(content, defaultBankName)
         }
         return emptyList()
     }
@@ -616,6 +859,106 @@ object FileParsers {
             }
         }
         return list
+    }
+
+    /**
+     * RFC-4180 compliant CSV/TSV parser:
+     * - Multi-line fields inside quotes (stems, passages, explanations)
+     * - Escaped quotes ("")
+     * - Automatic delimiter detection (comma ',', semicolon ';', tab '\t')
+     * - Stripping UTF-8 BOM (\uFEFF) and zero-width spaces (\u200B)
+     * - Handling \r\n and \n line endings
+     */
+    fun parseCsv(content: String): List<List<String>> {
+        val cleanContent = content.replace("\uFEFF", "").replace("\u200B", "")
+        if (cleanContent.isBlank()) return emptyList()
+
+        // Auto-detect delimiter from the first row outside quotes
+        val firstLine = cleanContent.lineSequence().firstOrNull { it.isNotBlank() } ?: ""
+        var inQ = false
+        var commas = 0
+        var semicolons = 0
+        var tabs = 0
+        for (ch in firstLine) {
+            if (ch == '\"') inQ = !inQ
+            else if (!inQ) {
+                when (ch) {
+                    ',' -> commas++
+                    ';' -> semicolons++
+                    '\t' -> tabs++
+                }
+            }
+        }
+        val delimiter = when {
+            semicolons > commas && semicolons > tabs -> ';'
+            tabs > commas && tabs > semicolons -> '\t'
+            else -> ','
+        }
+
+        val rows = mutableListOf<List<String>>()
+        val currentRow = mutableListOf<String>()
+        val currentField = StringBuilder()
+        var insideQuotes = false
+        var i = 0
+        val len = cleanContent.length
+
+        while (i < len) {
+            val c = cleanContent[i]
+            if (insideQuotes) {
+                if (c == '\"') {
+                    if (i + 1 < len && cleanContent[i + 1] == '\"') {
+                        currentField.append('\"')
+                        i++
+                    } else {
+                        insideQuotes = false
+                    }
+                } else {
+                    currentField.append(c)
+                }
+            } else {
+                when (c) {
+                    '\"' -> {
+                        insideQuotes = true
+                    }
+                    delimiter -> {
+                        currentRow.add(currentField.toString().trim())
+                        currentField.clear()
+                    }
+                    '\r' -> {
+                        if (i + 1 < len && cleanContent[i + 1] == '\n') {
+                            i++
+                        }
+                        currentRow.add(currentField.toString().trim())
+                        currentField.clear()
+                        if (currentRow.any { it.isNotBlank() }) {
+                            rows.add(ArrayList(currentRow))
+                        }
+                        currentRow.clear()
+                    }
+                    '\n' -> {
+                        currentRow.add(currentField.toString().trim())
+                        currentField.clear()
+                        if (currentRow.any { it.isNotBlank() }) {
+                            rows.add(ArrayList(currentRow))
+                        }
+                        currentRow.clear()
+                    }
+                    else -> {
+                        currentField.append(c)
+                    }
+                }
+            }
+            i++
+        }
+
+        if (currentField.isNotEmpty() || currentRow.isNotEmpty()) {
+            currentRow.add(currentField.toString().trim())
+            if (currentRow.any { it.isNotBlank() }) {
+                rows.add(ArrayList(currentRow))
+            }
+        }
+
+        return rows
     }
 
     /**

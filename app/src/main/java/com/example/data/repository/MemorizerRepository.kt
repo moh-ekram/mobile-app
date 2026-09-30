@@ -8,6 +8,7 @@ import com.example.data.model.DeletedArticleTitleEntity
 import com.example.data.model.CourseEntity
 import com.example.data.model.GamePracticeEntity
 import com.example.data.model.QuestionBankEntity
+import com.example.data.model.QbProgressRecord
 import com.example.data.model.UserProgressEntity
 import com.example.data.model.VocabularyWordEntity
 import com.example.data.model.ArchivedWordProgressEntity
@@ -308,6 +309,29 @@ class MemorizerRepository(
         refreshProgressAndSync(userId)
     }
 
+    suspend fun deleteWords(ids: List<String>, userId: String = "1235") = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) return@withContext
+        database.vocabularyDao().deleteWordsByIds(ids)
+        refreshProgressAndSync(userId)
+    }
+
+    suspend fun updateGroupForWords(ids: List<String>, newGroup: String, userId: String = "1235") = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) return@withContext
+        database.vocabularyDao().updateGroupForWords(ids, newGroup.trim())
+    }
+
+    suspend fun moveWordsToCourse(ids: List<String>, newCourseId: String, userId: String = "1235") = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) return@withContext
+        database.vocabularyDao().moveWordsToCourse(ids, newCourseId)
+        refreshProgressAndSync(userId)
+    }
+
+    suspend fun updateStatusForWords(ids: List<String>, newStatus: String, userId: String = "1235") = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) return@withContext
+        database.vocabularyDao().updateStatusForWords(ids, newStatus)
+        refreshProgressAndSync(userId)
+    }
+
     suspend fun addGameItem(item: GamePracticeEntity) = withContext(Dispatchers.IO) {
         database.gamePracticeDao().insertItem(item)
     }
@@ -363,6 +387,21 @@ class MemorizerRepository(
 
     suspend fun clearAllQuestionBank() = withContext(Dispatchers.IO) {
         database.questionBankDao().clearAll()
+    }
+
+    suspend fun updateQuestionStatus(id: String, status: String) = withContext(Dispatchers.IO) {
+        database.questionBankDao().updateQuestionStatus(id, status, System.currentTimeMillis())
+        try {
+            backupManager.saveQbProgressBackupFile()
+        } catch (_: Exception) {}
+    }
+
+    suspend fun deleteQuestionsByBankName(bankName: String) = withContext(Dispatchers.IO) {
+        database.questionBankDao().deleteQuestionsByBankName(bankName)
+    }
+
+    suspend fun renameBank(oldBankName: String, newBankName: String) = withContext(Dispatchers.IO) {
+        database.questionBankDao().renameBank(oldBankName, newBankName)
     }
 
     suspend fun recordQuizResult(score: Int, total: Int, userId: String = "1235") = withContext(Dispatchers.IO) {
@@ -580,16 +619,24 @@ class MemorizerRepository(
         }
     }
 
-    suspend fun importQuestionBankFile(content: String, clearExisting: Boolean = false): Result<Int> = withContext(Dispatchers.IO) {
+    suspend fun importQuestionBankFile(content: String, clearExisting: Boolean = false, bankName: String = "General QB"): Result<Int> = withContext(Dispatchers.IO) {
         try {
-            val items = FileParsers.parseQuestionBankAny(content)
+            val items = FileParsers.parseQuestionBankAny(content, bankName)
             if (items.isNotEmpty()) {
-                if (clearExisting) {
-                    database.questionBankDao().getAllQuestionsList().forEach {
-                        database.questionBankDao().deleteQuestion(it)
-                    }
+                val targetBank = items.firstOrNull()?.bankName ?: bankName
+                // Pre-gather all existing question progress by ID before any deletion
+                val existingQuestions = database.questionBankDao().getAllQuestionsList()
+                val existingProgMap = existingQuestions.associate {
+                    it.id to QbProgressRecord(it.id, it.status, it.timesAnswered, it.lastAnsweredAt, it.bankName)
                 }
-                database.questionBankDao().insertQuestions(items)
+                val savedProgressMap = backupManager.getSavedQbProgressMap()
+                val combinedProgMap = savedProgressMap + existingProgMap
+
+                if (clearExisting) {
+                    database.questionBankDao().deleteQuestionsByBankName(targetBank)
+                }
+                database.questionBankDao().insertOrMergeQuestions(items, combinedProgMap)
+                backupManager.saveQbProgressBackupFile()
                 Result.success(items.size)
             } else {
                 Result.failure(Exception("No valid Question Bank questions found"))
@@ -603,12 +650,20 @@ class MemorizerRepository(
         try {
             val items = FileParsers.parseQuestionBankFromBytes(bytes, fileName)
             if (items.isNotEmpty()) {
-                if (clearExisting) {
-                    database.questionBankDao().getAllQuestionsList().forEach {
-                        database.questionBankDao().deleteQuestion(it)
-                    }
+                val targetBank = items.firstOrNull()?.bankName ?: fileName.substringBeforeLast(".").ifBlank { "General QB" }
+                // Pre-gather all existing question progress by ID before any deletion
+                val existingQuestions = database.questionBankDao().getAllQuestionsList()
+                val existingProgMap = existingQuestions.associate {
+                    it.id to QbProgressRecord(it.id, it.status, it.timesAnswered, it.lastAnsweredAt, it.bankName)
                 }
-                database.questionBankDao().insertQuestions(items)
+                val savedProgressMap = backupManager.getSavedQbProgressMap()
+                val combinedProgMap = savedProgressMap + existingProgMap
+
+                if (clearExisting) {
+                    database.questionBankDao().deleteQuestionsByBankName(targetBank)
+                }
+                database.questionBankDao().insertOrMergeQuestions(items, combinedProgMap)
+                backupManager.saveQbProgressBackupFile()
                 Result.success(items.size)
             } else {
                 Result.failure(Exception("No valid Question Bank questions found in $fileName"))
@@ -633,12 +688,21 @@ class MemorizerRepository(
                 allQuestions.addAll(questions)
             }
             if (allQuestions.isNotEmpty()) {
+                // Pre-gather all existing question progress by ID before any deletion
+                val existingQuestions = database.questionBankDao().getAllQuestionsList()
+                val existingProgMap = existingQuestions.associate {
+                    it.id to QbProgressRecord(it.id, it.status, it.timesAnswered, it.lastAnsweredAt, it.bankName)
+                }
+                val savedProgressMap = backupManager.getSavedQbProgressMap()
+                val combinedProgMap = savedProgressMap + existingProgMap
+
                 if (clearExisting) {
                     database.questionBankDao().getAllQuestionsList().forEach {
                         database.questionBankDao().deleteQuestion(it)
                     }
                 }
-                database.questionBankDao().insertQuestions(allQuestions)
+                database.questionBankDao().insertOrMergeQuestions(allQuestions, combinedProgMap)
+                backupManager.saveQbProgressBackupFile()
                 Result.success(allQuestions.size)
             } else {
                 Result.failure(Exception("No valid Question Bank questions found in the link data."))
@@ -647,6 +711,22 @@ class MemorizerRepository(
             Result.failure(e)
         }
     }
+
+    suspend fun backupQbProgress(): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val json = backupManager.generateQbProgressJsonString()
+            backupManager.saveQbProgressBackupFile()
+            Result.success(json)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun restoreQbProgress(jsonContent: String): Result<Int> = withContext(Dispatchers.IO) {
+        backupManager.restoreQbProgressFromJsonString(jsonContent)
+    }
+
+    fun getQbProgressBackupFile(): java.io.File = backupManager.getQbProgressBackupFile()
 
     val articleScraperService = com.example.data.service.ArticleFlashcardScraperService.getInstance()
     val articleSitemapService = com.example.data.service.ArticleSitemapService.getInstance()

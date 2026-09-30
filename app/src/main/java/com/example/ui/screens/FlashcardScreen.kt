@@ -424,7 +424,7 @@ private fun FlashcardFilterDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // 1. Status Category - Row & Grid Boxes
+                // 1. Status Category
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -432,7 +432,7 @@ private fun FlashcardFilterDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Status Category",
+                            text = "Status",
                             fontFamily = PoppinsFontFamily,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
@@ -440,7 +440,7 @@ private fun FlashcardFilterDialog(
                         )
                         if (selectedStatuses.isNotEmpty()) {
                             Text(
-                                text = "Clear Statuses",
+                                text = "Clear",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = IndigoPrimary,
@@ -500,7 +500,7 @@ private fun FlashcardFilterDialog(
 
                 HorizontalDivider(color = palette.cardBorder)
 
-                // 2. Groups Category - Responsive Grid Boxes (4 per row)
+                // 2. Groups Category
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -508,7 +508,7 @@ private fun FlashcardFilterDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Course Groups (Grid)",
+                            text = "Groups",
                             fontFamily = PoppinsFontFamily,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
@@ -516,7 +516,7 @@ private fun FlashcardFilterDialog(
                         )
                         if (selectedGroups.isNotEmpty()) {
                             Text(
-                                text = "Clear Groups",
+                                text = "Clear",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = IndigoPrimary,
@@ -538,7 +538,7 @@ private fun FlashcardFilterDialog(
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Text(
-                                text = "All Groups (Show All)",
+                                text = "All Groups",
                                 fontSize = 12.sp,
                                 fontWeight = if (isAllGroups) FontWeight.Bold else FontWeight.Medium,
                                 color = if (isAllGroups) IndigoPrimary else palette.textPrimary

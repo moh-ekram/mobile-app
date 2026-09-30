@@ -7,16 +7,22 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.provider.OpenableColumns
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.material.icons.Icons
@@ -26,29 +32,42 @@ import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.AllInclusive
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CompareArrows
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Quiz
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.Style
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.UploadFile
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.FormatListNumbered
+import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Psychology
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.material3.*
@@ -501,11 +520,12 @@ fun ColorizedQuestionText(
     question: String,
     colorChoice: String = "red",
     fontSize: androidx.compose.ui.unit.TextUnit = 16.sp,
+    fontFamily: FontFamily? = null,
     modifier: Modifier = Modifier
 ) {
     val highlightColor = Color(0xFFDC2626) // Fixed red
 
-    val annotated = remember(question, highlightColor) {
+    val annotated = remember(question, highlightColor, fontFamily) {
         buildAnnotatedString {
             val regex = Regex("\\[([^\\]]+)\\]")
             var lastIndex = 0
@@ -521,11 +541,12 @@ fun ColorizedQuestionText(
                     }
                     val wordInside = match.groupValues[1]
                     val isBengali = isBengaliText(wordInside)
+                    val effectiveWordFont = fontFamily ?: (if (isBengali) KalpurushFontFamily else PoppinsFontFamily)
                     pushStyle(
                         SpanStyle(
                             color = highlightColor,
                             fontWeight = FontWeight.ExtraBold,
-                            fontFamily = if (isBengali) KalpurushFontFamily else PoppinsFontFamily,
+                            fontFamily = effectiveWordFont,
                             fontSynthesis = androidx.compose.ui.text.font.FontSynthesis.All
                         )
                     )
@@ -540,17 +561,31 @@ fun ColorizedQuestionText(
         }
     }
 
+    val effectiveFont = fontFamily ?: (if (isBengaliText(question)) KalpurushFontFamily else PoppinsFontFamily)
     Text(
         text = annotated,
-        fontFamily = PoppinsFontFamily,
+        fontFamily = effectiveFont,
         fontSize = fontSize,
         fontWeight = FontWeight.Bold,
         color = SlateText,
-        lineHeight = 22.sp,
+        lineHeight = (fontSize.value * 1.35f).sp,
         modifier = modifier
     )
 }
 
+private fun resolveQbFontFamily(fontKey: String, sampleText: String): FontFamily {
+    return when (fontKey.lowercase()) {
+        "poppins" -> PoppinsFontFamily
+        "kalpurush" -> KalpurushFontFamily
+        "aikya" -> AikyaFontFamily
+        "serif" -> FontFamily.Serif
+        "sans", "sans-serif" -> FontFamily.SansSerif
+        "mono", "monospace" -> FontFamily.Monospace
+        else -> if (isBengaliText(sampleText)) KalpurushFontFamily else PoppinsFontFamily
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GamePracticeScreen(
     games: List<GamePracticeEntity>,
@@ -572,6 +607,14 @@ fun GamePracticeScreen(
     onRateWord: (wordId: String, status: String) -> Unit = { _, _ -> },
     onBack: () -> Unit = {},
     onSectionChange: (String?) -> Unit = {},
+    initialSection: String? = null,
+    onUpdateQuestionStatus: (questionId: String, status: String) -> Unit = { _, _ -> },
+    onDeleteQuestionsByBank: (bankName: String) -> Unit = {},
+    onRenameBank: (oldBankName: String, newBankName: String) -> Unit = { _, _ -> },
+    onImportQBBytes: (bytes: ByteArray, fileName: String, clearExisting: Boolean) -> Unit = { _, _, _ -> },
+    onAddSampleData: () -> Unit = {},
+    onBackupQBProgress: () -> Unit = {},
+    onRestoreQBProgress: (bytes: ByteArray) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -579,17 +622,37 @@ fun GamePracticeScreen(
     var wordHighlightColor by remember { mutableStateOf("red") } // "red" (default), "blue", "green"
 
     // Top Section: null means list menu of categories; non-null opens dedicated section
-    var selectedSection by remember { mutableStateOf<String?>(null) }
+    var selectedSection by remember { mutableStateOf<String?>(initialSection) }
 
     LaunchedEffect(selectedSection) {
         onSectionChange(selectedSection)
     }
 
-    // Active Quiz State (Vertical Single-Page Quiz List)
+    // Active Quiz State (Vertical Single-Page Quiz List or One-by-One)
     var activeQuestions by remember { mutableStateOf<List<QuizQuestionItem>>(emptyList()) }
     var userAnswers by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
     var currentScore by remember { mutableIntStateOf(0) }
     var isQuizCompleted by remember { mutableStateOf(false) }
+    var quizViewMode by remember { mutableStateOf("continuous") } // "continuous" or "one_by_one"
+    var oneByOneIndex by remember { mutableIntStateOf(0) }
+    var activeStemBottomSheet by remember { mutableStateOf<Pair<String, String?>?>(null) } // Pair(stemText, stemId)
+
+    // Question Bank Active Bank & Filter Selection
+    var activeBankName by remember { mutableStateOf<String?>(null) }
+    var qbStatusFilter by remember { mutableStateOf("all") }
+
+    // QB Typography & Appearance Settings (Font and Font Size for Question, Answer, and Explanation)
+    val qbPrefs = remember(context) { context.getSharedPreferences("qb_typography_settings", Context.MODE_PRIVATE) }
+    var qbQuestionFontSize by remember { mutableFloatStateOf(qbPrefs.getFloat("qb_q_font_size", 16f)) }
+    var qbAnswerFontSize by remember { mutableFloatStateOf(qbPrefs.getFloat("qb_a_font_size", 14f)) }
+    var qbExplanationFontSize by remember { mutableFloatStateOf(qbPrefs.getFloat("qb_e_font_size", 12f)) }
+
+    var qbQuestionFont by remember { mutableStateOf(qbPrefs.getString("qb_q_font", "auto") ?: "auto") }
+    var qbAnswerFont by remember { mutableStateOf(qbPrefs.getString("qb_a_font", "auto") ?: "auto") }
+    var qbExplanationFont by remember { mutableStateOf(qbPrefs.getString("qb_e_font", "auto") ?: "auto") }
+    var qbQuestionOrder by remember { mutableStateOf(qbPrefs.getString("qb_question_order", "serial") ?: "serial") } // "serial" or "random"
+
+    var showQbTypographyDialog by remember { mutableStateOf(false) }
 
     // Quiz test (Course Vocabulary Quiz) Config - Multi-Selection Grid Style
     var courseQuizCourseIds by remember(activeCourseId, courses) {
@@ -970,7 +1033,11 @@ fun GamePracticeScreen(
             activeQuestions = emptyList()
             isQuizCompleted = false
         } else if (selectedSection != null) {
-            selectedSection = null
+            if (initialSection != null && selectedSection == initialSection) {
+                onBack()
+            } else {
+                selectedSection = null
+            }
         } else {
             onBack()
         }
@@ -1049,11 +1116,22 @@ fun GamePracticeScreen(
             }
             "question_bank" -> {
                 val filtered = questions.filter { q ->
+                    (activeBankName == null || q.bankName.equals(activeBankName, ignoreCase = true)) &&
+                    (when (qbStatusFilter.lowercase()) {
+                        "all", "" -> true
+                        "know" -> q.status.equals("know", true)
+                        "confusion", "review" -> q.status.equals("confusion", true) || q.status.equals("review", true)
+                        "dont_know" -> q.status.equals("dont_know", true)
+                        "unrated" -> q.status.isBlank() || q.status.equals("unrated", true)
+                        else -> q.status.equals(qbStatusFilter, ignoreCase = true)
+                    }) &&
                     (qbFilters1.isEmpty() || (q.filter1 != null && q.filter1 in qbFilters1)) &&
                     (qbFilters2.isEmpty() || (q.filter2 != null && q.filter2 in qbFilters2)) &&
                     (qbFilters3.isEmpty() || (q.filter3 != null && q.filter3 in qbFilters3))
-                }.shuffled().take(qbQuestionCount)
-                filtered.map { it.toQuizItem() }
+                }
+                val ordered = if (qbQuestionOrder == "random") filtered.shuffled() else filtered
+                val selected = if (qbQuestionCount > 0) ordered.take(qbQuestionCount) else ordered
+                selected.map { it.toQuizItem() }
             }
             else -> emptyList()
         }
@@ -1157,43 +1235,65 @@ fun GamePracticeScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(
-                        onClick = {
-                            if (activeArcherGame != null) {
-                                activeArcherGame = null
-                            } else if (activeColumnMatch != null) {
-                                activeColumnMatch = null
-                            } else {
-                                selectedSection = null
-                                activeQuestions = emptyList()
-                                isQuizCompleted = false
-                                onSelectArticle(null)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = {
+                                if (activeArcherGame != null) {
+                                    activeArcherGame = null
+                                } else if (activeColumnMatch != null) {
+                                    activeColumnMatch = null
+                                } else if (activeQuestions.isNotEmpty()) {
+                                    activeQuestions = emptyList()
+                                    isQuizCompleted = false
+                                } else if (initialSection != null && selectedSection == initialSection) {
+                                    onBack()
+                                } else {
+                                    selectedSection = null
+                                    activeQuestions = emptyList()
+                                    isQuizCompleted = false
+                                    onSelectArticle(null)
+                                }
                             }
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = SlateText
+                            )
                         }
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back to Games Hub",
-                            tint = SlateText
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = when (selectedSection) {
+                                "course_quiz" -> "Quiz test"
+                                "column_match" -> "Column Match"
+                                "archer_aim" -> "Archer Aim"
+                                "question_bank" -> "Question Bank"
+                                "read_article" -> "Read Article"
+                                else -> "Practice"
+                            },
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = SlateText
                         )
                     }
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = when (selectedSection) {
-                            "course_quiz" -> "Quiz test"
-                            "column_match" -> "Column Match"
-                            "archer_aim" -> "Archer Aim"
-                            "question_bank" -> "Question Bank (QB)"
-                            "read_article" -> "Read Article"
-                            else -> "Practice"
-                        },
-                        fontFamily = PoppinsFontFamily,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = SlateText
-                    )
+
+                    // In QB question sheet, filter button same as flashcard filter button
+                    if (activeQuestions.isNotEmpty()) {
+                        IconButton(
+                            onClick = { showQbTypographyDialog = true },
+                            modifier = Modifier.testTag("qb_topbar_filter_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Tune,
+                                contentDescription = "Question Sheet Filter & Settings",
+                                tint = IndigoPrimary
+                            )
+                        }
+                    }
                 }
             }
 
@@ -1316,26 +1416,23 @@ fun GamePracticeScreen(
                     onStart = { startQuizForCategory("course_quiz") }
                 )
             } else if (selectedSection == "question_bank" && activeQuestions.isEmpty() && !isQuizCompleted) {
-                QuestionBankConfigView(
+                QuestionBankDashboardView(
                     questions = questions,
-                    selectedFilters1 = qbFilters1,
-                    selectedFilters2 = qbFilters2,
-                    selectedFilters3 = qbFilters3,
-                    questionCount = qbQuestionCount,
-                    onFilter1Toggle = { v ->
-                        qbFilters1 = if (v in qbFilters1) qbFilters1 - v else qbFilters1 + v
+                    onStartQuiz = { bName: String, status: String, f1: Set<String>, f2: Set<String>, f3: Set<String>, count: Int ->
+                        activeBankName = bName
+                        qbStatusFilter = status
+                        qbFilters1 = f1
+                        qbFilters2 = f2
+                        qbFilters3 = f3
+                        qbQuestionCount = count
+                        startQuizForCategory("question_bank")
                     },
-                    onFilter1Clear = { qbFilters1 = emptySet() },
-                    onFilter2Toggle = { v ->
-                        qbFilters2 = if (v in qbFilters2) qbFilters2 - v else qbFilters2 + v
-                    },
-                    onFilter2Clear = { qbFilters2 = emptySet() },
-                    onFilter3Toggle = { v ->
-                        qbFilters3 = if (v in qbFilters3) qbFilters3 - v else qbFilters3 + v
-                    },
-                    onFilter3Clear = { qbFilters3 = emptySet() },
-                    onCountChange = { qbQuestionCount = it },
-                    onStart = { startQuizForCategory("question_bank") }
+                    onImportQBBytes = onImportQBBytes,
+                    onDeleteQuestionsByBank = onDeleteQuestionsByBank,
+                    onRenameBank = onRenameBank,
+                    onAddSampleData = onAddSampleData,
+                    onBackupQBProgress = onBackupQBProgress,
+                    onRestoreQBProgress = onRestoreQBProgress
                 )
             } else if (isQuizCompleted) {
                 val primaryCourseId = if (courseQuizCourseIds.size == 1 && "all" !in courseQuizCourseIds) {
@@ -1354,282 +1451,340 @@ fun GamePracticeScreen(
                     pooledScore = quizStats.first,
                     pooledTotal = quizStats.second,
                     isQuizTest = (selectedSection == "course_quiz"),
-                    onRetake = { startQuizForCategory(selectedSection ?: "course_quiz", gameStatusFilter, gameQuestionCount) }
+                    isQuestionBank = (selectedSection == "question_bank"),
+                    onRetake = { startQuizForCategory(selectedSection ?: "course_quiz", gameStatusFilter, gameQuestionCount) },
+                    onBackToBanks = {
+                        activeQuestions = emptyList()
+                        isQuizCompleted = false
+                    },
+                    onPracticeMissed = {
+                        val missed = activeQuestions.filterIndexed { idx, q ->
+                            val ans = userAnswers[idx]
+                            ans == null || !isOptionTheAnswer(ans, 0, q.answer)
+                        }
+                        if (missed.isNotEmpty()) {
+                            activeQuestions = missed
+                            userAnswers = emptyMap()
+                            currentScore = 0
+                            isQuizCompleted = false
+                        }
+                    }
                 )
             } else if (activeQuestions.isNotEmpty()) {
-                // Vertical scrolling list of all quiz questions on a single page
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .testTag("quiz_vertical_list"),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    contentPadding = PaddingValues(top = 8.dp, bottom = 28.dp)
-                ) {
-                    // Header progress and score
-                    item {
-                        Card(
-                            shape = RoundedCornerShape(18.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color.White),
-                            border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(SlateBorder)),
-                            modifier = Modifier.fillMaxWidth()
+                val clampedOneByOneIdx = oneByOneIndex.coerceIn(0, (activeQuestions.size - 1).coerceAtLeast(0))
+                val currentOneByOneQ = activeQuestions.getOrNull(clampedOneByOneIdx)
+
+                Box(modifier = Modifier.fillMaxSize()) {
+                    if (quizViewMode == "continuous") {
+                        // Continuous Scrolling Mode: all questions in a vertical LazyColumn
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .testTag("quiz_vertical_list"),
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                            contentPadding = PaddingValues(top = 8.dp, bottom = 90.dp)
                         ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(16.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "${userAnswers.size} of ${activeQuestions.size} Answered",
-                                        fontFamily = PoppinsFontFamily,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = IndigoPrimary
-                                    )
-                                    Text(
-                                        text = "Score: $currentScore",
-                                        fontFamily = PoppinsFontFamily,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = EmeraldSuccess
-                                    )
-                                }
+                            // Header progress and view mode switch
+                            item {
+                                QuizProgressHeaderCard(
+                                    answeredCount = userAnswers.size,
+                                    totalCount = activeQuestions.size,
+                                    quizViewMode = quizViewMode,
+                                    onViewModeChange = { quizViewMode = it }
+                                )
+                            }
 
-                                Spacer(modifier = Modifier.height(10.dp))
+                            // Continuous list of questions
+                            itemsIndexed(activeQuestions) { qIdx, currentQ ->
+                                QuizQuestionCardView(
+                                    qIdx = qIdx,
+                                    currentQ = currentQ,
+                                    selectedOpt = userAnswers[qIdx],
+                                    isAnswered = userAnswers[qIdx] != null,
+                                    onOptionSelect = { opt, isCorrect ->
+                                        userAnswers = userAnswers + (qIdx to opt)
+                                        if (isCorrect) currentScore += 1
+                                        if (currentQ.id.isNotBlank()) {
+                                            if (currentQ.sheetType == "course_quiz" || words.any { it.id == currentQ.id }) {
+                                                onRecordWordQuizAnswer(currentQ.id, isCorrect)
+                                            }
+                                            if (currentQ.sheetType == "qb" || selectedSection == "question_bank") {
+                                                onUpdateQuestionStatus(currentQ.id, if (isCorrect) "know" else "dont_know")
+                                            } else if (currentQ.sheetType != "course_quiz") {
+                                                onRecordGameAnswer(currentQ.id, isCorrect)
+                                            }
+                                        }
+                                    },
+                                    onStatusUpdate = { status ->
+                                        onUpdateQuestionStatus(currentQ.id, status)
+                                    },
+                                    wordHighlightColor = wordHighlightColor,
+                                    qbQuestionFontSize = qbQuestionFontSize,
+                                    qbQuestionFont = qbQuestionFont,
+                                    qbAnswerFontSize = qbAnswerFontSize,
+                                    qbAnswerFont = qbAnswerFont,
+                                    qbExplanationFontSize = qbExplanationFontSize,
+                                    qbExplanationFont = qbExplanationFont,
+                                    selectedSection = selectedSection,
+                                    onOpenStem = { stemText, stemId ->
+                                        activeStemBottomSheet = Pair(stemText, stemId)
+                                    }
+                                )
+                            }
 
-                                LinearProgressIndicator(
-                                    progress = {
-                                        if (activeQuestions.isNotEmpty()) {
-                                            userAnswers.size.toFloat() / activeQuestions.size
-                                        } else 0f
+                            // Bottom Finish Button
+                            item {
+                                Button(
+                                    onClick = {
+                                        isQuizCompleted = true
+                                        if (selectedSection == "course_quiz") {
+                                            val primaryCourseId = if (courseQuizCourseIds.size == 1 && "all" !in courseQuizCourseIds) {
+                                                courseQuizCourseIds.first()
+                                            } else if (activeCourseId.isNotBlank() && activeCourseId != "all") {
+                                                activeCourseId
+                                            } else {
+                                                "all"
+                                            }
+                                            QuizTestStats.recordAttempt(context, currentScore, activeQuestions.size, primaryCourseId)
+                                            statsUpdateTrigger++
+                                        }
+                                        onCompleteQuiz(currentScore, activeQuestions.size)
                                     },
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(7.dp)
-                                        .clip(CircleShape),
-                                    color = IndigoPrimary,
-                                    trackColor = Color(0xFFE2E8F0)
-                                )
+                                        .height(48.dp)
+                                        .testTag("finish_quiz_button"),
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess)
+                                ) {
+                                    Text(
+                                        text = "Submit",
+                                        fontFamily = PoppinsFontFamily,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                }
                             }
                         }
-                    }
-
-                    // Questions
-                    itemsIndexed(activeQuestions) { qIdx, currentQ ->
-                        val selectedOpt = userAnswers[qIdx]
-                        val isAnswered = selectedOpt != null
-                        val options = remember(currentQ) {
-                            listOf(currentQ.opt1, currentQ.opt2, currentQ.opt3, currentQ.opt4)
-                                .filter { it.isNotBlank() }
-                        }
-
-                        Card(
-                            shape = RoundedCornerShape(20.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color.White),
-                            border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(SlateBorder)),
+                    } else {
+                        // One-by-One Mode: single question displayed at a time
+                        Column(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("quiz_question_card_$qIdx")
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState())
+                                .padding(bottom = 90.dp),
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
                         ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(18.dp)
+                            // Header progress and view mode switch
+                            QuizProgressHeaderCard(
+                                answeredCount = userAnswers.size,
+                                totalCount = activeQuestions.size,
+                                quizViewMode = quizViewMode,
+                                onViewModeChange = { quizViewMode = it }
+                            )
+
+                            // Quick question jumper pills (1, 2, 3...)
+                            LazyRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                contentPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp)
                             ) {
-                                // Question Badge and Status
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(CircleShape)
-                                            .background(IndigoLight)
-                                            .padding(horizontal = 10.dp, vertical = 4.dp)
-                                    ) {
-                                        Text(
-                                            text = "QUESTION ${qIdx + 1}",
-                                            fontFamily = PoppinsFontFamily,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = IndigoPrimary
-                                        )
+                                itemsIndexed(activeQuestions) { idx, q ->
+                                    val isCur = idx == clampedOneByOneIdx
+                                    val isAns = userAnswers.containsKey(idx)
+                                    val selectedOpt = userAnswers[idx]
+                                    val options = listOf(q.opt1, q.opt2, q.opt3, q.opt4, q.opt5).filter { it.isNotBlank() }
+                                    val isCor = isAns && options.indices.any { oIdx ->
+                                        options[oIdx] == selectedOpt && isOptionTheAnswer(options[oIdx], oIdx, q.answer)
                                     }
 
-                                    if (isAnswered) {
-                                        val hasCorrect = options.indices.any { idx ->
-                                            options[idx] == selectedOpt && isOptionTheAnswer(options[idx], idx, currentQ.answer)
-                                        }
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(CircleShape)
-                                                .background(if (hasCorrect) EmeraldLight else RoseLight)
-                                                .padding(horizontal = 10.dp, vertical = 4.dp)
-                                        ) {
+                                    val bg = when {
+                                        isCur -> IndigoPrimary
+                                        !isAns -> Color(0xFFF1F5F9)
+                                        isCor -> EmeraldLight
+                                        else -> RoseLight
+                                    }
+                                    val textColor = when {
+                                        isCur -> Color.White
+                                        !isAns -> SlateMuted
+                                        isCor -> EmeraldSuccess
+                                        else -> RoseError
+                                    }
+
+                                    Surface(
+                                        onClick = { oneByOneIndex = idx },
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = bg,
+                                        border = if (isCur) BorderStroke(1.5.dp, IndigoPrimary) else null,
+                                        modifier = Modifier.size(width = 38.dp, height = 34.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
                                             Text(
-                                                text = if (hasCorrect) "CORRECT" else "INCORRECT",
-                                                fontFamily = PoppinsFontFamily,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = if (hasCorrect) EmeraldSuccess else RoseError
+                                                text = "${idx + 1}",
+                                                fontSize = 12.sp,
+                                                fontWeight = if (isCur) FontWeight.Bold else FontWeight.Medium,
+                                                color = textColor
                                             )
                                         }
                                     }
                                 }
+                            }
 
-                                Spacer(modifier = Modifier.height(12.dp))
-
-                                // Question Title with Colorized [Word]
-                                ColorizedQuestionText(
-                                    question = currentQ.question,
-                                    colorChoice = wordHighlightColor,
-                                    fontSize = 16.sp
-                                )
-
-                                Spacer(modifier = Modifier.height(16.dp))
-
-                                // Options
-                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    options.forEachIndexed { optIdx, opt ->
-                                        val isThisOptionSelected = selectedOpt == opt
-                                        val isThisOptionAnswer = isOptionTheAnswer(opt, optIdx, currentQ.answer)
-
-                                        val (btnBg, btnBorder, btnText) = when {
-                                            !isAnswered -> Triple(Color(0xFFF8FAFC), SlateBorder, SlateText)
-                                            isThisOptionAnswer -> Triple(EmeraldLight, EmeraldSuccess, EmeraldSuccess)
-                                            isThisOptionSelected && !isThisOptionAnswer -> Triple(RoseLight, RoseError, RoseError)
-                                            else -> Triple(Color(0xFFF8FAFC), SlateBorder, SlateMuted)
-                                        }
-
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(14.dp))
-                                                .background(btnBg)
-                                                .border(1.5.dp, btnBorder, RoundedCornerShape(14.dp))
-                                                .clickable(enabled = !isAnswered) {
-                                                    val isCorrect = isOptionTheAnswer(opt, optIdx, currentQ.answer)
-                                                    userAnswers = userAnswers + (qIdx to opt)
-                                                    if (isCorrect) {
-                                                        currentScore += 1
-                                                    }
-                                                    if (currentQ.id.isNotBlank()) {
-                                                        if (currentQ.sheetType == "course_quiz" || words.any { it.id == currentQ.id }) {
-                                                            onRecordWordQuizAnswer(currentQ.id, isCorrect)
-                                                        }
-                                                        if (currentQ.sheetType != "course_quiz") {
-                                                            onRecordGameAnswer(currentQ.id, isCorrect)
-                                                        }
-                                                    }
-                                                }
-                                                .padding(horizontal = 14.dp, vertical = 13.dp)
-                                        ) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    text = "${('A' + optIdx)}.  $opt",
-                                                    fontFamily = selectFontForText(opt),
-                                                    fontSize = 14.sp,
-                                                    fontWeight = if (isThisOptionSelected || (isAnswered && isThisOptionAnswer)) FontWeight.Bold else FontWeight.Medium,
-                                                    color = btnText,
-                                                    modifier = Modifier.weight(1f)
-                                                )
-
-                                                if (isAnswered && isThisOptionAnswer) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.CheckCircle,
-                                                        contentDescription = "Correct",
-                                                        tint = EmeraldSuccess,
-                                                        modifier = Modifier.size(20.dp)
-                                                    )
-                                                } else if (isAnswered && isThisOptionSelected && !isThisOptionAnswer) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Close,
-                                                        contentDescription = "Incorrect",
-                                                        tint = RoseError,
-                                                        modifier = Modifier.size(20.dp)
-                                                    )
-                                                }
+                            // The Active Question Card
+                            if (currentOneByOneQ != null) {
+                                QuizQuestionCardView(
+                                    qIdx = clampedOneByOneIdx,
+                                    currentQ = currentOneByOneQ,
+                                    selectedOpt = userAnswers[clampedOneByOneIdx],
+                                    isAnswered = userAnswers[clampedOneByOneIdx] != null,
+                                    onOptionSelect = { opt, isCorrect ->
+                                        userAnswers = userAnswers + (clampedOneByOneIdx to opt)
+                                        if (isCorrect) currentScore += 1
+                                        if (currentOneByOneQ.id.isNotBlank()) {
+                                            if (currentOneByOneQ.sheetType == "course_quiz" || words.any { it.id == currentOneByOneQ.id }) {
+                                                onRecordWordQuizAnswer(currentOneByOneQ.id, isCorrect)
+                                            }
+                                            if (currentOneByOneQ.sheetType == "qb" || selectedSection == "question_bank") {
+                                                onUpdateQuestionStatus(currentOneByOneQ.id, if (isCorrect) "know" else "dont_know")
+                                            } else if (currentOneByOneQ.sheetType != "course_quiz") {
+                                                onRecordGameAnswer(currentOneByOneQ.id, isCorrect)
                                             }
                                         }
+                                    },
+                                    onStatusUpdate = { status ->
+                                        onUpdateQuestionStatus(currentOneByOneQ.id, status)
+                                    },
+                                    wordHighlightColor = wordHighlightColor,
+                                    qbQuestionFontSize = qbQuestionFontSize,
+                                    qbQuestionFont = qbQuestionFont,
+                                    qbAnswerFontSize = qbAnswerFontSize,
+                                    qbAnswerFont = qbAnswerFont,
+                                    qbExplanationFontSize = qbExplanationFontSize,
+                                    qbExplanationFont = qbExplanationFont,
+                                    selectedSection = selectedSection,
+                                    onOpenStem = { stemText, stemId ->
+                                        activeStemBottomSheet = Pair(stemText, stemId)
                                     }
+                                )
+                            }
+
+                            // Navigation Controls (Previous, Indicator, Next)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedButton(
+                                    onClick = { if (clampedOneByOneIdx > 0) oneByOneIndex = clampedOneByOneIdx - 1 },
+                                    enabled = clampedOneByOneIdx > 0,
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = BorderStroke(1.dp, if (clampedOneByOneIdx > 0) IndigoPrimary else SlateBorder)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = "Previous",
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Previous", fontSize = 13.sp)
                                 }
 
-                                // Explanation Card
-                                if (isAnswered && !currentQ.explanation.isNullOrBlank()) {
-                                    Card(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(top = 14.dp),
-                                        shape = RoundedCornerShape(12.dp),
-                                        colors = CardDefaults.cardColors(containerColor = IndigoLight),
-                                        border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(Color(0xFFC7D2FE)))
-                                    ) {
-                                        Column(modifier = Modifier.padding(12.dp)) {
-                                            Text(
-                                                text = "EXPLANATION",
-                                                fontFamily = PoppinsFontFamily,
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = IndigoPrimary,
-                                                letterSpacing = 0.8.sp
-                                            )
-                                            Spacer(modifier = Modifier.height(3.dp))
-                                            Text(
-                                                text = currentQ.explanation ?: "",
-                                                fontFamily = selectFontForText(currentQ.explanation ?: ""),
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.Normal,
-                                                color = SlateText,
-                                                lineHeight = 17.sp
-                                            )
+                                Text(
+                                    text = "Question ${clampedOneByOneIdx + 1} of ${activeQuestions.size}",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = SlateText
+                                )
+
+                                Button(
+                                    onClick = {
+                                        if (clampedOneByOneIdx < activeQuestions.size - 1) {
+                                            oneByOneIndex = clampedOneByOneIdx + 1
                                         }
-                                    }
+                                    },
+                                    enabled = clampedOneByOneIdx < activeQuestions.size - 1,
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
+                                ) {
+                                    Text("Next", fontSize = 13.sp)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                        contentDescription = "Next",
+                                        modifier = Modifier.size(16.dp)
+                                    )
                                 }
+                            }
+
+                            // Finish / Submit button
+                            Button(
+                                onClick = {
+                                    isQuizCompleted = true
+                                    if (selectedSection == "course_quiz") {
+                                        val primaryCourseId = if (courseQuizCourseIds.size == 1 && "all" !in courseQuizCourseIds) {
+                                            courseQuizCourseIds.first()
+                                        } else if (activeCourseId.isNotBlank() && activeCourseId != "all") {
+                                            activeCourseId
+                                        } else {
+                                            "all"
+                                        }
+                                        QuizTestStats.recordAttempt(context, currentScore, activeQuestions.size, primaryCourseId)
+                                        statsUpdateTrigger++
+                                    }
+                                    onCompleteQuiz(currentScore, activeQuestions.size)
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .testTag("finish_quiz_button"),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = EmeraldSuccess)
+                            ) {
+                                Text(
+                                    text = "Submit",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
                             }
                         }
                     }
 
-                    // Bottom Action (Finish or Results)
-                    item {
-                        Button(
-                            onClick = {
-                                isQuizCompleted = true
-                                if (selectedSection == "course_quiz") {
-                                    val primaryCourseId = if (courseQuizCourseIds.size == 1 && "all" !in courseQuizCourseIds) {
-                                        courseQuizCourseIds.first()
-                                    } else if (activeCourseId.isNotBlank() && activeCourseId != "all") {
-                                        activeCourseId
-                                    } else {
-                                        "all"
-                                    }
-                                    QuizTestStats.recordAttempt(context, currentScore, activeQuestions.size, primaryCourseId)
-                                    statsUpdateTrigger++
-                                }
-                                onCompleteQuiz(currentScore, activeQuestions.size)
-                            },
+                    // Floating Stem Button (ONLY if current question in one-by-one mode has a stem!)
+                    // "যেসব প্রশ্নে স্টেম নেই তাদের পাশে কোন ফ্লোটিং বাটনও বসবে না।"
+                    if (quizViewMode == "one_by_one" && currentOneByOneQ != null && !currentOneByOneQ.stem.isNullOrBlank()) {
+                        Surface(
+                            onClick = { activeStemBottomSheet = Pair(currentOneByOneQ.stem, currentOneByOneQ.stemId) },
+                            shape = RoundedCornerShape(24.dp),
+                            color = IndigoPrimary,
+                            shadowElevation = 5.dp,
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .height(52.dp)
-                                .testTag("finish_quiz_button"),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
+                                .align(Alignment.BottomStart)
+                                .padding(16.dp)
+                                .testTag("floating_stem_button")
                         ) {
-                            Text(
-                                text = if (userAnswers.size == activeQuestions.size) "Finish & View Results" else "Submit (${userAnswers.size}/${activeQuestions.size}) & View Results",
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.MenuBook,
+                                    contentDescription = "Read Stem",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = if (!currentOneByOneQ.stemId.isNullOrBlank()) "Stem: ${currentOneByOneQ.stemId}" else "Read Stem",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
                         }
                     }
                 }
@@ -1650,13 +1805,1257 @@ fun GamePracticeScreen(
             }
         }
     }
+
+    if (showQbTypographyDialog) {
+        val currentBankQuestions = remember(questions, activeBankName) {
+            if (activeBankName.isNullOrBlank()) questions else questions.filter { it.bankName.equals(activeBankName, ignoreCase = true) }
+        }
+        val sheetF1Label = remember(currentBankQuestions) {
+            currentBankQuestions.mapNotNull { it.filter1Label }.firstOrNull { it.isNotBlank() } ?: "Course"
+        }
+        val sheetF2Label = remember(currentBankQuestions) {
+            currentBankQuestions.mapNotNull { it.filter2Label }.firstOrNull { it.isNotBlank() } ?: "Q.type"
+        }
+        val sheetF3Label = remember(currentBankQuestions) {
+            currentBankQuestions.mapNotNull { it.filter3Label }.firstOrNull { it.isNotBlank() } ?: "Session"
+        }
+        val sheetF1Values = remember(currentBankQuestions) {
+            currentBankQuestions.mapNotNull { it.filter1 }.map { it.trim() }.filter { it.isNotBlank() }.distinct().sorted()
+        }
+        val sheetF2Values = remember(currentBankQuestions) {
+            currentBankQuestions.mapNotNull { it.filter2 }.map { it.trim() }.filter { it.isNotBlank() }.distinct().sorted()
+        }
+        val sheetF3Values = remember(currentBankQuestions) {
+            currentBankQuestions.mapNotNull { it.filter3 }.map { it.trim() }.filter { it.isNotBlank() }.distinct().sorted()
+        }
+
+        QbTypographyFilterDialog(
+            questionFontSize = qbQuestionFontSize,
+            answerFontSize = qbAnswerFontSize,
+            explanationFontSize = qbExplanationFontSize,
+            questionFont = qbQuestionFont,
+            answerFont = qbAnswerFont,
+            explanationFont = qbExplanationFont,
+            questionOrder = qbQuestionOrder,
+            onOrderChange = { newOrder ->
+                qbQuestionOrder = newOrder
+                qbPrefs.edit().putString("qb_question_order", newOrder).apply()
+                if (activeQuestions.isNotEmpty()) {
+                    activeQuestions = if (newOrder == "random") {
+                        activeQuestions.shuffled()
+                    } else {
+                        activeQuestions.sortedBy { it.id }
+                    }
+                }
+            },
+            f1Label = sheetF1Label,
+            f1Values = sheetF1Values,
+            selectedFilters1 = qbFilters1,
+            onFilter1Toggle = { opt ->
+                qbFilters1 = if (opt in qbFilters1) qbFilters1 - opt else qbFilters1 + opt
+                if (selectedSection == "question_bank") {
+                    startQuizForCategory("question_bank")
+                }
+            },
+            onFilter1Clear = {
+                qbFilters1 = emptySet()
+                if (selectedSection == "question_bank") {
+                    startQuizForCategory("question_bank")
+                }
+            },
+            f2Label = sheetF2Label,
+            f2Values = sheetF2Values,
+            selectedFilters2 = qbFilters2,
+            onFilter2Toggle = { opt ->
+                qbFilters2 = if (opt in qbFilters2) qbFilters2 - opt else qbFilters2 + opt
+                if (selectedSection == "question_bank") {
+                    startQuizForCategory("question_bank")
+                }
+            },
+            onFilter2Clear = {
+                qbFilters2 = emptySet()
+                if (selectedSection == "question_bank") {
+                    startQuizForCategory("question_bank")
+                }
+            },
+            f3Label = sheetF3Label,
+            f3Values = sheetF3Values,
+            selectedFilters3 = qbFilters3,
+            onFilter3Toggle = { opt ->
+                qbFilters3 = if (opt in qbFilters3) qbFilters3 - opt else qbFilters3 + opt
+                if (selectedSection == "question_bank") {
+                    startQuizForCategory("question_bank")
+                }
+            },
+            onFilter3Clear = {
+                qbFilters3 = emptySet()
+                if (selectedSection == "question_bank") {
+                    startQuizForCategory("question_bank")
+                }
+            },
+            onApplySettings = { qSize, aSize, eSize, qFont, aFont, eFont ->
+                qbQuestionFontSize = qSize
+                qbAnswerFontSize = aSize
+                qbExplanationFontSize = eSize
+                qbQuestionFont = qFont
+                qbAnswerFont = aFont
+                qbExplanationFont = eFont
+                qbPrefs.edit()
+                    .putFloat("qb_q_font_size", qSize)
+                    .putFloat("qb_a_font_size", aSize)
+                    .putFloat("qb_e_font_size", eSize)
+                    .putString("qb_q_font", qFont)
+                    .putString("qb_a_font", aFont)
+                    .putString("qb_e_font", eFont)
+                    .apply()
+            },
+            onDismiss = { showQbTypographyDialog = false }
+        )
+    }
+
+    if (activeStemBottomSheet != null) {
+        val (stemText, stemId) = activeStemBottomSheet!!
+        ModalBottomSheet(
+            onDismissRequest = { activeStemBottomSheet = null },
+            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+            containerColor = Color.White,
+            dragHandle = {
+                BottomSheetDefaults.DragHandle(color = SlateBorder)
+            }
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 32.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(IndigoLight),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.MenuBook,
+                                contentDescription = "Stem",
+                                tint = IndigoPrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Column {
+                            Text(
+                                text = if (!stemId.isNullOrBlank()) "Stem: ${stemId.uppercase()}" else "Question Stem / Scenario",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = SlateText
+                            )
+                            Text(
+                                text = "Reference context for answering",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 11.5.sp,
+                                color = SlateMuted
+                            )
+                        }
+                    }
+                    IconButton(
+                        onClick = { activeStemBottomSheet = null },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = SlateMuted,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFFF8FAFC),
+                    border = BorderStroke(1.dp, SlateBorder),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = stemText,
+                        fontFamily = resolveQbFontFamily(qbQuestionFont, stemText),
+                        fontSize = qbQuestionFontSize.sp,
+                        color = SlateText,
+                        lineHeight = (qbQuestionFontSize * 1.45f).sp,
+                        modifier = Modifier.padding(16.dp)
+                    )
+                }
+            }
+        }
+    }
 }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun QuizProgressHeaderCard(
+    answeredCount: Int,
+    totalCount: Int,
+    quizViewMode: String,
+    onViewModeChange: (String) -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = BorderStroke(1.dp, SlateBorder),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "$answeredCount of $totalCount Answered",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = IndigoPrimary
+                )
+                // View Mode Toggle (Continuous vs One-by-One)
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFFF1F5F9))
+                        .padding(2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (quizViewMode == "continuous") Color.White else Color.Transparent)
+                            .clickable { onViewModeChange("continuous") }
+                            .padding(horizontal = 7.dp, vertical = 3.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Scroll",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 11.sp,
+                            fontWeight = if (quizViewMode == "continuous") FontWeight.Bold else FontWeight.Medium,
+                            color = if (quizViewMode == "continuous") IndigoPrimary else SlateMuted
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (quizViewMode == "one_by_one") Color.White else Color.Transparent)
+                            .clickable { onViewModeChange("one_by_one") }
+                            .padding(horizontal = 7.dp, vertical = 3.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "1-by-1",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 11.sp,
+                            fontWeight = if (quizViewMode == "one_by_one") FontWeight.Bold else FontWeight.Medium,
+                            color = if (quizViewMode == "one_by_one") IndigoPrimary else SlateMuted
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            LinearProgressIndicator(
+                progress = {
+                    if (totalCount > 0) answeredCount.toFloat() / totalCount else 0f
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(CircleShape),
+                color = IndigoPrimary,
+                trackColor = Color(0xFFE2E8F0)
+            )
+        }
+    }
+}
+
+@Composable
+private fun QuizQuestionCardView(
+    qIdx: Int,
+    currentQ: QuizQuestionItem,
+    selectedOpt: String?,
+    isAnswered: Boolean,
+    onOptionSelect: (String, Boolean) -> Unit,
+    onStatusUpdate: (String) -> Unit,
+    wordHighlightColor: String,
+    qbQuestionFontSize: Float,
+    qbQuestionFont: String,
+    qbAnswerFontSize: Float,
+    qbAnswerFont: String,
+    qbExplanationFontSize: Float,
+    qbExplanationFont: String,
+    selectedSection: String?,
+    onOpenStem: (stemText: String, stemId: String?) -> Unit
+) {
+    val options = remember(currentQ) {
+        listOf(currentQ.opt1, currentQ.opt2, currentQ.opt3, currentQ.opt4, currentQ.opt5)
+            .filter { it.isNotBlank() }
+    }
+    var isAnswerRevealed by remember(currentQ.id, qIdx) { mutableStateOf(false) }
+
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = BorderStroke(1.dp, SlateBorder),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("quiz_question_card_$qIdx")
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(18.dp)
+        ) {
+            // Top Row: Question ID badge + Stem chip + Eye icon (View Answer without clicking)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f, fill = false)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(IndigoLight)
+                            .padding(horizontal = 9.dp, vertical = 3.5.dp)
+                    ) {
+                        val displayId = when {
+                            currentQ.id.isNotBlank() && !currentQ.id.startsWith("qb_") -> currentQ.id
+                            currentQ.id.startsWith("qb_") && currentQ.id.contains("_") -> "ID: ${currentQ.id.substringAfterLast("_")}"
+                            else -> "ID: ${qIdx + 1}"
+                        }
+                        Text(
+                            text = displayId,
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = IndigoPrimary
+                        )
+                    }
+
+                    // Stem button: ONLY shown if this question has a stem!
+                    if (!currentQ.stem.isNullOrBlank()) {
+                        Surface(
+                            onClick = { onOpenStem(currentQ.stem, currentQ.stemId) },
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color(0xFFEEF2FF),
+                            border = BorderStroke(1.dp, Color(0xFFC7D2FE)),
+                            modifier = Modifier.testTag("read_stem_button_${currentQ.id}")
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.5.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.MenuBook,
+                                    contentDescription = "Read Stem",
+                                    tint = IndigoPrimary,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = if (!currentQ.stemId.isNullOrBlank()) "Stem: ${currentQ.stemId}" else "Read Stem",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = IndigoPrimary
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Eye icon button to reveal answer directly without clicking any option
+                Surface(
+                    onClick = { isAnswerRevealed = !isAnswerRevealed },
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isAnswerRevealed) IndigoLight else Color(0xFFF1F5F9),
+                    border = BorderStroke(1.dp, if (isAnswerRevealed) IndigoPrimary else Color.Transparent),
+                    modifier = Modifier.testTag("reveal_answer_button_$qIdx")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isAnswerRevealed) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                            contentDescription = if (isAnswerRevealed) "Hide Answer" else "Show Answer",
+                            tint = if (isAnswerRevealed) IndigoPrimary else SlateMuted,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = if (isAnswerRevealed) "Hide" else "Answer",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (isAnswerRevealed) IndigoPrimary else SlateMuted
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Question Title with Colorized [Word] & Customizable Font + Font Size
+            ColorizedQuestionText(
+                question = currentQ.question,
+                colorChoice = wordHighlightColor,
+                fontSize = qbQuestionFontSize.sp,
+                fontFamily = resolveQbFontFamily(qbQuestionFont, currentQ.question)
+            )
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            val isAnswerShown = isAnswered || isAnswerRevealed
+
+            // Options (NO stroke colour from option card!)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                options.forEachIndexed { optIdx, opt ->
+                    val isThisOptionSelected = selectedOpt == opt
+                    val isThisOptionAnswer = isOptionTheAnswer(opt, optIdx, currentQ.answer)
+
+                    val (btnBg, btnText) = when {
+                        !isAnswerShown -> Pair(Color(0xFFF1F5F9), SlateText)
+                        isThisOptionAnswer -> Pair(EmeraldLight, EmeraldSuccess)
+                        isThisOptionSelected && !isThisOptionAnswer -> Pair(RoseLight, RoseError)
+                        else -> Pair(Color(0xFFF8FAFC), SlateMuted)
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(btnBg)
+                            .clickable(enabled = !isAnswered) {
+                                val isCorrect = isOptionTheAnswer(opt, optIdx, currentQ.answer)
+                                onOptionSelect(opt, isCorrect)
+                            }
+                            .padding(horizontal = 14.dp, vertical = 12.dp)
+                    ) {
+                        Text(
+                            text = "${('A' + optIdx)}.  $opt",
+                            fontFamily = resolveQbFontFamily(qbAnswerFont, opt),
+                            fontSize = qbAnswerFontSize.sp,
+                            fontWeight = if (isThisOptionSelected || (isAnswerShown && isThisOptionAnswer)) FontWeight.Bold else FontWeight.Medium,
+                            color = btnText,
+                            lineHeight = (qbAnswerFontSize * 1.35f).sp,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            }
+
+            // Question Bank Status Rating Bar (Know, Review/Confusion, Don't Know)
+            if (currentQ.sheetType == "qb" || selectedSection == "question_bank") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Status:",
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = SlateMuted,
+                        modifier = Modifier.padding(end = 4.dp)
+                    )
+                    IconButton(
+                        onClick = { onStatusUpdate("know") },
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = "Know",
+                            tint = EmeraldSuccess,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = { onStatusUpdate("confusion") },
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.HelpOutline,
+                            contentDescription = "Review / Confusion",
+                            tint = AmberWarning,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = { onStatusUpdate("dont_know") },
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Don't Know",
+                            tint = RoseError,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
+                }
+            }
+
+            // Explanation Card with Customizable Font + Font Size
+            if (isAnswerShown && !currentQ.explanation.isNullOrBlank()) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = IndigoLight),
+                    border = BorderStroke(1.dp, Color(0xFFC7D2FE))
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = "EXPLANATION",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = IndigoPrimary,
+                            letterSpacing = 0.8.sp
+                        )
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = currentQ.explanation ?: "",
+                            fontFamily = resolveQbFontFamily(qbExplanationFont, currentQ.explanation ?: ""),
+                            fontSize = qbExplanationFontSize.sp,
+                            fontWeight = FontWeight.Normal,
+                            color = SlateText,
+                            lineHeight = (qbExplanationFontSize * 1.4f).sp
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+@Composable
+private fun QuestionBankDashboardView(
+    questions: List<QuestionBankEntity>,
+    onStartQuiz: (bankName: String, status: String, f1: Set<String>, f2: Set<String>, f3: Set<String>, count: Int) -> Unit,
+    onImportQBBytes: (bytes: ByteArray, fileName: String, clearExisting: Boolean) -> Unit,
+    onDeleteQuestionsByBank: (bankName: String) -> Unit,
+    onRenameBank: (oldBankName: String, newBankName: String) -> Unit,
+    onAddSampleData: () -> Unit,
+    onBackupQBProgress: () -> Unit = {},
+    onRestoreQBProgress: (bytes: ByteArray) -> Unit = {}
+) {
+    val context = LocalContext.current
+    val qbFilePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: android.net.Uri? ->
+        if (uri != null) {
+            try {
+                var fileName = "Imported QB"
+                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (cursor.moveToFirst() && nameIndex >= 0) {
+                        fileName = cursor.getString(nameIndex)
+                    }
+                }
+                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                if (bytes != null && bytes.isNotEmpty()) {
+                    onImportQBBytes(bytes, fileName, false)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    val qbProgressFilePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: android.net.Uri? ->
+        if (uri != null) {
+            try {
+                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                if (bytes != null && bytes.isNotEmpty()) {
+                    onRestoreQBProgress(bytes)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    var configuringBank by remember { mutableStateOf<String?>(null) }
+    var renamingBank by remember { mutableStateOf<String?>(null) }
+    var renameInputText by remember { mutableStateOf("") }
+    var deletingBank by remember { mutableStateOf<String?>(null) }
+
+    val banksMap = remember(questions) {
+        if (questions.isEmpty()) {
+            emptyMap()
+        } else {
+            questions.groupBy { it.bankName.ifBlank { "General QB" } }
+        }
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag("qb_dashboard_list"),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(bottom = 32.dp)
+    ) {
+        // Top Action & Header Card
+        item {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                border = BorderStroke(1.dp, SlateBorder)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(IndigoLight),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Quiz,
+                                    contentDescription = null,
+                                    tint = IndigoPrimary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "Question Banks",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = SlateText
+                                )
+                                Text(
+                                    text = "${banksMap.size} banks • ${questions.size} questions",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 11.5.sp,
+                                    color = SlateMuted
+                                )
+                            }
+                        }
+                    }
+
+                    // Action buttons in clean 2x2 grid with unified two-tone styling
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                qbFilePicker.launch(arrayOf(
+                                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    "application/vnd.ms-excel",
+                                    "text/csv",
+                                    "text/comma-separated-values",
+                                    "text/tab-separated-values",
+                                    "application/csv",
+                                    "text/plain",
+                                    "application/json",
+                                    "*/*"
+                                ))
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(38.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Text(
+                                    text = "Import",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+
+                        OutlinedButton(
+                            onClick = onAddSampleData,
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = SlateText),
+                            border = BorderStroke(1.dp, SlateBorder),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(38.dp),
+                            contentPadding = PaddingValues(horizontal = 6.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(Icons.Default.School, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(15.dp))
+                                Text(
+                                    text = "Samples",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Empty state if no banks
+        if (banksMap.isEmpty()) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    border = BorderStroke(1.dp, SlateBorder),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(28.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(52.dp)
+                                .clip(CircleShape)
+                                .background(IndigoLight),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Quiz,
+                                contentDescription = null,
+                                tint = IndigoPrimary,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+                        Text(
+                            text = "No Question Banks",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = SlateText,
+                            textAlign = TextAlign.Center
+                        )
+                        Text(
+                            text = "Import an Excel/CSV file or load sample banks to start.",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 12.5.sp,
+                            color = SlateMuted,
+                            textAlign = TextAlign.Center
+                        )
+                        Button(
+                            onClick = onAddSampleData,
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                            modifier = Modifier.height(38.dp)
+                        ) {
+                            Text("Load Sample Banks", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        } else {
+            // Render each bank card with minimal two-color palette
+            items(banksMap.entries.toList(), key = { it.key }) { (bankName, bankQuestions) ->
+                val totalCount = bankQuestions.size
+                val knowCount = bankQuestions.count { it.status.equals("know", true) }
+                val confusionCount = bankQuestions.count { it.status.equals("confusion", true) || it.status.equals("review", true) }
+                val dontKnowCount = bankQuestions.count { it.status.equals("dont_know", true) }
+                val unratedCount = bankQuestions.count { it.status.isBlank() || it.status.equals("unrated", true) }
+                val percent = if (totalCount > 0) (knowCount * 100 / totalCount) else 0
+
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    border = BorderStroke(1.dp, SlateBorder),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("qb_card_${bankName.lowercase().replace(" ", "_")}")
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Header with Bank Name, question count, and Rename/Delete actions
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(CircleShape)
+                                        .background(IndigoLight),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.School,
+                                        contentDescription = null,
+                                        tint = IndigoPrimary,
+                                        modifier = Modifier.size(17.dp)
+                                    )
+                                }
+                                Column {
+                                    Text(
+                                        text = bankName,
+                                        fontFamily = PoppinsFontFamily,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = SlateText,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "$totalCount questions",
+                                        fontFamily = PoppinsFontFamily,
+                                        fontSize = 11.5.sp,
+                                        color = SlateMuted
+                                    )
+                                }
+                            }
+
+                            // Bank Actions: Rename & Delete
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(
+                                    onClick = {
+                                        renamingBank = bankName
+                                        renameInputText = bankName
+                                    },
+                                    modifier = Modifier.size(30.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = "Rename Bank",
+                                        tint = SlateMuted,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                IconButton(
+                                    onClick = { deletingBank = bankName },
+                                    modifier = Modifier.size(30.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = "Delete Bank",
+                                        tint = SlateMuted,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Progress Bar (Two-tone minimalist style)
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Mastered",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 11.5.sp,
+                                    color = SlateMuted
+                                )
+                                Text(
+                                    text = "$percent% ($knowCount/$totalCount)",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = IndigoPrimary
+                                )
+                            }
+                            LinearProgressIndicator(
+                                progress = { if (totalCount > 0) knowCount.toFloat() / totalCount.toFloat() else 0f },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp)),
+                                color = IndigoPrimary,
+                                trackColor = Color(0xFFF1F5F9)
+                            )
+                        }
+
+                        // Status counts row in calm, minimalist two-color style
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            QBStatCard(
+                                title = "Know",
+                                count = knowCount,
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    onStartQuiz(bankName, "know", emptySet(), emptySet(), emptySet(), 0)
+                                }
+                            )
+                            QBStatCard(
+                                title = "Review",
+                                count = confusionCount,
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    onStartQuiz(bankName, "confusion", emptySet(), emptySet(), emptySet(), 0)
+                                }
+                            )
+                            QBStatCard(
+                                title = "Don't Know",
+                                count = dontKnowCount,
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    onStartQuiz(bankName, "dont_know", emptySet(), emptySet(), emptySet(), 0)
+                                }
+                            )
+                            QBStatCard(
+                                title = "Unrated",
+                                count = unratedCount,
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    onStartQuiz(bankName, "unrated", emptySet(), emptySet(), emptySet(), 0)
+                                }
+                            )
+                        }
+
+                        // Action Buttons: Practice & Filters
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    onStartQuiz(bankName, "all", emptySet(), emptySet(), emptySet(), 0)
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                                modifier = Modifier
+                                    .weight(1.2f)
+                                    .height(38.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Text("Practice", fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
+                                }
+                            }
+
+                            OutlinedButton(
+                                onClick = { configuringBank = bankName },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = SlateText),
+                                border = BorderStroke(1.dp, SlateBorder),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(38.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    Icon(Icons.Default.Tune, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(15.dp))
+                                    Text("Filters", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Rename Dialog
+    if (renamingBank != null) {
+        val target = renamingBank!!
+        AlertDialog(
+            onDismissRequest = { renamingBank = null },
+            title = {
+                Text(
+                    text = "Rename Bank",
+                    fontFamily = PoppinsFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    color = SlateText
+                )
+            },
+            text = {
+                OutlinedTextField(
+                    value = renameInputText,
+                    onValueChange = { renameInputText = it },
+                    placeholder = { Text("Enter bank name...", fontSize = 12.sp) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = IndigoPrimary,
+                        unfocusedBorderColor = SlateBorder
+                    )
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val cleaned = renameInputText.trim()
+                        if (cleaned.isNotBlank() && cleaned != target) {
+                            onRenameBank(target, cleaned)
+                        }
+                        renamingBank = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { renamingBank = null }) {
+                    Text("Cancel", color = SlateMuted)
+                }
+            },
+            shape = RoundedCornerShape(18.dp),
+            containerColor = Color.White
+        )
+    }
+
+    // Delete Confirmation Dialog
+    if (deletingBank != null) {
+        val target = deletingBank!!
+        AlertDialog(
+            onDismissRequest = { deletingBank = null },
+            title = {
+                Text(
+                    text = "Delete Bank",
+                    fontFamily = PoppinsFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    color = SlateText
+                )
+            },
+            text = {
+                Text(
+                    text = "Delete all questions in '$target'?",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 13.5.sp,
+                    color = SlateMuted
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteQuestionsByBank(target)
+                        deletingBank = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = RoseError),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deletingBank = null }) {
+                    Text("Cancel", color = SlateMuted)
+                }
+            },
+            shape = RoundedCornerShape(18.dp),
+            containerColor = Color.White
+        )
+    }
+
+    // Configure & Filter Modal Dialog for specific bank
+    if (configuringBank != null) {
+        val target = configuringBank!!
+        val bankQuestions = remember(questions, target) {
+            questions.filter { it.bankName.equals(target, ignoreCase = true) }
+        }
+        var selectedStatus by remember(target) { mutableStateOf("all") }
+        var selectedF1 by remember(target) { mutableStateOf<Set<String>>(emptySet()) }
+        var selectedF2 by remember(target) { mutableStateOf<Set<String>>(emptySet()) }
+        var selectedF3 by remember(target) { mutableStateOf<Set<String>>(emptySet()) }
+        var questionCount by remember(target, bankQuestions) { mutableIntStateOf(minOf(15, maxOf(1, bankQuestions.size))) }
+
+        AlertDialog(
+            onDismissRequest = { configuringBank = null },
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(30.dp)
+                                .clip(CircleShape)
+                                .background(IndigoLight),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Tune, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(16.dp))
+                        }
+                        Text(
+                            text = target,
+                            fontFamily = PoppinsFontFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.5.sp,
+                            color = SlateText,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    IconButton(
+                        onClick = { configuringBank = null },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = SlateMuted, modifier = Modifier.size(18.dp))
+                    }
+                }
+            },
+            text = {
+                QuestionBankConfigView(
+                    questions = bankQuestions,
+                    selectedStatus = selectedStatus,
+                    onStatusChange = { selectedStatus = it },
+                    selectedFilters1 = selectedF1,
+                    selectedFilters2 = selectedF2,
+                    selectedFilters3 = selectedF3,
+                    questionCount = questionCount,
+                    onFilter1Toggle = { opt ->
+                        selectedF1 = if (opt in selectedF1) selectedF1 - opt else selectedF1 + opt
+                    },
+                    onFilter1Clear = { selectedF1 = emptySet() },
+                    onFilter2Toggle = { opt ->
+                        selectedF2 = if (opt in selectedF2) selectedF2 - opt else selectedF2 + opt
+                    },
+                    onFilter2Clear = { selectedF2 = emptySet() },
+                    onFilter3Toggle = { opt ->
+                        selectedF3 = if (opt in selectedF3) selectedF3 - opt else selectedF3 + opt
+                    },
+                    onFilter3Clear = { selectedF3 = emptySet() },
+                    onCountChange = { questionCount = it },
+                    onStart = {
+                        onStartQuiz(target, selectedStatus, selectedF1, selectedF2, selectedF3, questionCount)
+                        configuringBank = null
+                    }
+                )
+            },
+            confirmButton = {},
+            shape = RoundedCornerShape(18.dp),
+            containerColor = Color.White
+        )
+    }
+}
+
+@Composable
+private fun QBStatCard(
+    title: String,
+    count: Int,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xFFF8FAFC))
+            .border(1.dp, SlateBorder, RoundedCornerShape(10.dp))
+            .then(
+                if (onClick != null) Modifier.clickable { onClick() }
+                else Modifier
+            )
+            .padding(vertical = 8.dp, horizontal = 4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = count.toString(),
+                fontFamily = PoppinsFontFamily,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                color = SlateText
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = title,
+                fontFamily = PoppinsFontFamily,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium,
+                color = SlateMuted,
+                maxLines = 1
+            )
+        }
+    }
+}
+
 @Composable
 private fun QuestionBankConfigView(
     questions: List<QuestionBankEntity>,
+    selectedStatus: String,
+    onStatusChange: (String) -> Unit,
     selectedFilters1: Set<String>,
     selectedFilters2: Set<String>,
     selectedFilters3: Set<String>,
@@ -1670,245 +3069,495 @@ private fun QuestionBankConfigView(
     onCountChange: (Int) -> Unit,
     onStart: () -> Unit
 ) {
-    val f1Label = questions.firstOrNull()?.filter1Label ?: "Category"
-    val f2Label = questions.firstOrNull()?.filter2Label ?: "Difficulty"
-    val f3Label = questions.firstOrNull()?.filter3Label ?: "Source"
+    val totalCount = questions.size
+    val knowCount = remember(questions) { questions.count { it.status.equals("know", true) } }
+    val reviewCount = remember(questions) { questions.count { it.status.equals("confusion", true) || it.status.equals("review", true) } }
+    val dontKnowCount = remember(questions) { questions.count { it.status.equals("dont_know", true) } }
+    val unratedCount = remember(questions) { questions.count { it.status.isBlank() || it.status.equals("unrated", true) } }
 
-    val f1Values = questions.mapNotNull { it.filter1 }.distinct()
-    val f2Values = questions.mapNotNull { it.filter2 }.distinct()
-    val f3Values = questions.mapNotNull { it.filter3 }.distinct()
+    val f1Label = questions.mapNotNull { it.filter1Label }.firstOrNull { it.isNotBlank() }
+        ?: questions.firstOrNull()?.filter1Label?.ifBlank { "Course" } ?: "Course"
+    val f2Label = questions.mapNotNull { it.filter2Label }.firstOrNull { it.isNotBlank() }
+        ?: questions.firstOrNull()?.filter2Label?.ifBlank { "Q.type" } ?: "Q.type"
+    val f3Label = questions.mapNotNull { it.filter3Label }.firstOrNull { it.isNotBlank() }
+        ?: questions.firstOrNull()?.filter3Label?.ifBlank { "Session" } ?: "Session"
 
-    val matchedCount = questions.count { q ->
-        (selectedFilters1.isEmpty() || (q.filter1 != null && q.filter1 in selectedFilters1)) &&
-        (selectedFilters2.isEmpty() || (q.filter2 != null && q.filter2 in selectedFilters2)) &&
-        (selectedFilters3.isEmpty() || (q.filter3 != null && q.filter3 in selectedFilters3))
+    val f1Values = remember(questions) {
+        questions.mapNotNull { it.filter1 }.map { it.trim() }.filter { it.isNotBlank() }.distinct().sorted()
+    }
+    val f2Values = remember(questions) {
+        questions.mapNotNull { it.filter2 }.map { it.trim() }.filter { it.isNotBlank() }.distinct().sorted()
+    }
+    val f3Values = remember(questions) {
+        questions.mapNotNull { it.filter3 }.map { it.trim() }.filter { it.isNotBlank() }.distinct().sorted()
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+    val matchedCount = remember(questions, selectedStatus, selectedFilters1, selectedFilters2, selectedFilters3) {
+        questions.count { q ->
+            (when (selectedStatus.lowercase()) {
+                "all", "" -> true
+                "know" -> q.status.equals("know", true)
+                "confusion", "review" -> q.status.equals("confusion", true) || q.status.equals("review", true)
+                "dont_know" -> q.status.equals("dont_know", true)
+                "unrated" -> q.status.isBlank() || q.status.equals("unrated", true)
+                else -> q.status.equals(selectedStatus, ignoreCase = true)
+            }) &&
+            (selectedFilters1.isEmpty() || (q.filter1 != null && q.filter1 in selectedFilters1)) &&
+            (selectedFilters2.isEmpty() || (q.filter2 != null && q.filter2 in selectedFilters2)) &&
+            (selectedFilters3.isEmpty() || (q.filter3 != null && q.filter3 in selectedFilters3))
+        }
+    }
+
+    val hasActiveFilters = selectedStatus != "all" || selectedFilters1.isNotEmpty() || selectedFilters2.isNotEmpty() || selectedFilters3.isNotEmpty()
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        item {
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(SlateBorder))
+        if (hasActiveFilters) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    Text(
-                        text = "Filter & Category Selection",
-                        fontFamily = PoppinsFontFamily,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = SlateText
-                    )
-                    // Sub-heading and description removed as requested
-
-                    // Filter 1 - Grid Style
-                    if (f1Values.isNotEmpty()) {
-                        Text(
-                            text = f1Label,
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = SlateText
-                        )
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            FilterChip(
-                                selected = selectedFilters1.isEmpty(),
-                                onClick = onFilter1Clear,
-                                label = { Text("All") },
-                                shape = CircleShape,
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = IndigoPrimary,
-                                    selectedLabelColor = Color.White
-                                )
-                            )
-                            f1Values.forEach { v ->
-                                val isSelected = v in selectedFilters1
-                                FilterChip(
-                                    selected = isSelected,
-                                    onClick = { onFilter1Toggle(v) },
-                                    label = { Text(v) },
-                                    leadingIcon = if (isSelected) {
-                                        { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                                    } else null,
-                                    shape = CircleShape,
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = IndigoPrimary,
-                                        selectedLabelColor = Color.White
-                                    )
-                                )
-                            }
-                        }
+                Text(
+                    text = "Filters Active",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 11.5.sp,
+                    color = SlateMuted
+                )
+                Text(
+                    text = "Reset All",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = IndigoPrimary,
+                    modifier = Modifier.clickable {
+                        onStatusChange("all")
+                        onFilter1Clear()
+                        onFilter2Clear()
+                        onFilter3Clear()
                     }
+                )
+            }
+        }
 
-                    // Filter 2 - Grid Style
-                    if (f2Values.isNotEmpty()) {
-                        Text(
-                            text = f2Label,
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = SlateText
-                        )
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            FilterChip(
-                                selected = selectedFilters2.isEmpty(),
-                                onClick = onFilter2Clear,
-                                label = { Text("All") },
-                                shape = CircleShape,
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = IndigoPrimary,
-                                    selectedLabelColor = Color.White
-                                )
-                            )
-                            f2Values.forEach { v ->
-                                val isSelected = v in selectedFilters2
-                                FilterChip(
-                                    selected = isSelected,
-                                    onClick = { onFilter2Toggle(v) },
-                                    label = { Text(v) },
-                                    leadingIcon = if (isSelected) {
-                                        { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                                    } else null,
-                                    shape = CircleShape,
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = IndigoPrimary,
-                                        selectedLabelColor = Color.White
-                                    )
-                                )
-                            }
-                        }
-                    }
+        // Status Filter Icon Buttons: All, Know, Review, Don't Know, Unrated
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                text = "Status",
+                fontFamily = PoppinsFontFamily,
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = SlateMuted
+            )
+            val statusIcons = listOf(
+                Triple("all", Icons.Default.DoneAll, IndigoPrimary),
+                Triple("know", Icons.Default.CheckCircle, EmeraldSuccess),
+                Triple("review", Icons.Default.Psychology, AmberWarning),
+                Triple("dont_know", Icons.Default.Cancel, RoseError),
+                Triple("unrated", Icons.Default.HelpOutline, SlateMuted)
+            )
+            val statusCounts = mapOf(
+                "all" to totalCount,
+                "know" to knowCount,
+                "review" to reviewCount,
+                "dont_know" to dontKnowCount,
+                "unrated" to unratedCount
+            )
+            val statusTitles = mapOf(
+                "all" to "All",
+                "know" to "Know",
+                "review" to "Review",
+                "dont_know" to "Don't Know",
+                "unrated" to "Unrated"
+            )
 
-                    // Filter 3 - Grid Style
-                    if (f3Values.isNotEmpty()) {
-                        Text(
-                            text = f3Label,
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = SlateText
-                        )
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            FilterChip(
-                                selected = selectedFilters3.isEmpty(),
-                                onClick = onFilter3Clear,
-                                label = { Text("All") },
-                                shape = CircleShape,
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = IndigoPrimary,
-                                    selectedLabelColor = Color.White
-                                )
-                            )
-                            f3Values.forEach { v ->
-                                val isSelected = v in selectedFilters3
-                                FilterChip(
-                                    selected = isSelected,
-                                    onClick = { onFilter3Toggle(v) },
-                                    label = { Text(v) },
-                                    leadingIcon = if (isSelected) {
-                                        { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                                    } else null,
-                                    shape = CircleShape,
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = IndigoPrimary,
-                                        selectedLabelColor = Color.White
-                                    )
-                                )
-                            }
-                        }
-                    }
-
-                    // Question Count Selector
-                    Text(
-                        text = "Number of Questions",
-                        fontFamily = PoppinsFontFamily,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = SlateText
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(5, 10, 15, 20).forEach { cnt ->
-                            FilterChip(
-                                selected = questionCount == cnt,
-                                onClick = { onCountChange(cnt) },
-                                label = { Text("$cnt Questions") },
-                                shape = CircleShape,
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = IndigoPrimary,
-                                    selectedLabelColor = Color.White
-                                )
-                            )
-                        }
-                    }
-
-                    // Match Count Notification Card
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = IndigoLight.copy(alpha = 0.5f)),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                statusIcons.forEach { (stKey, icon, brandColor) ->
+                    val isSelected = selectedStatus.equals(stKey, ignoreCase = true)
+                    val count = statusCounts[stKey] ?: 0
+                    Surface(
+                        onClick = { onStatusChange(stKey) },
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isSelected) brandColor else Color(0xFFF8FAFC),
+                        border = BorderStroke(
+                            if (isSelected) 1.5.dp else 1.dp,
+                            if (isSelected) brandColor else SlateBorder
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .testTag("qb_filter_status_$stKey")
                     ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 2.dp, vertical = 3.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = statusTitles[stKey],
+                                tint = if (isSelected) Color.White else brandColor,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "$count",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 10.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected) Color.White else SlateMuted
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3 Minimized and Iconized Filter Buttons: Course, Q.type, Session
+        if (f1Values.isNotEmpty() || f2Values.isNotEmpty() || f3Values.isNotEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = "Filters",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = SlateMuted
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    CompactFilterMenuButton(
+                        label = f1Label,
+                        icon = Icons.Default.School,
+                        options = f1Values,
+                        selectedOptions = selectedFilters1,
+                        onToggleOption = onFilter1Toggle,
+                        onClearOption = onFilter1Clear,
+                        modifier = Modifier.weight(1f)
+                    )
+                    CompactFilterMenuButton(
+                        label = f2Label,
+                        icon = Icons.Default.Adjust,
+                        options = f2Values,
+                        selectedOptions = selectedFilters2,
+                        onToggleOption = onFilter2Toggle,
+                        onClearOption = onFilter2Clear,
+                        modifier = Modifier.weight(1f)
+                    )
+                    CompactFilterMenuButton(
+                        label = f3Label,
+                        icon = Icons.Default.MenuBook,
+                        options = f3Values,
+                        selectedOptions = selectedFilters3,
+                        onToggleOption = onFilter3Toggle,
+                        onClearOption = onFilter3Clear,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
+
+        // Questions Count
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                text = "Questions",
+                fontFamily = PoppinsFontFamily,
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = SlateMuted
+            )
+            val baseOptions = listOf(5, 10, 15, 20, 30)
+            val countOptions = (baseOptions.filter { it <= matchedCount || matchedCount == 0 } + listOf(matchedCount).filter { it > 0 }).distinct().sorted()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                countOptions.forEach { opt ->
+                    val isSelected = (questionCount == opt) || (opt == matchedCount && questionCount >= matchedCount)
+                    val label = if (opt == matchedCount && matchedCount > 0) "All ($opt)" else "$opt"
+                    Surface(
+                        onClick = { onCountChange(opt) },
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isSelected) IndigoPrimary else Color(0xFFF8FAFC),
+                        border = BorderStroke(1.dp, if (isSelected) IndigoPrimary else SlateBorder)
+                    ) {
+                        Text(
+                            text = label,
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 11.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isSelected) Color.White else SlateText,
+                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(2.dp))
+
+        // Start Button with compact count
+        Button(
+            onClick = onStart,
+            enabled = matchedCount > 0,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(42.dp)
+                .testTag("start_qb_test_button"),
+            shape = RoundedCornerShape(10.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                Text(
+                    text = if (matchedCount > 0) "Start (${minOf(questionCount, matchedCount)} of $matchedCount Qs)" else "No Questions Match",
+                    fontFamily = PoppinsFontFamily,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.5.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompactFilterMenuButton(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    options: List<String>,
+    selectedOptions: Set<String>,
+    onToggleOption: (String) -> Unit,
+    onClearOption: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val isFilterActive = selectedOptions.isNotEmpty()
+
+    Box(modifier = modifier) {
+        Surface(
+            onClick = { if (options.isNotEmpty()) expanded = true },
+            shape = RoundedCornerShape(10.dp),
+            color = if (isFilterActive) IndigoLight else Color(0xFFF8FAFC),
+            border = BorderStroke(
+                1.dp,
+                if (isFilterActive) IndigoPrimary else SlateBorder
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(38.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = label,
+                    tint = if (isFilterActive) IndigoPrimary else SlateMuted,
+                    modifier = Modifier.size(15.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = if (isFilterActive) "${label.take(6)} (${selectedOptions.size})" else label.take(8),
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 11.sp,
+                    fontWeight = if (isFilterActive) FontWeight.Bold else FontWeight.Medium,
+                    color = if (isFilterActive) IndigoPrimary else SlateText,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier
+                .widthIn(min = 180.dp, max = 280.dp)
+                .background(Color.White)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = label,
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = IndigoPrimary
+                )
+                if (isFilterActive) {
+                    Text(
+                        text = "Clear",
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = RoseError,
+                        modifier = Modifier.clickable {
+                            onClearOption()
+                            expanded = false
+                        }
+                    )
+                }
+            }
+            HorizontalDivider(color = SlateBorder)
+            options.forEach { opt ->
+                val isChecked = opt in selectedOptions
+                DropdownMenuItem(
+                    text = {
                         Row(
-                            modifier = Modifier.padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(Icons.Default.FilterList, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(18.dp))
+                            Checkbox(
+                                checked = isChecked,
+                                onCheckedChange = { onToggleOption(opt) },
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = IndigoPrimary,
+                                    uncheckedColor = SlateBorder
+                                ),
+                                modifier = Modifier.size(18.dp)
+                            )
                             Text(
-                                text = "$matchedCount questions match your selection",
+                                text = opt,
                                 fontFamily = PoppinsFontFamily,
                                 fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = IndigoPrimary
+                                color = SlateText
                             )
                         }
+                    },
+                    onClick = { onToggleOption(opt) },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuestionBankCountDropdown(
+    questionCount: Int,
+    maxAvailable: Int,
+    onCountChange: (Int) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val baseOptions = listOf(5, 10, 15, 20, 25, 30)
+    val countOptions = (baseOptions + listOf(maxAvailable).filter { it > 0 }).distinct().sorted()
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Icon(Icons.Default.Quiz, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(15.dp))
+            Text(
+                text = "Number of Questions",
+                fontFamily = PoppinsFontFamily,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = SlateText
+            )
+        }
+
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Surface(
+                onClick = { expanded = !expanded },
+                shape = RoundedCornerShape(12.dp),
+                color = if (expanded) IndigoLight.copy(alpha = 0.45f) else Color(0xFFF8FAFC),
+                border = BorderStroke(1.dp, if (expanded) IndigoPrimary else SlateBorder),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val countText = if (questionCount >= maxAvailable && maxAvailable > 0) {
+                        "All Available ($maxAvailable Questions)"
+                    } else {
+                        "$questionCount Questions"
                     }
 
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = countText,
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = IndigoPrimary
+                    )
 
-                    Button(
-                        onClick = onStart,
-                        enabled = matchedCount > 0,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(50.dp)
-                            .testTag("start_qb_test_button"),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null)
-                            Text(
-                                text = if (matchedCount > 0)
-                                    "Start Practice Test (${minOf(questionCount, matchedCount)} Questions)"
-                                else
-                                    "No Questions Match Filters",
-                                fontWeight = FontWeight.Bold
-                            )
+                    Icon(
+                        imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = "Select question count",
+                        tint = IndigoPrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+                modifier = Modifier
+                    .fillMaxWidth(0.85f)
+                    .background(Color.White)
+            ) {
+                countOptions.forEach { cnt ->
+                    val isChecked = (questionCount == cnt)
+                    val label = if (cnt == maxAvailable && maxAvailable > 0 && maxAvailable !in baseOptions) {
+                        "All Available Questions ($cnt)"
+                    } else {
+                        "$cnt Questions"
+                    }
+                    DropdownMenuItem(
+                        text = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                if (isChecked) {
+                                    Icon(Icons.Default.Check, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(16.dp))
+                                } else {
+                                    Spacer(modifier = Modifier.size(16.dp))
+                                }
+                                Text(
+                                    text = label,
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (isChecked) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isChecked) IndigoPrimary else SlateText
+                                )
+                            }
+                        },
+                        onClick = {
+                            onCountChange(cnt)
+                            expanded = false
                         }
-                    }
+                    )
                 }
             }
         }
@@ -1922,7 +3571,10 @@ private fun QuizSummaryView(
     pooledScore: Int? = null,
     pooledTotal: Int? = null,
     isQuizTest: Boolean = false,
-    onRetake: () -> Unit
+    isQuestionBank: Boolean = false,
+    onRetake: () -> Unit,
+    onBackToBanks: (() -> Unit)? = null,
+    onPracticeMissed: (() -> Unit)? = null
 ) {
     val percent = if (total > 0) (score * 100 / total) else 0
 
@@ -2036,6 +3688,46 @@ private fun QuizSummaryView(
                 ) {
                     Icon(Icons.Default.Refresh, contentDescription = null)
                     Text("Try Another Round", fontWeight = FontWeight.Bold)
+                }
+            }
+
+            if (onPracticeMissed != null && score < total) {
+                OutlinedButton(
+                    onClick = onPracticeMissed,
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = RoseError),
+                    border = BorderStroke(1.dp, RoseBorder),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, tint = RoseError)
+                        Text("Practice Missed (${total - score})", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            if (isQuestionBank && onBackToBanks != null) {
+                OutlinedButton(
+                    onClick = onBackToBanks,
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = IndigoPrimary),
+                    border = BorderStroke(1.dp, IndigoPrimary),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, tint = IndigoPrimary)
+                        Text("Back to Question Banks", fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
@@ -3646,9 +5338,14 @@ private data class QuizQuestionItem(
     val opt2: String,
     val opt3: String,
     val opt4: String,
+    val opt5: String = "",
     val answer: String,
     val explanation: String?,
-    val lastAttemptStatus: String? = "not_studied"
+    val stem: String? = null,
+    val stemId: String? = null,
+    val lastAttemptStatus: String? = "not_studied",
+    val bankName: String = "",
+    val wordStatus: String = "unrated"
 )
 
 private fun isOptionTheAnswer(opt: String, optIdx: Int, answer: String): Boolean {
@@ -3658,13 +5355,15 @@ private fun isOptionTheAnswer(opt: String, optIdx: Int, answer: String): Boolean
 
     val letter = ('A' + optIdx).toString()
     if (cleanAns.equals(letter, ignoreCase = true)) return true
+    if (cleanAns.equals("($letter)", ignoreCase = true)) return true
+    if (cleanAns.equals("${optIdx + 1}", ignoreCase = true)) return true
     if (cleanAns.equals("Opt${optIdx + 1}", ignoreCase = true)) return true
     if (cleanAns.equals("Option ${optIdx + 1}", ignoreCase = true)) return true
     if (cleanAns.equals("Option${optIdx + 1}", ignoreCase = true)) return true
 
-    if (cleanAns.startsWith("$letter.", ignoreCase = true) || cleanAns.startsWith("$letter)", ignoreCase = true)) {
-        val sub = cleanAns.substring(2).trim()
-        if (sub.equals(cleanOpt, ignoreCase = true)) return true
+    if (cleanAns.startsWith("$letter.", ignoreCase = true) || cleanAns.startsWith("$letter)", ignoreCase = true) || cleanAns.startsWith("($letter)", ignoreCase = true)) {
+        val sub = cleanAns.replace(Regex("""^(\([A-Za-z]\)|[A-Za-z][\.\)])\s*"""), "").trim()
+        if (sub.equals(cleanOpt, ignoreCase = true) || sub.isBlank()) return true
     }
     return false
 }
@@ -3675,6 +5374,7 @@ private fun GamePracticeEntity.toQuizItem(): QuizQuestionItem {
         rawOpt2 = opt2,
         rawOpt3 = opt3,
         rawOpt4 = opt4,
+        rawOpt5 = opt5,
         rawAnswer = answer
     )
     return QuizQuestionItem(
@@ -3685,6 +5385,7 @@ private fun GamePracticeEntity.toQuizItem(): QuizQuestionItem {
         opt2 = resolved.cleanOpt2,
         opt3 = resolved.cleanOpt3,
         opt4 = resolved.cleanOpt4,
+        opt5 = resolved.cleanOpt5,
         answer = resolved.correctAnswer,
         explanation = explanation,
         lastAttemptStatus = lastAttemptStatus
@@ -3697,6 +5398,7 @@ private fun QuestionBankEntity.toQuizItem(): QuizQuestionItem {
         rawOpt2 = opt2,
         rawOpt3 = opt3,
         rawOpt4 = opt4,
+        rawOpt5 = opt5,
         rawAnswer = answer
     )
     return QuizQuestionItem(
@@ -3707,9 +5409,14 @@ private fun QuestionBankEntity.toQuizItem(): QuizQuestionItem {
         opt2 = resolved.cleanOpt2,
         opt3 = resolved.cleanOpt3,
         opt4 = resolved.cleanOpt4,
+        opt5 = resolved.cleanOpt5,
         answer = resolved.correctAnswer,
         explanation = explanation,
-        lastAttemptStatus = "not_studied"
+        stem = stem,
+        stemId = stemId,
+        lastAttemptStatus = "not_studied",
+        bankName = bankName,
+        wordStatus = status
     )
 }
 
@@ -4307,6 +6014,666 @@ private fun CourseQuizConfigView(
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QbTypographyFilterDialog(
+    questionFontSize: Float,
+    answerFontSize: Float,
+    explanationFontSize: Float,
+    questionFont: String,
+    answerFont: String,
+    explanationFont: String,
+    questionOrder: String = "serial",
+    onOrderChange: (String) -> Unit = {},
+    f1Label: String = "Course",
+    f1Values: List<String> = emptyList(),
+    selectedFilters1: Set<String> = emptySet(),
+    onFilter1Toggle: (String) -> Unit = {},
+    onFilter1Clear: () -> Unit = {},
+    f2Label: String = "Q.type",
+    f2Values: List<String> = emptyList(),
+    selectedFilters2: Set<String> = emptySet(),
+    onFilter2Toggle: (String) -> Unit = {},
+    onFilter2Clear: () -> Unit = {},
+    f3Label: String = "Session",
+    f3Values: List<String> = emptyList(),
+    selectedFilters3: Set<String> = emptySet(),
+    onFilter3Toggle: (String) -> Unit = {},
+    onFilter3Clear: () -> Unit = {},
+    onApplySettings: (qSize: Float, aSize: Float, eSize: Float, qFont: String, aFont: String, eFont: String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var qSize by remember { mutableFloatStateOf(questionFontSize) }
+    var aSize by remember { mutableFloatStateOf(answerFontSize) }
+    var eSize by remember { mutableFloatStateOf(explanationFontSize) }
+    var qFontState by remember { mutableStateOf(questionFont) }
+    var aFontState by remember { mutableStateOf(answerFont) }
+    var eFontState by remember { mutableStateOf(explanationFont) }
+
+    var selectedTab by remember { mutableIntStateOf(0) } // 0: Question, 1: Answer, 2: Explanation
+
+    val fontOptions = listOf(
+        Pair("auto", "Auto / Default"),
+        Pair("poppins", "Poppins"),
+        Pair("kalpurush", "Kalpurush"),
+        Pair("aikya", "Aikya"),
+        Pair("serif", "Serif"),
+        Pair("sans", "Sans-Serif"),
+        Pair("mono", "Monospace")
+    )
+
+    AlertDialog(
+        onDismissRequest = {
+            onApplySettings(qSize, aSize, eSize, qFontState, aFontState, eFontState)
+            onDismiss()
+        },
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(IndigoLight),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Tune,
+                            contentDescription = null,
+                            tint = IndigoPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = "Question Sheet Filter",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = SlateText
+                        )
+                        Text(
+                            text = "Order, filters & appearance",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 11.5.sp,
+                            color = SlateMuted
+                        )
+                    }
+                }
+                IconButton(
+                    onClick = {
+                        onApplySettings(qSize, aSize, eSize, qFontState, aFontState, eFontState)
+                        onDismiss()
+                    },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close",
+                        tint = SlateMuted,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                // 1. Question Order Control (Serial vs Random)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "Question Order",
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = SlateMuted
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFFF1F5F9))
+                            .padding(3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Surface(
+                            onClick = { onOrderChange("serial") },
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (questionOrder == "serial") IndigoPrimary else Color.Transparent,
+                            modifier = Modifier.weight(1f).height(34.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.FormatListNumbered,
+                                    contentDescription = null,
+                                    tint = if (questionOrder == "serial") Color.White else IndigoPrimary,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(
+                                    text = "Serial",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (questionOrder == "serial") FontWeight.Bold else FontWeight.Medium,
+                                    color = if (questionOrder == "serial") Color.White else SlateText
+                                )
+                            }
+                        }
+
+                        Surface(
+                            onClick = { onOrderChange("random") },
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (questionOrder == "random") IndigoPrimary else Color.Transparent,
+                            modifier = Modifier.weight(1f).height(34.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Shuffle,
+                                    contentDescription = null,
+                                    tint = if (questionOrder == "random") Color.White else IndigoPrimary,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(
+                                    text = "Random",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (questionOrder == "random") FontWeight.Bold else FontWeight.Medium,
+                                    color = if (questionOrder == "random") Color.White else SlateText
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 2. 3 Minimized and Iconized Filter Buttons (Course, Q.type, Session)
+                if (f1Values.isNotEmpty() || f2Values.isNotEmpty() || f3Values.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Sheet Filters",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = SlateMuted
+                            )
+                            if (selectedFilters1.isNotEmpty() || selectedFilters2.isNotEmpty() || selectedFilters3.isNotEmpty()) {
+                                Text(
+                                    text = "Reset All",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = IndigoPrimary,
+                                    modifier = Modifier.clickable {
+                                        onFilter1Clear()
+                                        onFilter2Clear()
+                                        onFilter3Clear()
+                                    }
+                                )
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            CompactFilterMenuButton(
+                                label = f1Label,
+                                icon = Icons.Default.School,
+                                options = f1Values,
+                                selectedOptions = selectedFilters1,
+                                onToggleOption = onFilter1Toggle,
+                                onClearOption = onFilter1Clear,
+                                modifier = Modifier.weight(1f)
+                            )
+                            CompactFilterMenuButton(
+                                label = f2Label,
+                                icon = Icons.Default.Adjust,
+                                options = f2Values,
+                                selectedOptions = selectedFilters2,
+                                onToggleOption = onFilter2Toggle,
+                                onClearOption = onFilter2Clear,
+                                modifier = Modifier.weight(1f)
+                            )
+                            CompactFilterMenuButton(
+                                label = f3Label,
+                                icon = Icons.Default.MenuBook,
+                                options = f3Values,
+                                selectedOptions = selectedFilters3,
+                                onToggleOption = onFilter3Toggle,
+                                onClearOption = onFilter3Clear,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
+
+                HorizontalDivider(color = SlateBorder)
+
+                // Tab Selection: All | Question | Answer | Explanation
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFFF1F5F9))
+                        .padding(3.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    listOf("All", "Question", "Answer", "Explanation").forEachIndexed { index, tabTitle ->
+                        val isSelected = selectedTab == index
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) Color.White else Color.Transparent)
+                                .clickable { selectedTab = index }
+                                .padding(vertical = 7.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = tabTitle,
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 11.5.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected) IndigoPrimary else SlateMuted
+                            )
+                        }
+                    }
+                }
+
+                when (selectedTab) {
+                    0 -> { // All Settings
+                        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            QbTypographySection(
+                                title = "Question Font & Size",
+                                currentFont = qFontState,
+                                fontSize = qSize,
+                                minSize = 12f,
+                                maxSize = 26f,
+                                sizePresets = listOf(13f, 14f, 15f, 16f, 18f, 20f, 22f),
+                                fontOptions = fontOptions,
+                                onFontChange = { qFontState = it },
+                                onSizeChange = { qSize = it },
+                                onApplyFontToAll = {
+                                    qFontState = it
+                                    aFontState = it
+                                    eFontState = it
+                                }
+                            )
+
+                            HorizontalDivider(color = SlateBorder)
+
+                            QbTypographySection(
+                                title = "Answer Options Font & Size",
+                                currentFont = aFontState,
+                                fontSize = aSize,
+                                minSize = 11f,
+                                maxSize = 22f,
+                                sizePresets = listOf(12f, 13f, 14f, 15f, 16f, 18f),
+                                fontOptions = fontOptions,
+                                onFontChange = { aFontState = it },
+                                onSizeChange = { aSize = it },
+                                onApplyFontToAll = {
+                                    qFontState = it
+                                    aFontState = it
+                                    eFontState = it
+                                }
+                            )
+
+                            HorizontalDivider(color = SlateBorder)
+
+                            QbTypographySection(
+                                title = "Explanation Font & Size",
+                                currentFont = eFontState,
+                                fontSize = eSize,
+                                minSize = 10f,
+                                maxSize = 20f,
+                                sizePresets = listOf(10f, 11f, 12f, 13f, 14f, 16f),
+                                fontOptions = fontOptions,
+                                onFontChange = { eFontState = it },
+                                onSizeChange = { eSize = it },
+                                onApplyFontToAll = {
+                                    qFontState = it
+                                    aFontState = it
+                                    eFontState = it
+                                }
+                            )
+                        }
+                    }
+                    1 -> { // Question Settings
+                        QbTypographySection(
+                            title = "Question Font & Size",
+                            currentFont = qFontState,
+                            fontSize = qSize,
+                            minSize = 12f,
+                            maxSize = 26f,
+                            sizePresets = listOf(13f, 14f, 15f, 16f, 18f, 20f, 22f),
+                            fontOptions = fontOptions,
+                            onFontChange = { qFontState = it },
+                            onSizeChange = { qSize = it },
+                            onApplyFontToAll = {
+                                qFontState = it
+                                aFontState = it
+                                eFontState = it
+                            }
+                        )
+                    }
+                    2 -> { // Answer Settings
+                        QbTypographySection(
+                            title = "Answer Options Font & Size",
+                            currentFont = aFontState,
+                            fontSize = aSize,
+                            minSize = 11f,
+                            maxSize = 22f,
+                            sizePresets = listOf(12f, 13f, 14f, 15f, 16f, 18f),
+                            fontOptions = fontOptions,
+                            onFontChange = { aFontState = it },
+                            onSizeChange = { aSize = it },
+                            onApplyFontToAll = {
+                                qFontState = it
+                                aFontState = it
+                                eFontState = it
+                            }
+                        )
+                    }
+                    3 -> { // Explanation Settings
+                        QbTypographySection(
+                            title = "Explanation Font & Size",
+                            currentFont = eFontState,
+                            fontSize = eSize,
+                            minSize = 10f,
+                            maxSize = 20f,
+                            sizePresets = listOf(10f, 11f, 12f, 13f, 14f, 16f),
+                            fontOptions = fontOptions,
+                            onFontChange = { eFontState = it },
+                            onSizeChange = { eSize = it },
+                            onApplyFontToAll = {
+                                qFontState = it
+                                aFontState = it
+                                eFontState = it
+                            }
+                        )
+                    }
+                }
+
+                // Live Preview Card
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
+                    border = BorderStroke(1.dp, SlateBorder)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "LIVE PREVIEW",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = IndigoPrimary,
+                            letterSpacing = 0.5.sp
+                        )
+
+                        // Sample Question
+                        Text(
+                            text = "What is the primary objective of this problem?",
+                            fontFamily = resolveQbFontFamily(qFontState, "What is the primary objective of this problem?"),
+                            fontSize = qSize.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = SlateText,
+                            lineHeight = (qSize * 1.35f).sp
+                        )
+
+                        // Sample Option (with NO stroke color!)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFFF1F5F9))
+                                .padding(horizontal = 12.dp, vertical = 9.dp)
+                        ) {
+                            Text(
+                                text = "A.  Correctly evaluate and deduce the answer",
+                                fontFamily = resolveQbFontFamily(aFontState, "A.  Correctly evaluate and deduce the answer"),
+                                fontSize = aSize.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = SlateText
+                            )
+                        }
+
+                        // Sample Explanation
+                        Card(
+                            shape = RoundedCornerShape(8.dp),
+                            colors = CardDefaults.cardColors(containerColor = IndigoLight.copy(alpha = 0.6f))
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                Text(
+                                    text = "Explanation: Step-by-step logic explains the reasoning clearly.",
+                                    fontFamily = resolveQbFontFamily(eFontState, "Explanation: Step-by-step logic explains the reasoning clearly."),
+                                    fontSize = eSize.sp,
+                                    color = SlateText,
+                                    lineHeight = (eSize * 1.35f).sp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(
+                    onClick = {
+                        qSize = 16f
+                        aSize = 14f
+                        eSize = 12f
+                        qFontState = "auto"
+                        aFontState = "auto"
+                        eFontState = "auto"
+                    }
+                ) {
+                    Text(
+                        text = "Reset Defaults",
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 12.sp,
+                        color = SlateMuted
+                    )
+                }
+
+                Button(
+                    onClick = {
+                        onApplySettings(qSize, aSize, eSize, qFontState, aFontState, eFontState)
+                        onDismiss()
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = "Done",
+                        fontFamily = PoppinsFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.5.sp
+                    )
+                }
+            }
+        },
+        shape = RoundedCornerShape(18.dp),
+        containerColor = Color.White
+    )
+}
+
+@Composable
+private fun QbTypographySection(
+    title: String,
+    currentFont: String,
+    fontSize: Float,
+    minSize: Float,
+    maxSize: Float,
+    sizePresets: List<Float>,
+    fontOptions: List<Pair<String, String>>,
+    onFontChange: (String) -> Unit,
+    onSizeChange: (Float) -> Unit,
+    onApplyFontToAll: (String) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // Font Family Selector
+        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Font Family",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = SlateMuted
+                )
+                Text(
+                    text = "Apply to all",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = IndigoPrimary,
+                    modifier = Modifier.clickable { onApplyFontToAll(currentFont) }
+                )
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                fontOptions.forEach { (key, label) ->
+                    val isSelected = currentFont.equals(key, ignoreCase = true)
+                    Surface(
+                        onClick = { onFontChange(key) },
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isSelected) IndigoPrimary else Color(0xFFF8FAFC),
+                        border = BorderStroke(1.dp, if (isSelected) IndigoPrimary else SlateBorder)
+                    ) {
+                        Text(
+                            text = label,
+                            fontFamily = resolveQbFontFamily(key, label),
+                            fontSize = 11.5.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isSelected) Color.White else SlateText,
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Font Size Stepper & Presets
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Font Size",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = SlateMuted
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    IconButton(
+                        onClick = { onSizeChange(maxOf(minSize, fontSize - 1f)) },
+                        modifier = Modifier
+                            .size(26.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFF1F5F9))
+                    ) {
+                        Text("-", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = SlateText)
+                    }
+                    Text(
+                        text = "${fontSize.toInt()} sp",
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = IndigoPrimary,
+                        modifier = Modifier.widthIn(min = 36.dp),
+                        textAlign = TextAlign.Center
+                    )
+                    IconButton(
+                        onClick = { onSizeChange(minOf(maxSize, fontSize + 1f)) },
+                        modifier = Modifier
+                            .size(26.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFF1F5F9))
+                    ) {
+                        Text("+", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = SlateText)
+                    }
+                }
+            }
+
+            // Quick Preset Buttons
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                sizePresets.forEach { size ->
+                    val isSelected = fontSize.toInt() == size.toInt()
+                    Surface(
+                        onClick = { onSizeChange(size) },
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isSelected) IndigoLight else Color(0xFFF8FAFC),
+                        border = BorderStroke(1.dp, if (isSelected) IndigoPrimary else SlateBorder)
+                    ) {
+                        Text(
+                            text = "${size.toInt()}sp",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 11.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isSelected) IndigoPrimary else SlateText,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
                 }
             }
         }

@@ -51,6 +51,194 @@ class BackupManager(private val context: Context, private val database: AppDatab
 
     fun getJsonBackupFile(): File = File(getBackupDirectory(), "memorizer_progress.json")
     fun getCsvBackupFile(): File = File(getBackupDirectory(), "memorizer_vocabulary.csv")
+    fun getQbProgressBackupFile(): File = File(getBackupDirectory(), "qb_progress.json")
+
+    /**
+     * Generates a separate JSON backup string containing ONLY Question Bank progress (no questions data).
+     * Format: { "type": "qb_progress_backup", "timestamp": ..., "count": ..., "progress": [{ "id": ..., "status": ..., "timesAnswered": ..., "lastAnsweredAt": ..., "bankName": ... }] }
+     */
+    suspend fun generateQbProgressJsonString(): String = withContext(Dispatchers.IO) {
+        val questions = database.questionBankDao().getAllQuestionsList()
+        val jsonRoot = JSONObject()
+        jsonRoot.put("type", "qb_progress_backup")
+        jsonRoot.put("version", "1.0")
+        jsonRoot.put("timestamp", System.currentTimeMillis())
+        jsonRoot.put("count", questions.size)
+
+        val progArray = JSONArray()
+        questions.forEach { q ->
+            val pObj = JSONObject()
+            pObj.put("id", q.id)
+            pObj.put("status", q.status)
+            pObj.put("timesAnswered", q.timesAnswered)
+            pObj.put("lastAnsweredAt", q.lastAnsweredAt)
+            pObj.put("bankName", q.bankName)
+            pObj.put("prompt", q.question.trim())
+            progArray.put(pObj)
+        }
+        jsonRoot.put("progress", progArray)
+        jsonRoot.toString(2)
+    }
+
+    /**
+     * Saves the QB progress backup file directly to local backup directory and SAF linked folder.
+     */
+    suspend fun saveQbProgressBackupFile(): Result<File> = withContext(Dispatchers.IO) {
+        try {
+            val jsonText = generateQbProgressJsonString()
+            val file = getQbProgressBackupFile()
+            file.writeText(jsonText, Charsets.UTF_8)
+
+            // Also write to custom linked folder if SAF is granted
+            val treeUriStr = getCustomTreeUri()
+            if (treeUriStr != null) {
+                try {
+                    val treeUri = Uri.parse(treeUriStr)
+                    writeToSafTree(treeUri, "qb_progress.json", "application/json", jsonText.toByteArray(Charsets.UTF_8))
+                } catch (e: Exception) {
+                    android.util.Log.e("BackupManager", "Failed writing qb_progress to SAF tree: ${e.message}")
+                }
+            }
+            Result.success(file)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Reads saved QB progress map from qb_progress.json on disk if present.
+     */
+    suspend fun getSavedQbProgressMap(): Map<String, com.example.data.model.QbProgressRecord> = withContext(Dispatchers.IO) {
+        val file = getQbProgressBackupFile()
+        if (!file.exists() || file.length() == 0L) return@withContext emptyMap()
+        try {
+            val content = file.readText(Charsets.UTF_8)
+            parseQbProgressJsonToMap(content)
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
+    fun parseQbProgressJsonToMap(jsonStr: String): Map<String, com.example.data.model.QbProgressRecord> {
+        val map = mutableMapOf<String, com.example.data.model.QbProgressRecord>()
+        try {
+            val trimmed = jsonStr.trim()
+            val arr = if (trimmed.startsWith("[")) {
+                JSONArray(trimmed)
+            } else {
+                val root = JSONObject(trimmed)
+                root.optJSONArray("progress")
+                    ?: root.optJSONArray("items")
+                    ?: root.optJSONArray("qb_progress")
+                    ?: root.optJSONArray("data")
+                    ?: JSONArray()
+            }
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i) ?: continue
+                val prompt = obj.optString("prompt", obj.optString("question", obj.optString("q", obj.optString("title", obj.optString("stem", ""))))).trim()
+                var id = obj.optString("id", obj.optString("qbId", "")).trim()
+                if (id.isBlank() && prompt.isNotBlank()) {
+                    id = "qb_${prompt.hashCode()}"
+                }
+                if (id.isNotBlank()) {
+                    val status = obj.optString("status", "unrated")
+                    val timesAnswered = obj.optInt("timesAnswered", 0)
+                    val lastAnsweredAt = obj.optLong("lastAnsweredAt", 0L)
+                    val bankName = if (obj.has("bankName")) obj.optString("bankName", null) else null
+                    map[id] = com.example.data.model.QbProgressRecord(
+                        id = id,
+                        status = status,
+                        timesAnswered = timesAnswered,
+                        lastAnsweredAt = lastAnsweredAt,
+                        bankName = bankName,
+                        questionPrompt = prompt
+                    )
+                }
+            }
+        } catch (_: Exception) {}
+        return map
+    }
+
+    private fun normalizePrompt(text: String): String {
+        val key = text.lowercase().trim().replace(Regex("[^\\p{L}\\p{Nd}]"), "")
+        return if (key.isNotBlank()) key else text.lowercase().trim()
+    }
+
+    /**
+     * Restores QB progress from a progress JSON string by matching question ID numbers or prompts.
+     * Sets progress (status, timesAnswered, lastAnsweredAt) for each matched question in the database.
+     * Supports all Unicode languages including Bengali characters seamlessly.
+     */
+    suspend fun restoreQbProgressFromJsonString(jsonStr: String): Result<Int> = withContext(Dispatchers.IO) {
+        try {
+            val progressMap = parseQbProgressJsonToMap(jsonStr)
+            if (progressMap.isEmpty()) {
+                return@withContext Result.failure(Exception("No progress records found in file."))
+            }
+
+            var matchedCount = 0
+            val allQuestions = database.questionBankDao().getAllQuestionsList()
+            val questionMapById = allQuestions.associateBy { it.id }
+            val questionMapByNormPrompt = allQuestions.associateBy { normalizePrompt(it.question) }
+            val questionMapByRawPrompt = allQuestions.associateBy { it.question.trim().lowercase() }
+
+            progressMap.forEach { (id, prog) ->
+                val normPrompt = normalizePrompt(prog.questionPrompt)
+                val rawPrompt = prog.questionPrompt.trim().lowercase()
+                val existing = questionMapById[id]
+                    ?: questionMapById[id.replace("qb_", "")]
+                    ?: questionMapById["qb_$id"]
+                    ?: (if (normPrompt.isNotBlank()) questionMapByNormPrompt[normPrompt] else null)
+                    ?: (if (rawPrompt.isNotBlank()) questionMapByRawPrompt[rawPrompt] else null)
+
+                if (existing != null) {
+                    database.questionBankDao().updateQuestionProgress(
+                        id = existing.id,
+                        status = prog.status,
+                        timesAnswered = prog.timesAnswered,
+                        lastAnsweredAt = prog.lastAnsweredAt
+                    )
+                    matchedCount++
+                }
+            }
+
+            // Also persist to local qb_progress.json (merging with existing progress) so future question imports will match and set progress automatically
+            val existingLocalMap = getSavedQbProgressMap()
+            val mergedMap = existingLocalMap + progressMap
+            val file = getQbProgressBackupFile()
+            file.writeText(jsonTextOrProgress(jsonStr, mergedMap), Charsets.UTF_8)
+
+            val reportCount = if (matchedCount > 0) matchedCount else progressMap.size
+            Result.success(reportCount)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun jsonTextOrProgress(original: String, map: Map<String, com.example.data.model.QbProgressRecord>): String {
+        return try {
+            val root = JSONObject()
+            root.put("type", "qb_progress_backup")
+            root.put("version", "1.0")
+            root.put("timestamp", System.currentTimeMillis())
+            root.put("count", map.size)
+            val arr = JSONArray()
+            map.values.forEach { p ->
+                val obj = JSONObject()
+                obj.put("id", p.id)
+                obj.put("status", p.status)
+                obj.put("timesAnswered", p.timesAnswered)
+                obj.put("lastAnsweredAt", p.lastAnsweredAt)
+                obj.put("bankName", p.bankName)
+                if (p.questionPrompt.isNotBlank()) obj.put("prompt", p.questionPrompt)
+                arr.put(obj)
+            }
+            root.put("progress", arr)
+            root.toString(2)
+        } catch (_: Exception) {
+            original
+        }
+    }
 
     fun getBackupPathString(): String {
         val treeUri = getCustomTreeUri()
@@ -73,7 +261,7 @@ class BackupManager(private val context: Context, private val database: AppDatab
      * Only includes data belonging to selectedCourseIds if specified.
      */
     suspend fun generateBackupJsonString(userId: String = "1235", selectedCourseIds: Set<String>? = null): String = withContext(Dispatchers.IO) {
-        val targetCourseIds = selectedCourseIds ?: getSelectedCourseIds()
+        val targetCourseIds = selectedCourseIds
         val allCourses = database.courseDao().getAllCoursesList()
         val courses = if (targetCourseIds != null && targetCourseIds.isNotEmpty()) {
             allCourses.filter { it.id in targetCourseIds }
@@ -224,14 +412,21 @@ class BackupManager(private val context: Context, private val database: AppDatab
             qObj.put("opt2", q.opt2)
             qObj.put("opt3", q.opt3)
             qObj.put("opt4", q.opt4)
+            qObj.put("opt5", q.opt5)
             qObj.put("answer", q.answer)
             qObj.put("explanation", q.explanation ?: "")
+            qObj.put("stem", q.stem ?: "")
+            qObj.put("stemId", q.stemId ?: "")
             qObj.put("filter1", q.filter1 ?: "")
             qObj.put("filter2", q.filter2 ?: "")
             qObj.put("filter3", q.filter3 ?: "")
-            qObj.put("filter1Label", q.filter1Label ?: "Category")
-            qObj.put("filter2Label", q.filter2Label ?: "Difficulty")
-            qObj.put("filter3Label", q.filter3Label ?: "Source")
+            qObj.put("filter1Label", q.filter1Label ?: "Course")
+            qObj.put("filter2Label", q.filter2Label ?: "Q.type")
+            qObj.put("filter3Label", q.filter3Label ?: "Session")
+            qObj.put("bankName", q.bankName)
+            qObj.put("status", q.status)
+            qObj.put("timesAnswered", q.timesAnswered)
+            qObj.put("lastAnsweredAt", q.lastAnsweredAt)
             qbArray.put(qObj)
         }
         jsonRoot.put("questionBank", qbArray)
@@ -315,7 +510,7 @@ class BackupManager(private val context: Context, private val database: AppDatab
      */
     suspend fun saveBackupFiles(userId: String = "1235", selectedCourseIds: Set<String>? = null): Result<Pair<File, File>> = withContext(Dispatchers.IO) {
         try {
-            val targetCourseIds = selectedCourseIds ?: getSelectedCourseIds()
+            val targetCourseIds = selectedCourseIds
             val allCourses = database.courseDao().getAllCoursesList()
             val courses = if (targetCourseIds != null && targetCourseIds.isNotEmpty()) {
                 allCourses.filter { it.id in targetCourseIds }
@@ -467,7 +662,9 @@ class BackupManager(private val context: Context, private val database: AppDatab
             }
             jsonRoot.put("games", gamesArray)
 
-            // Question Bank Array
+            // Save Question Bank progress to separate dedicated file
+            saveQbProgressBackupFile()
+
             val qbArray = JSONArray()
             questions.forEach { q ->
                 val qObj = JSONObject()
@@ -477,14 +674,21 @@ class BackupManager(private val context: Context, private val database: AppDatab
                 qObj.put("opt2", q.opt2)
                 qObj.put("opt3", q.opt3)
                 qObj.put("opt4", q.opt4)
+                qObj.put("opt5", q.opt5)
                 qObj.put("answer", q.answer)
                 qObj.put("explanation", q.explanation ?: "")
+                qObj.put("stem", q.stem ?: "")
+                qObj.put("stemId", q.stemId ?: "")
                 qObj.put("filter1", q.filter1 ?: "")
                 qObj.put("filter2", q.filter2 ?: "")
                 qObj.put("filter3", q.filter3 ?: "")
-                qObj.put("filter1Label", q.filter1Label ?: "Category")
-                qObj.put("filter2Label", q.filter2Label ?: "Difficulty")
-                qObj.put("filter3Label", q.filter3Label ?: "Source")
+                qObj.put("filter1Label", q.filter1Label ?: "Course")
+                qObj.put("filter2Label", q.filter2Label ?: "Q.type")
+                qObj.put("filter3Label", q.filter3Label ?: "Session")
+                qObj.put("bankName", q.bankName)
+                qObj.put("status", q.status)
+                qObj.put("timesAnswered", q.timesAnswered)
+                qObj.put("lastAnsweredAt", q.lastAnsweredAt)
                 qbArray.put(qObj)
             }
             jsonRoot.put("questionBank", qbArray)
@@ -891,6 +1095,11 @@ class BackupManager(private val context: Context, private val database: AppDatab
                 if (trimmed.startsWith("{")) {
                     val root = JSONObject(trimmed)
 
+                    // Check if this is a Question Bank progress-only backup
+                    if (root.optString("type") == "qb_progress_backup" || (root.has("progress") && !root.has("courses") && !root.has("words"))) {
+                        return@withContext restoreQbProgressFromJsonString(trimmed)
+                    }
+
                     val backupFlaggedIds = mutableSetOf<String>()
                     root.optJSONArray("flaggedWordIds")?.let { arr ->
                         for (i in 0 until arr.length()) {
@@ -1207,6 +1416,14 @@ class BackupManager(private val context: Context, private val database: AppDatab
                             val o2 = findStr(qObj, "opt2", "Opt2", "option2", "Option2", "b", "B")
                             val o3 = findStr(qObj, "opt3", "Opt3", "option3", "Option3", "c", "C")
                             val o4 = findStr(qObj, "opt4", "Opt4", "option4", "Option4", "d", "D")
+                            val o5 = findStr(qObj, "opt5", "Opt5", "option5", "Option5", "e", "E")
+                            val exp = findStr(qObj, "explanation", "Explanation", "exp").ifEmpty { null }
+                            val stemText = findStr(qObj, "stem", "Stem", "passage", "scenario").ifEmpty { null }
+                            val stemId = findStr(qObj, "stemId", "stem_id", "StemId").ifEmpty { null }
+                            val bankName = findStr(qObj, "bankName", "bank_name", "bank").ifEmpty { "General QB" }
+                            val status = findStr(qObj, "status", "Status").ifEmpty { "unrated" }
+                            val timesAnswered = findIntVal(qObj, 0, "timesAnswered", "times_answered")
+                            val lastAnsweredAt = if (qObj.has("lastAnsweredAt")) qObj.optLong("lastAnsweredAt") else 0L
 
                             if (qText.isNotBlank() && (qAns.isNotBlank() || o1.isNotBlank())) {
                                 questionsToInsert.add(
@@ -1217,14 +1434,21 @@ class BackupManager(private val context: Context, private val database: AppDatab
                                         opt2 = o2,
                                         opt3 = o3,
                                         opt4 = o4,
+                                        opt5 = o5,
                                         answer = qAns,
-                                        explanation = findStr(qObj, "explanation", "Explanation", "exp").ifEmpty { null },
-                                        filter1 = findStr(qObj, "filter1", "cat", "category").ifEmpty { null },
-                                        filter2 = findStr(qObj, "filter2", "diff", "difficulty").ifEmpty { null },
-                                        filter3 = findStr(qObj, "filter3", "src", "source").ifEmpty { null },
-                                        filter1Label = findStr(qObj, "filter1Label", "filter1_label").ifEmpty { "Category" },
-                                        filter2Label = findStr(qObj, "filter2Label", "filter2_label").ifEmpty { "Difficulty" },
-                                        filter3Label = findStr(qObj, "filter3Label", "filter3_label").ifEmpty { "Source" }
+                                        explanation = exp,
+                                        stem = stemText,
+                                        stemId = stemId,
+                                        filter1 = findStr(qObj, "filter1", "filter1:Course", "filter1:course", "course", "Course", "cat", "category", "topic", "subject").ifEmpty { null },
+                                        filter2 = findStr(qObj, "filter2", "filter2: Q.type", "filter2:Q.type", "qtype", "q.type", "Q.type", "diff", "difficulty").ifEmpty { null },
+                                        filter3 = findStr(qObj, "filter3", "filter3: Session", "filter3:Session", "session", "Session", "src", "source").ifEmpty { null },
+                                        filter1Label = findStr(qObj, "filter1Label", "filter1_label").ifEmpty { "Course" },
+                                        filter2Label = findStr(qObj, "filter2Label", "filter2_label").ifEmpty { "Q.type" },
+                                        filter3Label = findStr(qObj, "filter3Label", "filter3_label").ifEmpty { "Session" },
+                                        bankName = bankName,
+                                        status = status,
+                                        timesAnswered = timesAnswered,
+                                        lastAnsweredAt = lastAnsweredAt
                                     )
                                 )
                             }
@@ -1574,8 +1798,14 @@ class BackupManager(private val context: Context, private val database: AppDatab
                     val dbWords = currentDbWordsByCourse[matchInDb.id] ?: emptyList()
                     val dbScore = calculateCourseProgressScore(dbWords)
 
-                    if (dbScore >= incomingScore) {
-                        // DB course has higher or equal progress: preserve DB course ID as sole course!
+                    val isDbSampleOrUnrated = matchInDb.id.startsWith("course_gre_") ||
+                            matchInDb.id.startsWith("course_ielts_") ||
+                            matchInDb.id.startsWith("course_bilingual_") ||
+                            matchInDb.id == "course_default" ||
+                            dbWords.all { it.status == "unrated" && it.timesReviewed == 0 && it.quizCorrectCount == 0 }
+
+                    if (!isDbSampleOrUnrated && dbScore > incomingScore) {
+                        // DB course has legitimately higher progress: preserve DB course ID as sole course!
                         globalCourseIdRemap[resCourse.id] = matchInDb.id
                         val dbWordMap = dbWords.associateBy { it.word.trim().lowercase() }.toMutableMap()
                         for (rw in incomingCourseWords) {
@@ -1584,13 +1814,15 @@ class BackupManager(private val context: Context, private val database: AppDatab
                             if (existingW == null) {
                                 finalWordsToInsert.add(rw.copy(courseId = matchInDb.id))
                             } else {
-                                if (calculateWordProgressScore(rw) > calculateWordProgressScore(existingW)) {
+                                if (calculateWordProgressScore(rw) >= calculateWordProgressScore(existingW)) {
                                     finalWordsToInsert.add(rw.copy(id = existingW.id, courseId = matchInDb.id))
+                                } else {
+                                    finalWordsToInsert.add(existingW)
                                 }
                             }
                         }
                     } else {
-                        // Restored course has higher progress! Restored course replaces lower-progress DB version
+                        // Restored course has higher progress or DB had sample/unrated data!
                         database.courseDao().deleteCourseById(matchInDb.id)
                         database.vocabularyDao().deleteWordsByCourse(matchInDb.id)
 
@@ -1665,20 +1897,38 @@ class BackupManager(private val context: Context, private val database: AppDatab
                 }
                 if (finalQuestionsToInsert.isNotEmpty()) {
                     database.questionBankDao().insertQuestions(finalQuestionsToInsert)
+                    val qbProgMap = finalQuestionsToInsert.associate {
+                        it.id to com.example.data.model.QbProgressRecord(it.id, it.status, it.timesAnswered, it.lastAnsweredAt, it.bankName, it.question)
+                    }
+                    if (qbProgMap.isNotEmpty()) {
+                        val existingLocalMap = getSavedQbProgressMap()
+                        val merged = existingLocalMap + qbProgMap
+                        getQbProgressBackupFile().writeText(jsonTextOrProgress("", merged), Charsets.UTF_8)
+                    }
                 }
                 if (archivedToInsert.isNotEmpty()) {
                     database.archivedWordProgressDao().insertAll(archivedToInsert)
                 }
 
-                // Update course preference selection to ensure active course exists
+                // Update course preference selection to ensure active course points to course with most progress
                 val coursePrefs = context.getSharedPreferences("memorizer_course_prefs", Context.MODE_PRIVATE)
                 val allRemainingCourses = database.courseDao().getAllCoursesList()
-                val allRemainingIds = allRemainingCourses.map { it.id }.toSet()
-                val currentActive = coursePrefs.getString("saved_active_course_id", "")
-                if (currentActive.isNullOrBlank() || currentActive !in allRemainingIds) {
-                    val newActive = allRemainingCourses.firstOrNull()?.id ?: ""
-                    coursePrefs.edit().putString("saved_active_course_id", newActive).apply()
-                }
+                val allRemainingWords = database.vocabularyDao().getAllWordsList()
+                val bestActive = allRemainingCourses.maxByOrNull { c ->
+                    val cWords = allRemainingWords.filter { it.courseId == c.id }
+                    cWords.count { it.status != "unrated" } * 20 + cWords.size
+                }?.id ?: allRemainingCourses.firstOrNull()?.id ?: ""
+                coursePrefs.edit().putString("saved_active_course_id", bestActive).apply()
+
+                val updatedProg = UserProgressEntity(
+                    userId = userId,
+                    totalWords = allRemainingWords.size,
+                    knowCount = allRemainingWords.count { it.status == "know" },
+                    confusionCount = allRemainingWords.count { it.status == "confusion" },
+                    dontKnowCount = allRemainingWords.count { it.status == "dont_know" },
+                    unratedCount = allRemainingWords.count { it.status == "unrated" }
+                )
+                database.userProgressDao().insertOrUpdate(updatedProg)
 
                 // Auto-sync backup file on disk locally
                 saveBackupFiles(userId)
