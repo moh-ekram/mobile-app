@@ -6,6 +6,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.model.*
 import com.example.data.repository.*
+import com.example.data.sync.DiscoveredDriveFile
+import com.example.data.sync.GoogleDriveSyncService
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -119,6 +121,24 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
     )
     val selectedCourseIds: StateFlow<Set<String>> = _selectedCourseIds.asStateFlow()
 
+    // Google Drive Courses Catalog (Folder: 1FTKJCe98AEK3VzIyNK8t1siQEXdTUcJ9)
+    val driveCourses = MutableStateFlow<List<DiscoveredDriveFile>>(GoogleDriveSyncService.DEFAULT_FALLBACK_DRIVE_COURSES)
+    val isRefreshingDriveCourses = MutableStateFlow(false)
+    val downloadingCourseFileIds = MutableStateFlow<Set<String>>(emptySet())
+
+    fun refreshDriveCoursesList() {
+        viewModelScope.launch {
+            isRefreshingDriveCourses.value = true
+            try {
+                val list = GoogleDriveSyncService.fetchFolderFileList()
+                if (list.isNotEmpty()) {
+                    driveCourses.value = list
+                }
+            } catch (_: Exception) {}
+            isRefreshingDriveCourses.value = false
+        }
+    }
+
     init {
         viewModelScope.launch {
             allCourses.collect { courses ->
@@ -152,9 +172,13 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
                         activeCourseId.value = fallback
                         coursePrefs.edit().putString("saved_active_course_id", fallback).commit()
                     }
+                } else {
+                    activeCourseId.value = ""
+                    _selectedCourseIds.value = emptySet()
                 }
             }
         }
+        refreshDriveCoursesList()
     }
 
     fun toggleCourseSelection(courseId: String) {
@@ -254,6 +278,31 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun clearDriveSyncSummary() {
         _driveSyncSummary.value = null
+    }
+
+    fun downloadAndAddDriveCourse(item: DiscoveredDriveFile) {
+        val fid = item.fileId
+        if (fid in downloadingCourseFileIds.value) return
+        downloadingCourseFileIds.value = downloadingCourseFileIds.value + fid
+
+        viewModelScope.launch {
+            _statusMessage.value = "Downloading ${item.title} from Drive..."
+            val uid = _currentUser.value?.userId ?: "1235"
+            val result = repository.downloadAndAddSingleDriveCourse(item, preserveProgress = true, userId = uid)
+            downloadingCourseFileIds.value = downloadingCourseFileIds.value - fid
+
+            result.onSuccess { detail ->
+                _statusMessage.value = "${detail.courseTitle} added to your courses (${detail.totalWords} words)!"
+                val allC = repository.allCourses.firstOrNull() ?: emptyList()
+                if (allC.isNotEmpty()) {
+                    val matching = allC.find { it.title.equals(detail.courseTitle, ignoreCase = true) } ?: allC.last()
+                    selectCourse(matching.id)
+                    toggleCourseSelection(matching.id)
+                }
+            }.onFailure { err ->
+                _statusMessage.value = "Failed to download ${item.title}: ${err.message}"
+            }
+        }
     }
 
     fun syncCoursesFromDrive(url: String = driveSyncUrl.value, preserveProgress: Boolean = true) {

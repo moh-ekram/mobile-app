@@ -90,7 +90,7 @@ class MainActivity : ComponentActivity() {
                 this,
                 screenReceiver,
                 filter,
-                androidx.core.content.ContextCompat.RECEIVER_EXPORTED
+                androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
             )
             isScreenReceiverRegistered = true
         } catch (e: Exception) {
@@ -158,6 +158,16 @@ class MainActivity : ComponentActivity() {
         triggerHomeReturnUpdate()
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        if (isScreenReceiverRegistered) {
+            try {
+                unregisterReceiver(screenReceiver)
+                isScreenReceiverRegistered = false
+            } catch (_: Exception) {}
+        }
+    }
+
     private fun triggerHomeReturnUpdate() {
         try {
             val prefs = getSharedPreferences(DailyVocabWidgetProvider.PREFS_NAME, Context.MODE_PRIVATE)
@@ -179,16 +189,6 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {
             android.util.Log.e("MainActivity", "Error in onRequestPermissionsResult", e)
         }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        try {
-            if (isScreenReceiverRegistered) {
-                unregisterReceiver(screenReceiver)
-                isScreenReceiverRegistered = false
-            }
-        } catch (_: Exception) {}
     }
 }
 
@@ -226,6 +226,9 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
     val isSyncingDrive by viewModel.isSyncingDrive.collectAsState()
     val driveSyncUrl by viewModel.driveSyncUrl.collectAsState()
     val driveSyncSummary by viewModel.driveSyncSummary.collectAsState()
+    val driveCourses by viewModel.driveCourses.collectAsState()
+    val isRefreshingDriveCourses by viewModel.isRefreshingDriveCourses.collectAsState()
+    val downloadingCourseFileIds by viewModel.downloadingCourseFileIds.collectAsState()
     val qbSyncUrl by viewModel.qbSyncUrl.collectAsState()
     val isSyncingQB by viewModel.isSyncingQB.collectAsState()
     val selectedCourseIds by viewModel.selectedCourseIds.collectAsState()
@@ -374,7 +377,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                                         )
                                     }
                                 }
-                            } else {
+                            } else if (currentRoute != "home") {
                                 Box(
                                     modifier = Modifier
                                         .padding(end = 12.dp)
@@ -609,6 +612,11 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             isSyncingDrive = isSyncingDrive,
                             driveSyncUrl = driveSyncUrl,
                             driveSyncSummary = driveSyncSummary,
+                            driveCourses = driveCourses,
+                            isRefreshingDriveCourses = isRefreshingDriveCourses,
+                            downloadingCourseFileIds = downloadingCourseFileIds,
+                            onRefreshDriveCourses = { viewModel.refreshDriveCoursesList() },
+                            onDownloadDriveCourse = { item -> viewModel.downloadAndAddDriveCourse(item) },
                             initialTab = if (currentRoute == "admin") 1 else 0,
                             onToggleDarkTheme = { enable -> viewModel.setDarkTheme(enable) },
                             onToggleFlipAnimation = { enable -> viewModel.setFlipAnimationEnabled(enable) },

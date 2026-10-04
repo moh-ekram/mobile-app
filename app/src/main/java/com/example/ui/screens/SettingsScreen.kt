@@ -55,6 +55,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -70,9 +71,14 @@ import com.example.data.model.UserSession
 import com.example.data.model.VocabularyWordEntity
 import com.example.data.repository.DriveSyncSummary
 import com.example.data.repository.LocalCourseFileInput
+import com.example.data.sync.DiscoveredDriveFile
 import com.example.notification.NotificationHelper
 import com.example.ui.theme.*
 import com.example.widget.DailyVocabWidgetProvider
+import org.json.JSONArray
+import org.json.JSONObject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -97,6 +103,9 @@ fun SettingsScreen(
     isSyncingDrive: Boolean = false,
     driveSyncUrl: String = "",
     driveSyncSummary: DriveSyncSummary? = null,
+    driveCourses: List<DiscoveredDriveFile> = emptyList(),
+    isRefreshingDriveCourses: Boolean = false,
+    downloadingCourseFileIds: Set<String> = emptySet(),
     initialTab: Int = 0,
     onToggleDarkTheme: (Boolean) -> Unit = {},
     onToggleFlipAnimation: (Boolean) -> Unit = {},
@@ -110,6 +119,8 @@ fun SettingsScreen(
     onExportToUri: (Uri) -> Unit = {},
     onRestoreFromUri: (Uri) -> Unit = {},
     onCloudSync: () -> Unit = {},
+    onRefreshDriveCourses: () -> Unit = {},
+    onDownloadDriveCourse: (DiscoveredDriveFile) -> Unit = {},
     onRestoreBackup: (String, Boolean) -> Unit = { _, _ -> },
     onUpdateProfile: (displayName: String, avatarUri: String?, targetExam: String, dailyGoal: Int, bio: String) -> Unit = { _, _, _, _, _ -> },
     onLogout: () -> Unit = {},
@@ -365,6 +376,11 @@ fun SettingsScreen(
                     questions = questions,
                     isSyncingDrive = isSyncingDrive,
                     driveSyncSummary = driveSyncSummary,
+                    driveCourses = driveCourses,
+                    isRefreshingDriveCourses = isRefreshingDriveCourses,
+                    downloadingCourseFileIds = downloadingCourseFileIds,
+                    onRefreshDriveCourses = onRefreshDriveCourses,
+                    onDownloadDriveCourse = onDownloadDriveCourse,
                     onToggleCourseSelection = onToggleCourseSelection,
                     onSelectAllCourses = onSelectAllCourses,
                     onDeselectAllCourses = onDeselectAllCourses,
@@ -389,7 +405,7 @@ fun SettingsScreen(
                     onImportQBFileClick = { qbFilePicker.launch("*/*") }
                 )
                 2 -> WidgetAndRemindersTab(
-                    courses = courses.filter { it.id in selectedCourseIds },
+                    courses = courses,
                     words = words,
                     selectedCourseIds = selectedCourseIds,
                     onToggleCourseSelection = onToggleCourseSelection,
@@ -401,6 +417,8 @@ fun SettingsScreen(
                     progress = progress,
                     backupDirectoryPath = backupDirectoryPath,
                     customBackupTreeUri = customBackupTreeUri,
+                    courses = courses,
+                    words = words,
                     onSelectFolder = { folderPickerLauncher.launch(null) },
                     onManualBackup = onManualBackup,
                     onBackupToDriveDirect = onBackupToDriveDirect,
@@ -701,75 +719,11 @@ private fun GeneralSettingsTab(
                         overflow = TextOverflow.Ellipsis
                     )
 
-                    // Target Exam & Goal Badges Centered
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (palette.isDark) Color(0xFF312E81) else IndigoLight
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.School,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(13.dp),
-                                    tint = IndigoPrimary
-                                )
-                                Text(
-                                    text = user?.targetExam ?: "GRE / IELTS",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = IndigoPrimary
-                                )
-                            }
-                        }
-
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.TrackChanges,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(13.dp),
-                                    tint = palette.textMuted
-                                )
-                                Text(
-                                    text = "${user?.dailyWordGoal ?: 20} words/day",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = palette.textMuted
-                                )
-                            }
-                        }
-                    }
-
-                    if (!user?.bio.isNullOrBlank()) {
-                        Text(
-                            text = user?.bio ?: "",
-                            fontSize = 12.sp,
-                            color = palette.textMuted,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
                     // Centered Action Buttons: Add/Change Photo & Edit Profile
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(top = 4.dp)
+                        modifier = Modifier.padding(top = 2.dp)
                     ) {
                         OutlinedButton(
                             onClick = {
@@ -807,27 +761,6 @@ private fun GeneralSettingsTab(
                             Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Edit Profile", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-
-                    // Photo backup status note
-                    if (!user?.avatarUri.isNullOrBlank()) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            modifier = Modifier.padding(top = 2.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = null,
-                                tint = EmeraldSuccess,
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Text(
-                                text = "Photo backed up locally & cloud-ready",
-                                fontSize = 10.sp,
-                                color = palette.textMuted
-                            )
                         }
                     }
                 }
@@ -1087,6 +1020,192 @@ private fun SwipeableCourseCard(
     }
 }
 
+@Composable
+private fun DriveCourseCard(
+    item: DiscoveredDriveFile,
+    cleanTitle: String,
+    extension: String,
+    isAlreadyAdded: Boolean,
+    isDownloading: Boolean,
+    wordCount: Int?,
+    palette: AppPalette,
+    onAddToList: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = palette.surface,
+        border = BorderStroke(
+            1.dp,
+            if (isAlreadyAdded) EmeraldSuccess.copy(alpha = 0.4f) else palette.border
+        ),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                // File Type Avatar / Icon
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (isAlreadyAdded) EmeraldSuccess.copy(alpha = 0.12f)
+                            else IndigoPrimary.copy(alpha = 0.12f)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (isAlreadyAdded) Icons.Default.School else Icons.Default.Description,
+                        contentDescription = null,
+                        tint = if (isAlreadyAdded) EmeraldSuccess else IndigoPrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = cleanTitle,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.5.sp,
+                        color = palette.textPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = palette.cardBackground,
+                            border = BorderStroke(0.5.dp, palette.border)
+                        ) {
+                            Text(
+                                text = extension,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = palette.textSecondary,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                            )
+                        }
+                        if (isAlreadyAdded && wordCount != null && wordCount > 0) {
+                            Text(
+                                text = "$wordCount words in course",
+                                fontSize = 11.sp,
+                                color = EmeraldSuccess,
+                                fontWeight = FontWeight.Medium
+                            )
+                        } else {
+                            Text(
+                                text = item.title,
+                                fontSize = 10.5.sp,
+                                color = palette.textMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // Action: Downloading state vs Added state vs Add to list
+            if (isDownloading) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(IndigoPrimary.copy(alpha = 0.1f))
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(13.dp),
+                        strokeWidth = 2.dp,
+                        color = IndigoPrimary
+                    )
+                    Text(
+                        text = "Adding...",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = IndigoPrimary
+                    )
+                }
+            } else if (isAlreadyAdded) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = EmeraldSuccess.copy(alpha = 0.12f),
+                        border = BorderStroke(1.dp, EmeraldSuccess.copy(alpha = 0.3f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Check,
+                                contentDescription = null,
+                                tint = EmeraldSuccess,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                text = "Added",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = EmeraldSuccess
+                            )
+                        }
+                    }
+                    IconButton(
+                        onClick = onAddToList,
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .background(palette.cardBackground)
+                    ) {
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = "Re-download / update",
+                            tint = palette.textSecondary,
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
+                }
+            } else {
+                Button(
+                    onClick = onAddToList,
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    modifier = Modifier.height(32.dp)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(13.dp))
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(
+                        text = "Add to list",
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+    }
+}
+
 // ----------------------------------------------------
 // TAB 1: Courses & Content Management
 // ----------------------------------------------------
@@ -1099,6 +1218,11 @@ private fun CoursesSettingsTab(
     questions: List<QuestionBankEntity>,
     isSyncingDrive: Boolean,
     driveSyncSummary: DriveSyncSummary?,
+    driveCourses: List<DiscoveredDriveFile> = emptyList(),
+    isRefreshingDriveCourses: Boolean = false,
+    downloadingCourseFileIds: Set<String> = emptySet(),
+    onRefreshDriveCourses: () -> Unit = {},
+    onDownloadDriveCourse: (DiscoveredDriveFile) -> Unit = {},
     onToggleCourseSelection: (String) -> Unit,
     onSelectAllCourses: () -> Unit,
     onDeselectAllCourses: () -> Unit,
@@ -1449,38 +1573,130 @@ private fun CoursesSettingsTab(
                 }
             }
 
-            // Course swipe hint
-            item {
-                Text(
-                    text = "Swipe right to edit • Swipe left to delete",
-                    fontSize = 11.sp,
-                    color = palette.textMuted,
-                    modifier = Modifier.padding(vertical = 2.dp)
-                )
+            if (courses.isEmpty()) {
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = palette.surface,
+                        border = BorderStroke(1.dp, palette.border),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(Icons.Default.School, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(28.dp))
+                            Text("No Courses in Library", fontWeight = FontWeight.Bold, fontSize = 13.5.sp, color = palette.textPrimary)
+                            Text("Choose any course from the Google Drive list below and click 'Add to list' to download.", fontSize = 11.5.sp, color = palette.textSecondary, textAlign = TextAlign.Center)
+                        }
+                    }
+                }
+            } else {
+                item {
+                    Text(
+                        text = "Swipe right to edit • Swipe left to delete",
+                        fontSize = 11.sp,
+                        color = palette.textMuted,
+                        modifier = Modifier.padding(vertical = 2.dp)
+                    )
+                }
+
+                // Courses List using Swipeable cards
+                items(courses.distinctBy { it.id }, key = { "inst_course_${it.id}" }) { course ->
+                    val courseWordCount = words.count { it.courseId == course.id }
+                    val courseFlaggedCount = words.count { it.courseId == course.id && it.isReported }
+
+                    SwipeableCourseCard(
+                        course = course,
+                        isSelected = false,
+                        wordCount = courseWordCount,
+                        flaggedCount = courseFlaggedCount,
+                        palette = palette,
+                        onClick = {
+                            onSelectCourse(course.id)
+                        },
+                        onEdit = { onEditCourseClick(course) },
+                        onDelete = { courseToDelete = course },
+                        onManageWords = {
+                            selectedCourseFilterForWords = course.id
+                            selectedGroupFilterForWords = "all"
+                            selectedWordIds = emptySet()
+                            contentSubView = "words"
+                        }
+                    )
+                }
             }
 
-            // Courses List using Swipeable cards
-            items(courses, key = { it.id }) { course ->
-                val courseWordCount = words.count { it.courseId == course.id }
-                val courseFlaggedCount = words.count { it.courseId == course.id && it.isReported }
-
-                SwipeableCourseCard(
-                    course = course,
-                    isSelected = false,
-                    wordCount = courseWordCount,
-                    flaggedCount = courseFlaggedCount,
-                    palette = palette,
-                    onClick = {
-                        onSelectCourse(course.id)
-                    },
-                    onEdit = { onEditCourseClick(course) },
-                    onDelete = { courseToDelete = course },
-                    onManageWords = {
-                        selectedCourseFilterForWords = course.id
-                        selectedGroupFilterForWords = "all"
-                        selectedWordIds = emptySet()
-                        contentSubView = "words"
+            // Google Drive Courses Catalog Header
+            item {
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(Icons.Default.CloudDownload, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(16.dp))
+                            Text(
+                                text = "Google Drive Courses",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = palette.textPrimary
+                            )
+                        }
+                        Text(
+                            text = "${driveCourses.size} files in Drive • Click 'Add to list' to download",
+                            fontSize = 11.sp,
+                            color = palette.textMuted
+                        )
                     }
+
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        IconButton(
+                            onClick = onRefreshDriveCourses,
+                            modifier = Modifier.size(32.dp).clip(CircleShape).background(palette.surface)
+                        ) {
+                            if (isRefreshingDriveCourses) {
+                                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = IndigoPrimary)
+                            } else {
+                                Icon(Icons.Default.Refresh, contentDescription = "Refresh Drive Courses", tint = IndigoPrimary, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Drive Courses List
+            items(driveCourses.distinctBy { it.fileId }, key = { "drive_${it.fileId}" }) { item ->
+                val cleanTitle = item.title
+                    .substringBeforeLast(".")
+                    .replace("_", " ")
+                    .replace("-", " ")
+                    .trim()
+                val isDownloading = item.fileId in downloadingCourseFileIds
+                val downloadedCourse = courses.find { 
+                    it.title.equals(cleanTitle, ignoreCase = true) || 
+                    it.title.equals(item.title.substringBeforeLast("."), ignoreCase = true) ||
+                    it.title.equals(item.title, ignoreCase = true)
+                }
+                val isAlreadyAdded = downloadedCourse != null
+                val wordCountForCourse = if (downloadedCourse != null) words.count { it.courseId == downloadedCourse.id } else null
+                val ext = item.title.substringAfterLast(".", "XLSX").uppercase()
+
+                DriveCourseCard(
+                    item = item,
+                    cleanTitle = cleanTitle,
+                    extension = ext,
+                    isAlreadyAdded = isAlreadyAdded,
+                    isDownloading = isDownloading,
+                    wordCount = wordCountForCourse,
+                    palette = palette,
+                    onAddToList = { onDownloadDriveCourse(item) }
                 )
             }
         }
@@ -2400,32 +2616,13 @@ private fun WidgetAndRemindersTab(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(if (isNotifEnabled) IndigoLight else palette.background),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    Icons.Default.NotificationsActive,
-                                    contentDescription = null,
-                                    tint = if (isNotifEnabled) IndigoPrimary else palette.textMuted,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                            Column {
-                                Text("Study Reminders", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = palette.textPrimary)
-                                Text(
-                                    if (isNotifEnabled) "Active • ${eligibleWords.size} words in pool" else "Disabled",
-                                    fontSize = 11.sp,
-                                    color = if (isNotifEnabled) EmeraldSuccess else palette.textMuted
-                                )
-                            }
+                        Column {
+                            Text("Study Reminders", fontWeight = FontWeight.Bold, fontSize = 13.5.sp, color = palette.textPrimary)
+                            Text(
+                                if (isNotifEnabled) "Active • ${eligibleWords.size} words in pool" else "Disabled",
+                                fontSize = 11.sp,
+                                color = if (isNotifEnabled) EmeraldSuccess else palette.textMuted
+                            )
                         }
 
                         Switch(
@@ -2539,27 +2736,36 @@ private fun WidgetAndRemindersTab(
                             colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
                             contentPadding = PaddingValues(vertical = 8.dp)
                         ) {
-                            Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(15.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Send Test Notification Now", fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
+                            Text("Send Test Notification Now", fontWeight = FontWeight.SemiBold, fontSize = 11.5.sp)
                         }
                     }
                 }
             }
         }
 
-        // Shared Word Status Filter with Icons Only (No text, No flagged option)
+        // Word Status Filter Card
         item {
             Card(
                 shape = RoundedCornerShape(14.dp),
                 colors = CardDefaults.cardColors(containerColor = palette.surface),
-                border = BorderStroke(1.dp, palette.border)
+                border = BorderStroke(1.dp, palette.border),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Word Status Filter", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = palette.textPrimary)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "Word Status Filter",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.5.sp,
+                        color = palette.textPrimary
+                    )
 
                     Row(
-                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         wordFilterOptions.forEach { (key, label, icon) ->
@@ -2574,23 +2780,28 @@ private fun WidgetAndRemindersTab(
                             }
                             Surface(
                                 onClick = {
-                                    val updated = if (key == "all") {
+                                    val newFilters = if (key == "all") {
                                         emptySet()
                                     } else {
                                         if (key in selectedStatusFilters) selectedStatusFilters - key else selectedStatusFilters + key
                                     }
-                                    selectedStatusFilters = updated
-                                    persistAllSettings(newStatusFilters = updated)
+                                    selectedStatusFilters = newFilters
+                                    persistAllSettings(newStatusFilters = newFilters)
                                 },
                                 shape = RoundedCornerShape(10.dp),
-                                color = if (isSelected) chipColor else palette.surface,
+                                color = if (isSelected) chipColor else if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9),
                                 border = BorderStroke(
-                                    if (isSelected) 1.5.dp else 1.dp,
+                                    1.dp,
                                     if (isSelected) chipColor else palette.border
                                 ),
-                                modifier = Modifier.size(width = 46.dp, height = 36.dp)
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(38.dp)
                             ) {
-                                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
                                     Icon(
                                         imageVector = icon,
                                         contentDescription = label,
@@ -2629,47 +2840,27 @@ private fun WidgetAndRemindersTab(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(if (palette.isDark) Color(0xFF1E293B) else IndigoLight),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.School,
-                                    contentDescription = null,
-                                    tint = IndigoPrimary,
-                                    modifier = Modifier.size(20.dp)
-                                )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Target Courses",
+                                fontFamily = PoppinsFontFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.5.sp,
+                                color = palette.textPrimary
+                            )
+                            val selectedCount = selectedCourseIds.size
+                            val summaryText = when {
+                                courses.isEmpty() -> "No courses available"
+                                selectedCount == 0 -> "None selected (All courses included)"
+                                selectedCount >= courses.size -> "All ${courses.size} courses selected"
+                                else -> "$selectedCount of ${courses.size} courses selected"
                             }
-                            Column {
-                                Text(
-                                    text = "Target Courses",
-                                    fontFamily = PoppinsFontFamily,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp,
-                                    color = palette.textPrimary
-                                )
-                                val selectedCount = selectedCourseIds.size
-                                val summaryText = when {
-                                    courses.isEmpty() -> "No courses available"
-                                    selectedCount == 0 -> "None selected (All courses included)"
-                                    selectedCount >= courses.size -> "All ${courses.size} courses selected"
-                                    else -> "$selectedCount of ${courses.size} courses selected"
-                                }
-                                Text(
-                                    text = summaryText,
-                                    fontFamily = PoppinsFontFamily,
-                                    fontSize = 11.sp,
-                                    color = if (selectedCount > 0) EmeraldSuccess else palette.textMuted
-                                )
-                            }
+                            Text(
+                                text = summaryText,
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 11.sp,
+                                color = if (selectedCount > 0) EmeraldSuccess else palette.textMuted
+                            )
                         }
 
                         IconButton(
@@ -2874,23 +3065,64 @@ private fun WidgetAndRemindersTab(
                 Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Widget Appearance", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = palette.textPrimary)
 
-                    // Font Size Options
+                    // Font Size: Only +/- icons on the side
+                    val fontSizes = listOf("small", "medium", "large")
+                    val currentIdx = fontSizes.indexOf(selectedFontSize).coerceAtLeast(0)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text("Font Size", fontSize = 12.sp, color = palette.textPrimary)
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            listOf("small" to "Small", "medium" to "Med", "large" to "Large").forEach { (key, label) ->
-                                FilterChip(
-                                    selected = selectedFontSize == key,
-                                    onClick = {
-                                        selectedFontSize = key
-                                        persistAllSettings(newFontSize = key)
-                                    },
-                                    label = { Text(label, fontSize = 10.sp) }
-                                )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    if (currentIdx > 0) {
+                                        val newKey = fontSizes[currentIdx - 1]
+                                        selectedFontSize = newKey
+                                        persistAllSettings(newFontSize = newKey)
+                                    }
+                                },
+                                enabled = currentIdx > 0,
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9))
+                            ) {
+                                Text("-", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = palette.textPrimary)
+                            }
+
+                            Text(
+                                text = when (selectedFontSize) {
+                                    "small" -> "Small"
+                                    "large" -> "Large"
+                                    else -> "Medium"
+                                },
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = IndigoPrimary,
+                                modifier = Modifier.widthIn(min = 52.dp),
+                                textAlign = TextAlign.Center
+                            )
+
+                            IconButton(
+                                onClick = {
+                                    if (currentIdx < fontSizes.size - 1) {
+                                        val newKey = fontSizes[currentIdx + 1]
+                                        selectedFontSize = newKey
+                                        persistAllSettings(newFontSize = newKey)
+                                    }
+                                },
+                                enabled = currentIdx < fontSizes.size - 1,
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9))
+                            ) {
+                                Text("+", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = palette.textPrimary)
                             }
                         }
                     }
@@ -2962,6 +3194,8 @@ private fun BackupSettingsTab(
     progress: UserProgressEntity?,
     backupDirectoryPath: String,
     customBackupTreeUri: String?,
+    courses: List<CourseEntity> = emptyList(),
+    words: List<VocabularyWordEntity> = emptyList(),
     onSelectFolder: () -> Unit,
     onManualBackup: () -> Unit,
     onBackupToDriveDirect: () -> Unit,
@@ -2977,6 +3211,63 @@ private fun BackupSettingsTab(
 ) {
     val palette = LocalAppPalette.current
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
+    // Filter states for Selective Export
+    var exportSelectedCourseIds by remember(courses) {
+        mutableStateOf(courses.map { it.id }.toSet())
+    }
+    var exportSelectedStatusTags by remember {
+        mutableStateOf<Set<String>>(emptySet()) // empty = all
+    }
+    var isCoursesExpanded by remember { mutableStateOf(false) }
+
+    // Live filtered words calculation
+    val filteredWords = remember(words, exportSelectedCourseIds, exportSelectedStatusTags) {
+        val courseFiltered = if (exportSelectedCourseIds.isEmpty()) {
+            words
+        } else {
+            words.filter { it.courseId in exportSelectedCourseIds }
+        }
+        if (exportSelectedStatusTags.isEmpty()) {
+            courseFiltered
+        } else {
+            courseFiltered.filter { word ->
+                exportSelectedStatusTags.any { tag ->
+                    if (tag.equals("flagged", ignoreCase = true)) word.isReported
+                    else word.status.equals(tag, ignoreCase = true)
+                }
+            }
+        }
+    }
+
+    var pendingExportFormat by remember { mutableStateOf<String?>(null) }
+
+    val filteredDocLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/*")
+    ) { uri: Uri? ->
+        if (uri != null) {
+            coroutineScope.launch(Dispatchers.IO) {
+                try {
+                    val content = if (pendingExportFormat == "csv") {
+                        generateFilteredCsv(filteredWords, courses)
+                    } else {
+                        generateFilteredJson(filteredWords, courses, exportSelectedStatusTags)
+                    }
+                    context.contentResolver.openOutputStream(uri)?.use { os ->
+                        os.write(content.toByteArray(Charsets.UTF_8))
+                    }
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "Filtered data exported successfully!", Toast.LENGTH_SHORT).show()
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "Export failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    }
 
     val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()) }
     val lastBackupStr = if (progress != null && progress.lastBackupTimestamp > 0) {
@@ -3001,7 +3292,6 @@ private fun BackupSettingsTab(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Icon(Icons.Default.CloudDone, contentDescription = null, tint = EmeraldSuccess, modifier = Modifier.size(22.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Auto-Backup: Daily at 2:00 AM", fontWeight = FontWeight.Bold, fontSize = 12.5.sp, color = palette.textPrimary)
                         Text("Last: $lastBackupStr", fontSize = 10.5.sp, color = palette.textMuted)
@@ -3063,8 +3353,6 @@ private fun BackupSettingsTab(
                             colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
                             contentPadding = PaddingValues(vertical = 6.dp)
                         ) {
-                            Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
                             Text("Backup Drive", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                         }
 
@@ -3074,9 +3362,446 @@ private fun BackupSettingsTab(
                             shape = RoundedCornerShape(10.dp),
                             contentPadding = PaddingValues(vertical = 6.dp)
                         ) {
-                            Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
                             Text("Restore Drive", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
+        }
+
+        // ----------------------------------------------------
+        // Selective Data Export (Word Status Tag & Courses)
+        // ----------------------------------------------------
+        item {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = palette.surface),
+                border = BorderStroke(1.dp, palette.border),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Card Title Header
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(IndigoLight),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.FilterList,
+                                    contentDescription = null,
+                                    tint = IndigoPrimary,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "Filtered Data Export",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.5.sp,
+                                    color = palette.textPrimary
+                                )
+                                Text(
+                                    text = "Export by word status tag & course",
+                                    fontSize = 10.5.sp,
+                                    color = palette.textMuted
+                                )
+                            }
+                        }
+
+                        // Badge showing matched word count
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (filteredWords.isNotEmpty()) EmeraldSuccess.copy(alpha = 0.12f) else palette.border.copy(alpha = 0.3f),
+                            border = BorderStroke(1.dp, if (filteredWords.isNotEmpty()) EmeraldSuccess.copy(alpha = 0.4f) else palette.border)
+                        ) {
+                            Text(
+                                text = "${filteredWords.size} words",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (filteredWords.isNotEmpty()) EmeraldSuccess else palette.textMuted,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = palette.border.copy(alpha = 0.5f))
+
+                    // 1. Word Status Tag Multi-Select Section
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Word Status Tags",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.5.sp,
+                                color = palette.textPrimary
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "All",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = IndigoPrimary,
+                                    modifier = Modifier
+                                        .clickable { exportSelectedStatusTags = emptySet() }
+                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                                Text(
+                                    text = "•",
+                                    fontSize = 11.sp,
+                                    color = palette.textMuted
+                                )
+                                Text(
+                                    text = "Clear",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color(0xFFE11D48),
+                                    modifier = Modifier
+                                        .clickable { exportSelectedStatusTags = setOf("none") }
+                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+
+                        // 6 Status Icons Row with multiple-select support (Exact match to image!)
+                        val statusOptions = listOf(
+                            Triple("all", "All", Icons.Default.DoneAll),
+                            Triple("know", "Know", Icons.Default.CheckCircle),
+                            Triple("confusion", "Confusion", Icons.Default.Psychology),
+                            Triple("dont_know", "Don't Know", Icons.Default.Cancel),
+                            Triple("unrated", "Unrated", Icons.Default.HelpOutline),
+                            Triple("flagged", "Flagged", Icons.Default.Flag)
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            statusOptions.forEach { (key, label, icon) ->
+                                val isSelected = if (key == "all") exportSelectedStatusTags.isEmpty() else key in exportSelectedStatusTags
+                                val chipColor = when (key) {
+                                    "know" -> EmeraldSuccess
+                                    "confusion" -> AmberWarning
+                                    "dont_know" -> Color(0xFFE11D48)
+                                    "unrated" -> Color(0xFF64748B)
+                                    "flagged" -> Color(0xFFE11D48)
+                                    else -> IndigoPrimary
+                                }
+                                Surface(
+                                    onClick = {
+                                        exportSelectedStatusTags = if (key == "all") {
+                                            emptySet()
+                                        } else {
+                                            if (exportSelectedStatusTags.isEmpty()) {
+                                                setOf(key)
+                                            } else if (key in exportSelectedStatusTags) {
+                                                val next = exportSelectedStatusTags - key
+                                                if (next.isEmpty()) emptySet() else next
+                                            } else {
+                                                (exportSelectedStatusTags - "none") + key
+                                            }
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (isSelected) chipColor else if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9),
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (isSelected) chipColor else palette.border
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(38.dp)
+                                ) {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier.fillMaxSize()
+                                    ) {
+                                        Icon(
+                                            imageVector = icon,
+                                            contentDescription = label,
+                                            modifier = Modifier.size(19.dp),
+                                            tint = if (isSelected) Color.White else chipColor
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Status Tag Count Summary Chips
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            val counts = listOf(
+                                Triple("Know", words.count { it.status.equals("know", ignoreCase = true) }, EmeraldSuccess),
+                                Triple("Confusion", words.count { it.status.equals("confusion", ignoreCase = true) }, AmberWarning),
+                                Triple("Don't Know", words.count { it.status.equals("dont_know", ignoreCase = true) }, Color(0xFFE11D48)),
+                                Triple("Unrated", words.count { it.status.equals("unrated", ignoreCase = true) }, Color(0xFF64748B)),
+                                Triple("Flagged", words.count { it.isReported }, Color(0xFFE11D48))
+                            )
+                            counts.forEach { (lbl, cnt, clr) ->
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = clr.copy(alpha = 0.08f),
+                                    border = BorderStroke(0.5.dp, clr.copy(alpha = 0.25f))
+                                ) {
+                                    Text(
+                                        text = "$lbl: $cnt",
+                                        fontSize = 10.sp,
+                                        color = clr,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = palette.border.copy(alpha = 0.5f))
+
+                    // 2. Course List Multi-Select Section with Icons
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "Courses (${exportSelectedCourseIds.size}/${courses.size})",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.5.sp,
+                                color = palette.textPrimary
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "Select All",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = IndigoPrimary,
+                                    modifier = Modifier
+                                        .clickable { exportSelectedCourseIds = courses.map { it.id }.toSet() }
+                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                                Text(
+                                    text = "•",
+                                    fontSize = 11.sp,
+                                    color = palette.textMuted
+                                )
+                                Text(
+                                    text = "Deselect",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color(0xFFE11D48),
+                                    modifier = Modifier
+                                        .clickable { exportSelectedCourseIds = emptySet() }
+                                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+
+                        // Courses multi-select list/grid with icons
+                        if (courses.isEmpty()) {
+                            Text("No courses found", fontSize = 11.sp, color = palette.textMuted)
+                        } else {
+                            val displayedCourses = if (isCoursesExpanded || courses.size <= 4) courses else courses.take(4)
+
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                displayedCourses.forEach { course ->
+                                    val isSelected = course.id in exportSelectedCourseIds
+                                    val courseWordsCount = words.count { it.courseId == course.id }
+
+                                    Surface(
+                                        onClick = {
+                                            exportSelectedCourseIds = if (isSelected) {
+                                                exportSelectedCourseIds - course.id
+                                            } else {
+                                                exportSelectedCourseIds + course.id
+                                            }
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = if (isSelected) IndigoLight.copy(alpha = 0.5f) else (if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF8FAFC)),
+                                        border = BorderStroke(
+                                            1.dp,
+                                            if (isSelected) IndigoPrimary.copy(alpha = 0.6f) else palette.border
+                                        ),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                // Course Icon
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(26.dp)
+                                                        .clip(CircleShape)
+                                                        .background(if (isSelected) IndigoPrimary else palette.border.copy(alpha = 0.4f)),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.School,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.size(14.dp),
+                                                        tint = if (isSelected) Color.White else palette.textMuted
+                                                    )
+                                                }
+
+                                                Column {
+                                                    Text(
+                                                        text = course.title,
+                                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                                        fontSize = 12.sp,
+                                                        color = palette.textPrimary,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                    Text(
+                                                        text = "$courseWordsCount words",
+                                                        fontSize = 10.sp,
+                                                        color = palette.textMuted
+                                                    )
+                                                }
+                                            }
+
+                                            // Multi-Select Check Icon
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(20.dp)
+                                                    .clip(CircleShape)
+                                                    .background(if (isSelected) IndigoPrimary else palette.cardBorder),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                if (isSelected) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Check,
+                                                        contentDescription = "Selected",
+                                                        tint = Color.White,
+                                                        modifier = Modifier.size(13.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (courses.size > 4) {
+                                    Text(
+                                        text = if (isCoursesExpanded) "Show Less ▲" else "+ Show ${courses.size - 4} More Courses ▼",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = IndigoPrimary,
+                                        modifier = Modifier
+                                            .align(Alignment.CenterHorizontally)
+                                            .clickable { isCoursesExpanded = !isCoursesExpanded }
+                                            .padding(vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = palette.border.copy(alpha = 0.5f))
+
+                    // 3. Export Action Buttons (JSON, CSV, Share)
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    if (filteredWords.isEmpty()) {
+                                        Toast.makeText(context, "No words matched the selected filters", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        pendingExportFormat = "json"
+                                        filteredDocLauncher.launch("memorizer_filtered_${System.currentTimeMillis()}.json")
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                                contentPadding = PaddingValues(vertical = 8.dp)
+                            ) {
+                                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Export JSON", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                            }
+
+                            Button(
+                                onClick = {
+                                    if (filteredWords.isEmpty()) {
+                                        Toast.makeText(context, "No words matched the selected filters", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        pendingExportFormat = "csv"
+                                        filteredDocLauncher.launch("memorizer_filtered_${System.currentTimeMillis()}.csv")
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F766E)),
+                                contentPadding = PaddingValues(vertical = 8.dp)
+                            ) {
+                                Icon(Icons.Default.TableChart, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Export CSV", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+
+                        // Share Action
+                        OutlinedButton(
+                            onClick = {
+                                if (filteredWords.isEmpty()) {
+                                    Toast.makeText(context, "No words matched to share", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    try {
+                                        val content = generateFilteredCsv(filteredWords, courses)
+                                        val sendIntent = Intent().apply {
+                                            action = Intent.ACTION_SEND
+                                            putExtra(Intent.EXTRA_TEXT, content)
+                                            type = "text/plain"
+                                        }
+                                        context.startActivity(Intent.createChooser(sendIntent, "Share Filtered Words (CSV)"))
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "Share error: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(vertical = 6.dp)
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(15.dp), tint = IndigoPrimary)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Share Filtered List Directly", fontSize = 11.sp, color = IndigoPrimary, fontWeight = FontWeight.Medium)
                         }
                     }
                 }
@@ -3096,19 +3821,11 @@ private fun BackupSettingsTab(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(Icons.Default.Quiz, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(18.dp))
-                            Text("Question Bank", fontWeight = FontWeight.Bold, fontSize = 12.5.sp, color = palette.textPrimary)
-                        }
+                        Text("Question Bank", fontWeight = FontWeight.Bold, fontSize = 12.5.sp, color = palette.textPrimary)
                         TextButton(
                             onClick = onImportQBClick,
                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                         ) {
-                            Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(13.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
                             Text("Sync Link", fontSize = 11.sp)
                         }
                     }
@@ -3122,8 +3839,6 @@ private fun BackupSettingsTab(
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(10.dp)
                         ) {
-                            Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
                             Text("Export QB", fontSize = 11.sp)
                         }
 
@@ -3132,8 +3847,6 @@ private fun BackupSettingsTab(
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(10.dp)
                         ) {
-                            Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
                             Text("Restore QB", fontSize = 11.sp)
                         }
                     }
@@ -3160,8 +3873,6 @@ private fun BackupSettingsTab(
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(10.dp)
                         ) {
-                            Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(14.dp), tint = IndigoPrimary)
-                            Spacer(modifier = Modifier.width(4.dp))
                             Text("Export JSON", fontSize = 11.sp)
                         }
 
@@ -3170,8 +3881,6 @@ private fun BackupSettingsTab(
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(10.dp)
                         ) {
-                            Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(14.dp), tint = IndigoPrimary)
-                            Spacer(modifier = Modifier.width(4.dp))
                             Text("Restore JSON", fontSize = 11.sp)
                         }
                     }
@@ -3180,8 +3889,6 @@ private fun BackupSettingsTab(
                         onClick = onDirectPasteRestore,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
                         Text("Paste Raw JSON", fontSize = 11.sp)
                     }
                 }
@@ -3194,8 +3901,6 @@ private fun BackupSettingsTab(
                 onClick = onResetData,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Icon(Icons.Default.RestartAlt, contentDescription = null, tint = Color(0xFFE11D48), modifier = Modifier.size(14.dp))
-                Spacer(modifier = Modifier.width(4.dp))
                 Text("Reset to Sample Data", fontSize = 11.sp, color = Color(0xFFE11D48))
             }
         }
@@ -4004,4 +4709,84 @@ private fun CompactBulkEditModal(
             }
         }
     )
+}
+
+private fun generateFilteredJson(
+    filteredWords: List<VocabularyWordEntity>,
+    courses: List<CourseEntity>,
+    statusTags: Set<String>
+): String {
+    val courseMap = courses.associateBy { it.id }
+    val root = JSONObject()
+    root.put("app", "Memorizer")
+    root.put("type", "filtered_export")
+    root.put("version", "2.0")
+    root.put("timestamp", System.currentTimeMillis())
+    root.put("totalWords", filteredWords.size)
+    val tagsArray = JSONArray()
+    if (statusTags.isEmpty()) {
+        tagsArray.put("all")
+    } else {
+        statusTags.forEach { tagsArray.put(it) }
+    }
+    root.put("selectedStatuses", tagsArray)
+
+    val coursesArray = JSONArray()
+    courses.filter { c -> filteredWords.any { it.courseId == c.id } }.forEach { c ->
+        val cObj = JSONObject()
+        cObj.put("id", c.id)
+        cObj.put("title", c.title)
+        cObj.put("description", c.description ?: "")
+        coursesArray.put(cObj)
+    }
+    root.put("courses", coursesArray)
+
+    val wordsArray = JSONArray()
+    filteredWords.forEach { w ->
+        val wObj = JSONObject()
+        wObj.put("id", w.id)
+        wObj.put("courseId", w.courseId)
+        wObj.put("courseTitle", courseMap[w.courseId]?.title ?: "General")
+        wObj.put("word", w.word)
+        wObj.put("meaning", w.meaning)
+        wObj.put("group", w.group)
+        wObj.put("synonyms", w.synonyms ?: "")
+        wObj.put("extraWord", w.extraWord ?: "")
+        wObj.put("extraMeaning", w.extraMeaning ?: "")
+        wObj.put("example", w.example ?: "")
+        wObj.put("mnemonic", w.mnemonic ?: "")
+        wObj.put("status", w.status)
+        wObj.put("isReported", w.isReported)
+        wObj.put("reportReason", w.reportReason ?: "")
+        wObj.put("quizCorrectCount", w.quizCorrectCount)
+        wObj.put("quizIncorrectCount", w.quizIncorrectCount)
+        wordsArray.put(wObj)
+    }
+    root.put("words", wordsArray)
+    return root.toString(2)
+}
+
+private fun generateFilteredCsv(
+    filteredWords: List<VocabularyWordEntity>,
+    courses: List<CourseEntity>
+): String {
+    val courseMap = courses.associateBy { it.id }
+    val sb = StringBuilder()
+    sb.append("id,courseId,courseTitle,group,word,meaning,example,synonyms,extraWord,mnemonic,status,isReported,reportReason\n")
+    filteredWords.forEach { w ->
+        sb.append("\"${w.id}\",")
+        sb.append("\"${w.courseId}\",")
+        sb.append("\"${(courseMap[w.courseId]?.title ?: "General").replace("\"", "\"\"")}\",")
+        sb.append("\"${w.group.replace("\"", "\"\"")}\",")
+        sb.append("\"${w.word.replace("\"", "\"\"")}\",")
+        sb.append("\"${w.meaning.replace("\"", "\"\"")}\",")
+        sb.append("\"${(w.example ?: "").replace("\"", "\"\"")}\",")
+        sb.append("\"${(w.synonyms ?: "").replace("\"", "\"\"")}\",")
+        sb.append("\"${(w.extraWord ?: "").replace("\"", "\"\"")}\",")
+        sb.append("\"${(w.mnemonic ?: "").replace("\"", "\"\"")}\",")
+        sb.append("\"${w.status}\",")
+        sb.append("\"${w.isReported}\",")
+        sb.append("\"${(w.reportReason ?: "").replace("\"", "\"\"")}\"\n")
+    }
+    return sb.toString()
 }

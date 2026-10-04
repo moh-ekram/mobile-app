@@ -6,6 +6,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -27,6 +28,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -84,6 +87,10 @@ fun HomeScreen(
     val unratedCount = activeWords.count { it.status == "unrated" }
     val flaggedCount = activeWords.count { it.isReported }
     val masteryPercent = if (totalWords > 0) ((knowCount.toFloat() / totalWords) * 100).toInt() else 0
+    val knowPercent = if (totalWords > 0) ((knowCount.toFloat() / totalWords) * 100).toInt() else 0
+    val confusionPercent = if (totalWords > 0) ((confusionCount.toFloat() / totalWords) * 100).toInt() else 0
+    val dontKnowPercent = if (totalWords > 0) ((dontKnowCount.toFloat() / totalWords) * 100).toInt() else 0
+    val unratedPercent = if (totalWords > 0) ((unratedCount.toFloat() / totalWords) * 100).toInt() else 0
 
     var startAnimation by remember { mutableStateOf(false) }
     LaunchedEffect(activeCourseId, totalWords) {
@@ -112,6 +119,49 @@ fun HomeScreen(
         animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
         label = "unrated_count_anim"
     )
+
+    val animatedKnowPercent by animateIntAsState(
+        targetValue = if (startAnimation) knowPercent else 0,
+        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        label = "know_percent_anim"
+    )
+    val animatedConfusionPercent by animateIntAsState(
+        targetValue = if (startAnimation) confusionPercent else 0,
+        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        label = "confusion_percent_anim"
+    )
+    val animatedDontKnowPercent by animateIntAsState(
+        targetValue = if (startAnimation) dontKnowPercent else 0,
+        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        label = "dont_know_percent_anim"
+    )
+    val animatedUnratedPercent by animateIntAsState(
+        targetValue = if (startAnimation) unratedPercent else 0,
+        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        label = "unrated_percent_anim"
+    )
+
+    val animatedKnowProgress by animateFloatAsState(
+        targetValue = if (startAnimation && totalWords > 0) knowCount.toFloat() / totalWords else 0f,
+        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        label = "know_progress_anim"
+    )
+    val animatedConfusionProgress by animateFloatAsState(
+        targetValue = if (startAnimation && totalWords > 0) confusionCount.toFloat() / totalWords else 0f,
+        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        label = "confusion_progress_anim"
+    )
+    val animatedDontKnowProgress by animateFloatAsState(
+        targetValue = if (startAnimation && totalWords > 0) dontKnowCount.toFloat() / totalWords else 0f,
+        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        label = "dont_know_progress_anim"
+    )
+    val animatedUnratedProgress by animateFloatAsState(
+        targetValue = if (startAnimation && totalWords > 0) unratedCount.toFloat() / totalWords else 0f,
+        animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
+        label = "unrated_progress_anim"
+    )
+
     val animatedMasteryPercent by animateIntAsState(
         targetValue = if (startAnimation) masteryPercent else 0,
         animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
@@ -173,7 +223,7 @@ fun HomeScreen(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            items(courses, key = { it.id }) { course ->
+                            items(courses.distinctBy { it.id }, key = { "course_${it.id}" }) { course ->
                                 val isSelected = course.id == activeCourseId
                                 val courseWords = words.filter { it.courseId == course.id }
                                 val courseTotal = courseWords.size
@@ -281,31 +331,22 @@ fun HomeScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(22.dp)
+                        .padding(horizontal = 20.dp, vertical = 18.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
-                            Text(
-                                text = "Welcome back,",
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Normal,
-                                color = Color.White.copy(alpha = 0.85f)
-                            )
-                            Text(
-                                text = user?.displayName ?: "Vocabulary Learner",
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.White
-                            )
-                        }
+                        Text(
+                            text = user?.displayName ?: "Vocabulary Learner",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White
+                        )
 
-                        // User Profile Photo (replaces Streak)
+                        // User Profile Photo
                         Box(
                             modifier = Modifier
                                 .size(46.dp)
@@ -335,17 +376,7 @@ fun HomeScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(18.dp))
-
-                    Text(
-                        text = "Mastery Progress",
-                        fontFamily = PoppinsFontFamily,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color.White.copy(alpha = 0.8f)
-                    )
-
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
                     LinearProgressIndicator(
                         progress = { animatedProgress },
@@ -357,27 +388,15 @@ fun HomeScreen(
                         trackColor = Color.White.copy(alpha = 0.25f)
                     )
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "$animatedMasteryPercent% Mastered",
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Text(
-                            text = "$animatedKnowCount of $totalWords words",
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color.White.copy(alpha = 0.85f)
-                        )
-                    }
+                    Text(
+                        text = "$animatedMasteryPercent% Mastered",
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
                 }
             }
         }
@@ -422,7 +441,7 @@ fun HomeScreen(
                         }
                         Column {
                             Text(
-                                text = selectedCourse?.title ?: "Select Course",
+                                text = selectedCourse?.title ?: "No Course Selected",
                                 fontFamily = PoppinsFontFamily,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
@@ -430,7 +449,7 @@ fun HomeScreen(
                                 maxLines = 1
                             )
                             Text(
-                                text = "${activeWords.size} words • ${masteryPercent}% mastered",
+                                text = if (selectedCourse != null) "${activeWords.size} words" else "Tap to add courses from Drive",
                                 fontFamily = PoppinsFontFamily,
                                 fontSize = 11.sp,
                                 color = SlateMuted
@@ -439,20 +458,26 @@ fun HomeScreen(
                     }
 
                     Button(
-                        onClick = { showCourseDialog = true },
+                        onClick = {
+                            if (courses.isEmpty()) {
+                                onNavigate("admin")
+                            } else {
+                                showCourseDialog = true
+                            }
+                        },
                         shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                     ) {
                         Text(
-                            text = "Select course",
+                            text = if (courses.isEmpty()) "Add Course" else "Select course",
                             fontFamily = PoppinsFontFamily,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Icon(
-                            Icons.Default.KeyboardArrowDown,
+                            if (courses.isEmpty()) Icons.Default.CloudDownload else Icons.Default.KeyboardArrowDown,
                             contentDescription = null,
                             modifier = Modifier.size(16.dp)
                         )
@@ -463,42 +488,49 @@ fun HomeScreen(
 
         item {
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                StatCard(
+                StatCircle(
                     title = "Know",
                     count = animatedKnowCount,
-                    bg = EmeraldLight,
-                    border = EmeraldBorder,
+                    percentage = animatedKnowPercent,
+                    progress = animatedKnowProgress,
+                    strokeColor = EmeraldSuccess,
                     textColor = EmeraldSuccess,
                     modifier = Modifier.weight(1f),
                     onClick = { onSelectStatus("know") }
                 )
-                StatCard(
+                StatCircle(
                     title = "Confusion",
                     count = animatedConfusionCount,
-                    bg = AmberLight,
-                    border = AmberBorder,
+                    percentage = animatedConfusionPercent,
+                    progress = animatedConfusionProgress,
+                    strokeColor = AmberWarning,
                     textColor = AmberWarning,
                     modifier = Modifier.weight(1f),
                     onClick = { onSelectStatus("confusion") }
                 )
-                StatCard(
+                StatCircle(
                     title = "Don't Know",
                     count = animatedDontKnowCount,
-                    bg = RoseLight,
-                    border = RoseBorder,
+                    percentage = animatedDontKnowPercent,
+                    progress = animatedDontKnowProgress,
+                    strokeColor = RoseError,
                     textColor = RoseError,
                     modifier = Modifier.weight(1f),
                     onClick = { onSelectStatus("dont_know") }
                 )
-                StatCard(
+                StatCircle(
                     title = "Unrated",
                     count = animatedUnratedCount,
-                    bg = Color(0xFFF1F5F9),
-                    border = SlateBorder,
-                    textColor = SlateText,
+                    percentage = animatedUnratedPercent,
+                    progress = animatedUnratedProgress,
+                    strokeColor = if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary,
+                    textColor = palette.textPrimary,
                     modifier = Modifier.weight(1f),
                     onClick = { onSelectStatus("unrated") }
                 )
@@ -577,26 +609,14 @@ fun HomeScreen(
                     fontWeight = FontWeight.Bold,
                     color = SlateText
                 )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                TextButton(
+                    onClick = { onNavigate("admin") },
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                    modifier = Modifier.height(26.dp)
                 ) {
-                    Text(
-                        text = "${activeWords.size} words",
-                        fontFamily = PoppinsFontFamily,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = SlateMuted
-                    )
-                    TextButton(
-                        onClick = { onNavigate("admin") },
-                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
-                        modifier = Modifier.height(26.dp)
-                    ) {
-                        Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(13.dp), tint = IndigoPrimary)
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text("Manage", fontSize = 11.sp, color = IndigoPrimary, fontWeight = FontWeight.Bold)
-                    }
+                    Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(13.dp), tint = IndigoPrimary)
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text("Manage", fontSize = 11.sp, color = IndigoPrimary, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -627,50 +647,17 @@ fun HomeScreen(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    val displayGrpName = if (grp.isNotBlank() && grp.all { it.isDigit() }) "Group $grp" else grp
-                                    Text(
-                                        text = displayGrpName,
-                                        fontFamily = PoppinsFontFamily,
-                                        fontSize = 16.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = palette.textPrimary
-                                    )
-                                    Text(
-                                        text = "(${grpWords.size} words)",
-                                        fontFamily = PoppinsFontFamily,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = palette.textMuted
-                                    )
-                                }
-
-                                Box(
-                                    modifier = Modifier
-                                        .clip(CircleShape)
-                                        .background(if (grpPercent == 100) EmeraldSuccess else EmeraldLight)
-                                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        text = "$grpPercent% Mastered",
-                                        fontFamily = PoppinsFontFamily,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (grpPercent == 100) Color.White else EmeraldSuccess
-                                    )
-                                }
-                            }
+                            val displayGrpName = if (grp.isNotBlank() && grp.all { it.isDigit() }) "Group $grp" else grp
+                            Text(
+                                text = displayGrpName,
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = palette.textPrimary
+                            )
 
                             // Color fill progress bar
                             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -684,36 +671,13 @@ fun HomeScreen(
                                     trackColor = if (palette.isDark) Color(0xFF334155) else Color(0xFFE2E8F0)
                                 )
 
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        text = "$grpKnow of ${grpWords.size} mastered",
-                                        fontFamily = PoppinsFontFamily,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = palette.textMuted
-                                    )
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(2.dp)
-                                    ) {
-                                        Text(
-                                            text = "Practice",
-                                            fontFamily = PoppinsFontFamily,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = IndigoPrimary
-                                        )
-                                        Icon(
-                                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                            contentDescription = null,
-                                            tint = IndigoPrimary,
-                                            modifier = Modifier.size(13.dp)
-                                        )
-                                    }
-                                }
+                                Text(
+                                    text = "$grpKnow of ${grpWords.size} mastered",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = palette.textMuted
+                                )
                             }
                         }
                     }
@@ -724,44 +688,94 @@ fun HomeScreen(
 }
 
 @Composable
-private fun StatCard(
+private fun StatCircle(
     title: String,
     count: Int,
-    bg: Color,
-    border: Color,
+    percentage: Int,
+    progress: Float,
+    strokeColor: Color,
     textColor: Color,
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null
 ) {
-    Box(
+    val palette = LocalAppPalette.current
+    Column(
         modifier = modifier
             .clip(RoundedCornerShape(16.dp))
-            .background(bg)
-            .border(1.dp, border, RoundedCornerShape(16.dp))
-            .then(
-                if (onClick != null) Modifier.clickable { onClick() }
-                else Modifier
-            )
-            .padding(vertical = 12.dp, horizontal = 6.dp),
-        contentAlignment = Alignment.Center
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
+            .padding(vertical = 4.dp, horizontal = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = count.toString(),
-                fontFamily = PoppinsFontFamily,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Black,
-                color = textColor
-            )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = title,
-                fontFamily = PoppinsFontFamily,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = textColor.copy(alpha = 0.9f)
-            )
+        Box(
+            modifier = Modifier.size(66.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val strokeWidthPx = 4.5.dp.toPx()
+                val radius = (size.minDimension - strokeWidthPx) / 2f
+                val centerOffset = center
+
+                // 1. Completely solid white filled center circle as requested
+                val innerRadius = radius - (strokeWidthPx / 2f) + 0.5f
+                drawCircle(
+                    color = Color.White,
+                    radius = maxOf(0f, innerRadius),
+                    center = centerOffset
+                )
+
+                // 2. Inactive background track ring
+                drawCircle(
+                    color = strokeColor.copy(alpha = 0.15f),
+                    radius = radius,
+                    center = centerOffset,
+                    style = Stroke(width = strokeWidthPx, cap = StrokeCap.Round)
+                )
+
+                // 3. Active circular percentage arc
+                if (progress > 0f) {
+                    val sweepAngle = (progress.coerceIn(0f, 1f)) * 360f
+                    drawArc(
+                        color = strokeColor,
+                        startAngle = -90f,
+                        sweepAngle = sweepAngle,
+                        useCenter = false,
+                        style = Stroke(width = strokeWidthPx, cap = StrokeCap.Round)
+                    )
+                }
+            }
+
+            // In the center: count number and percentage
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = count.toString(),
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Black,
+                    color = textColor
+                )
+                Text(
+                    text = "$percentage%",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = strokeColor.copy(alpha = 0.85f)
+                )
+            }
         }
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+            text = title,
+            fontFamily = PoppinsFontFamily,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = palette.textPrimary,
+            maxLines = 1
+        )
     }
 }
 

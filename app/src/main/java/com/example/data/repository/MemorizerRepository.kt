@@ -77,40 +77,35 @@ class MemorizerRepository(
     init {
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                // Seed sample courses and articles if either is empty
-                val existingCourses = database.courseDao().getAllCoursesList()
+                // Per user requirement: "এর বাইরে কোন ডিফল্ট কোর্স রাখবে না।"
+                // Remove sample courses so only downloaded courses from Drive are retained.
+                val defaultCourseIds = listOf("course_gre_essential", "course_ielts_academic", "course_bilingual_daily")
+                defaultCourseIds.forEach { defId ->
+                    database.vocabularyDao().deleteWordsByCourse(defId)
+                    database.courseDao().deleteCourseById(defId)
+                }
+
                 val existingArticles = database.articleDao().getAllArticlesList()
-                if (existingCourses.isEmpty() || existingArticles.isEmpty()) {
-                    seedSampleData(force = false)
+                if (existingArticles.isEmpty()) {
+                    seedArticlesOnly()
                 }
             } catch (_: Exception) {}
         }
     }
 
-    suspend fun seedSampleData(force: Boolean = false) = withContext(Dispatchers.IO) {
-        val existingCourses = database.courseDao().getAllCoursesList()
-        if (force || existingCourses.isEmpty()) {
-            database.courseDao().insertCourses(SampleData.sampleCourses)
-            database.vocabularyDao().insertWords(SampleData.sampleWords)
-            val existingGames = database.gamePracticeDao().getAllItemsList()
-            if (existingGames.isEmpty()) {
-                database.gamePracticeDao().insertItems(SampleData.sampleGames)
-            }
-            val existingQ = database.questionBankDao().getAllQuestionsList()
-            if (existingQ.isEmpty()) {
-                database.questionBankDao().insertQuestions(SampleData.sampleQuestionBank)
-            }
-        }
-
+    private suspend fun seedArticlesOnly() = withContext(Dispatchers.IO) {
         val existingArticles = database.articleDao().getAllArticlesList()
-        if (force || existingArticles.isEmpty()) {
-            // Remove any deletion locks for sample articles
+        if (existingArticles.isEmpty()) {
             SampleData.sampleArticles.forEach { art ->
                 database.deletedArticleDao().removeDeleted(art.title.trim().lowercase())
             }
             database.articleDao().insertArticles(SampleData.sampleArticles)
         }
+    }
 
+    suspend fun seedSampleData(force: Boolean = false) = withContext(Dispatchers.IO) {
+        // No default sample courses are seeded per user requirement
+        seedArticlesOnly()
         refreshProgressAndSync("1235")
     }
 
@@ -556,11 +551,12 @@ class MemorizerRepository(
             }
 
             if (words.isNotEmpty()) {
+                val progressAppliedWords = applySavedProgressFromBackupFiles(words)
                 val (updated, inserted) = if (preserveProgress) {
-                    database.vocabularyDao().safeUpsertWordsPreservingProgress(words)
+                    database.vocabularyDao().safeUpsertWordsPreservingProgress(progressAppliedWords)
                 } else {
-                    database.vocabularyDao().insertWords(words)
-                    Pair(0, words.size)
+                    database.vocabularyDao().insertWords(progressAppliedWords)
+                    Pair(0, progressAppliedWords.size)
                 }
                 overallUpdated += updated
                 overallAdded += inserted
@@ -590,6 +586,66 @@ class MemorizerRepository(
                 courseDetails = details
             )
         )
+    }
+
+    /**
+     * Matches word IDs strictly and solely against saved progress in memorizer_progress.json,
+     * memorizer_backup.json, and custom linked folder.
+     * Never matches against word text or any other column to prevent cross-course progress contamination.
+     */
+    private suspend fun applySavedProgressFromBackupFiles(incomingWords: List<VocabularyWordEntity>): List<VocabularyWordEntity> {
+        val savedMap = backupManager.getSavedWordProgressMap()
+        if (savedMap.isEmpty()) return incomingWords
+
+        return incomingWords.map { word ->
+            // Strictly match solely by ID, never by word text or any other column
+            val match = savedMap[word.id] ?: savedMap[word.id.trim()]
+
+            if (match != null && match.status.isNotBlank() && match.status != "unrated") {
+                word.copy(
+                    status = match.status,
+                    timesReviewed = if (match.timesReviewed > 0) match.timesReviewed else word.timesReviewed,
+                    lastReviewedAt = if (match.lastReviewedAt > 0L) match.lastReviewedAt else word.lastReviewedAt,
+                    quizCorrectCount = if (match.quizCorrectCount > 0) match.quizCorrectCount else word.quizCorrectCount,
+                    quizIncorrectCount = if (match.quizIncorrectCount > 0) match.quizIncorrectCount else word.quizIncorrectCount,
+                    lastQuizStatus = match.lastQuizStatus ?: word.lastQuizStatus,
+                    isReported = match.isReported || word.isReported,
+                    reportReason = match.reportReason ?: word.reportReason
+                )
+            } else {
+                word
+            }
+        }
+    }
+
+    /**
+     * Downloads and imports a single course from Google Drive by DiscoveredDriveFile.
+     * Matches word ID with progress files to automatically restore status.
+     */
+    suspend fun downloadAndAddSingleDriveCourse(
+        item: com.example.data.sync.DiscoveredDriveFile,
+        preserveProgress: Boolean = true,
+        userId: String = "1235"
+    ): Result<CourseSyncDetail> = withContext(Dispatchers.IO) {
+        try {
+            val downloaded = GoogleDriveSyncService.downloadSingleDriveFile(item)
+            val fileInput = LocalCourseFileInput(downloaded.fileName, downloaded.bytes)
+            val res = processDownloadedOrBatchFiles(listOf(fileInput), preserveProgress, userId)
+            if (res.isSuccess) {
+                val detail = res.getOrNull()?.courseDetails?.firstOrNull() ?: CourseSyncDetail(
+                    courseId = "",
+                    courseTitle = item.title,
+                    updatedCount = 0,
+                    newCount = 0,
+                    totalWords = 0
+                )
+                Result.success(detail)
+            } else {
+                Result.failure(res.exceptionOrNull() ?: Exception("Failed to import course"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     suspend fun importGameItems(items: List<GamePracticeEntity>): Result<Int> = withContext(Dispatchers.IO) {

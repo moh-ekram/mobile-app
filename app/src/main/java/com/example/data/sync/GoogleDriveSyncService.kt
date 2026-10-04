@@ -37,6 +37,27 @@ data class DiscoveredDriveFile(
 
 object GoogleDriveSyncService {
 
+    const val DEFAULT_DRIVE_FOLDER_ID = "1FTKJCe98AEK3VzIyNK8t1siQEXdTUcJ9"
+    const val DEFAULT_DRIVE_FOLDER_URL = "https://drive.google.com/drive/folders/1FTKJCe98AEK3VzIyNK8t1siQEXdTUcJ9"
+
+    val DEFAULT_FALLBACK_DRIVE_COURSES = listOf(
+        DiscoveredDriveFile("1NdowDhMVRs--uhIgw767NwSFjVqe8pV5", "Bank-BCS-GRE.xlsx"),
+        DiscoveredDriveFile("1vUeX5zqmwhT4SOkCN2pxlKRRfQgDEvga", "Barron.xlsx"),
+        DiscoveredDriveFile("1pekebNsjjkYKz1ywAcrmMdxhqLXJ-4Xz", "Idiom and phrases.xlsx"),
+        DiscoveredDriveFile("1VXU6uFxxc4rcn7oZLGSC7y88aYf-3vyW", "IELTS.xlsx"),
+        DiscoveredDriveFile("1GMDDKix7rheFYoGu1Yix0CPjFU6jv56Q", "One word sub.xlsx"),
+        DiscoveredDriveFile("16S9zEGlHJniSP2LkXOru6poeHuQbnVKn", "Previous year exam vocabulary.xlsx"),
+        DiscoveredDriveFile("1UtUR09puaNW7vrbG311FYtVYU9TwKCyy", "SSC.xlsx"),
+        DiscoveredDriveFile("1c6f3xGVDcZEfmNXXEQFCfzCbi4iGlbYD", "Word smart I .xlsx"),
+        DiscoveredDriveFile("1-ZrNoSTZzLbu-atxsbRL72t0SqeUqYvo", "এক কথায় প্রকাশ.xlsx"),
+        DiscoveredDriveFile("1GZLTKt1ufBE_qpsato1633B_l2MV5enZ", "ণ-ত্ব ও ষ-ত্ব বানান পরীক্ষা.xlsx"),
+        DiscoveredDriveFile("199-Y8x4IWdTlCcl6CACDFbFZIqs8vSnM", "ধ্বনি পরিবর্তন.xlsx"),
+        DiscoveredDriveFile("1nNesTeaNvfO37BiaBLWinPIrikr1fCqm", "পরিভাষা.xlsx"),
+        DiscoveredDriveFile("1vR38fquHI7ZUFXpyrd-C27w1MDWC-cwk", "বাংলা বাগধারা.xlsx"),
+        DiscoveredDriveFile("1EW95o1k4CkEhc6ZE-CK8vXQxGkhEKiNR", "বানান চেক.xlsx"),
+        DiscoveredDriveFile("1syFXX00-b-b7DgedwAyyNF2Ni1u80dMP", "সকল সমাস পরীক্ষা.xlsx")
+    )
+
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
@@ -157,26 +178,25 @@ object GoogleDriveSyncService {
     }
 
     /**
-     * Crawls a public Google Drive folder HTML to find files.
+     * Crawls a public Google Drive folder HTML to return the list of files discovered.
      */
-    private suspend fun fetchFilesFromDriveFolder(folderId: String): List<DownloadedCourseFile> = withContext(Dispatchers.IO) {
-        // Fetch embedded folder view which provides a cleaner listing
-        val folderListUrl = "https://drive.google.com/embeddedfolderview?id=$folderId#list"
-        val request = Request.Builder()
-            .url(folderListUrl)
-            .header("User-Agent", USER_AGENT)
-            .build()
+    suspend fun fetchFolderFileList(folderId: String = DEFAULT_DRIVE_FOLDER_ID): List<DiscoveredDriveFile> = withContext(Dispatchers.IO) {
+        try {
+            val folderListUrl = "https://drive.google.com/embeddedfolderview?id=$folderId#list"
+            val request = Request.Builder()
+                .url(folderListUrl)
+                .header("User-Agent", USER_AGENT)
+                .build()
 
-        val html = client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw IOException("Failed to open Google Drive folder (HTTP ${response.code}). Ensure it is set to 'Anyone with link can view'.")
+            val html = client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) response.body?.string() ?: "" else ""
             }
-            response.body?.string() ?: ""
-        }
 
-        val discoveredFiles = parseFolderHtml(html, folderId)
+            val discoveredFiles = parseFolderHtml(html, folderId)
+            if (discoveredFiles.isNotEmpty()) {
+                return@withContext discoveredFiles
+            }
 
-        if (discoveredFiles.isEmpty()) {
             // Fallback: Try the main drive folder URL
             val fallbackUrl = "https://drive.google.com/drive/folders/$folderId"
             val fbRequest = Request.Builder()
@@ -185,15 +205,44 @@ object GoogleDriveSyncService {
                 .build()
 
             val fbHtml = client.newCall(fbRequest).execute().use { response ->
-                response.body?.string() ?: ""
+                if (response.isSuccessful) response.body?.string() ?: "" else ""
             }
             val fbDiscovered = parseFolderHtml(fbHtml, folderId)
-            if (fbDiscovered.isEmpty()) {
-                throw IOException("No files found in Google Drive folder. Please verify the folder contains .xlsx, .csv, or Google Sheets files and that sharing is set to 'Anyone with the link'.")
+            if (fbDiscovered.isNotEmpty()) {
+                return@withContext fbDiscovered
             }
-            return@withContext downloadAllDiscovered(fbDiscovered)
-        }
+        } catch (_: Exception) {}
 
+        if (folderId == DEFAULT_DRIVE_FOLDER_ID) {
+            return@withContext DEFAULT_FALLBACK_DRIVE_COURSES
+        }
+        return@withContext emptyList()
+    }
+
+    /**
+     * Downloads a single drive file by item descriptor.
+     */
+    suspend fun downloadSingleDriveFile(item: DiscoveredDriveFile): DownloadedCourseFile = withContext(Dispatchers.IO) {
+        val lower = item.title.lowercase()
+        if (lower.endsWith(".csv") || lower.endsWith(".tsv") || lower.endsWith(".json")) {
+            downloadDriveFile(item.fileId, item.title)
+        } else {
+            try {
+                downloadGoogleSheetAsXlsx(item.fileId, item.title)
+            } catch (_: Exception) {
+                downloadDriveFile(item.fileId, item.title)
+            }
+        }
+    }
+
+    /**
+     * Crawls a public Google Drive folder HTML to find files.
+     */
+    private suspend fun fetchFilesFromDriveFolder(folderId: String): List<DownloadedCourseFile> = withContext(Dispatchers.IO) {
+        val discoveredFiles = fetchFolderFileList(folderId)
+        if (discoveredFiles.isEmpty()) {
+            throw IOException("No files found in Google Drive folder. Please verify the folder contains .xlsx, .csv, or Google Sheets files and that sharing is set to 'Anyone with the link'.")
+        }
         return@withContext downloadAllDiscovered(discoveredFiles)
     }
 

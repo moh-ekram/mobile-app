@@ -249,8 +249,27 @@ private fun FrontFaceContent(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
+            val frontLabel = remember(word.customPlacesJson) {
+                if (!word.customPlacesJson.isNullOrBlank()) {
+                    try {
+                        val json = org.json.JSONObject(word.customPlacesJson)
+                        val keys = json.keys()
+                        if (keys.hasNext()) {
+                            val firstKey = keys.next()
+                            var clean = firstKey.replace(Regex("""(?i)^place\s*\d+\s*[-_:]?\s*"""), "").trim()
+                            clean = clean.replace("_", " ").replace("-", " ").replace("and", "&", ignoreCase = true).trim()
+                            if (clean.isNotBlank()) clean.uppercase() else "WORD"
+                        } else "WORD"
+                    } catch (_: Exception) {
+                        "WORD"
+                    }
+                } else {
+                    "WORD"
+                }
+            }
+
             Text(
-                text = "WORD",
+                text = frontLabel,
                 fontFamily = PoppinsFontFamily,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Medium,

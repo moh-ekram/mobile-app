@@ -71,6 +71,7 @@ import androidx.compose.material.icons.filled.Psychology
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.material3.*
+import androidx.compose.ui.window.Dialog
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -2275,59 +2276,6 @@ private fun QuizQuestionCardView(
                 }
             }
 
-            // Question Bank Status Rating Bar (Know, Review/Confusion, Don't Know)
-            if (currentQ.sheetType == "qb" || selectedSection == "question_bank") {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Status:",
-                        fontFamily = PoppinsFontFamily,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = SlateMuted,
-                        modifier = Modifier.padding(end = 4.dp)
-                    )
-                    IconButton(
-                        onClick = { onStatusUpdate("know") },
-                        modifier = Modifier.size(30.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = "Know",
-                            tint = EmeraldSuccess,
-                            modifier = Modifier.size(17.dp)
-                        )
-                    }
-                    IconButton(
-                        onClick = { onStatusUpdate("confusion") },
-                        modifier = Modifier.size(30.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.HelpOutline,
-                            contentDescription = "Review / Confusion",
-                            tint = AmberWarning,
-                            modifier = Modifier.size(17.dp)
-                        )
-                    }
-                    IconButton(
-                        onClick = { onStatusUpdate("dont_know") },
-                        modifier = Modifier.size(30.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Don't Know",
-                            tint = RoseError,
-                            modifier = Modifier.size(17.dp)
-                        )
-                    }
-                }
-            }
-
             // Explanation Card with Customizable Font + Font Size
             if (isAnswerShown && !currentQ.explanation.isNullOrBlank()) {
                 Card(
@@ -2936,78 +2884,73 @@ private fun QuestionBankDashboardView(
         var selectedF3 by remember(target) { mutableStateOf<Set<String>>(emptySet()) }
         var questionCount by remember(target, bankQuestions) { mutableIntStateOf(minOf(15, maxOf(1, bankQuestions.size))) }
 
-        AlertDialog(
-            onDismissRequest = { configuringBank = null },
-            title = {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+        Dialog(onDismissRequest = { configuringBank = null }) {
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = Color.White,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(18.dp)
                 ) {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(30.dp)
-                                .clip(CircleShape)
-                                .background(IndigoLight),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.Tune, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(16.dp))
-                        }
                         Text(
                             text = target,
                             fontFamily = PoppinsFontFamily,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 15.5.sp,
+                            fontSize = 16.sp,
                             color = SlateText,
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
                         )
+                        IconButton(
+                            onClick = { configuringBank = null },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = SlateMuted, modifier = Modifier.size(18.dp))
+                        }
                     }
-                    IconButton(
-                        onClick = { configuringBank = null },
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = SlateMuted, modifier = Modifier.size(18.dp))
-                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    QuestionBankConfigView(
+                        questions = bankQuestions,
+                        selectedStatus = selectedStatus,
+                        onStatusChange = { selectedStatus = it },
+                        selectedFilters1 = selectedF1,
+                        selectedFilters2 = selectedF2,
+                        selectedFilters3 = selectedF3,
+                        questionCount = questionCount,
+                        onFilter1Toggle = { opt ->
+                            selectedF1 = if (opt in selectedF1) selectedF1 - opt else selectedF1 + opt
+                        },
+                        onFilter1Clear = { selectedF1 = emptySet() },
+                        onFilter2Toggle = { opt ->
+                            selectedF2 = if (opt in selectedF2) selectedF2 - opt else selectedF2 + opt
+                        },
+                        onFilter2Clear = { selectedF2 = emptySet() },
+                        onFilter3Toggle = { opt ->
+                            selectedF3 = if (opt in selectedF3) selectedF3 - opt else selectedF3 + opt
+                        },
+                        onFilter3Clear = { selectedF3 = emptySet() },
+                        onCountChange = { questionCount = it },
+                        onStart = {
+                            onStartQuiz(target, selectedStatus, selectedF1, selectedF2, selectedF3, questionCount)
+                            configuringBank = null
+                        }
+                    )
                 }
-            },
-            text = {
-                QuestionBankConfigView(
-                    questions = bankQuestions,
-                    selectedStatus = selectedStatus,
-                    onStatusChange = { selectedStatus = it },
-                    selectedFilters1 = selectedF1,
-                    selectedFilters2 = selectedF2,
-                    selectedFilters3 = selectedF3,
-                    questionCount = questionCount,
-                    onFilter1Toggle = { opt ->
-                        selectedF1 = if (opt in selectedF1) selectedF1 - opt else selectedF1 + opt
-                    },
-                    onFilter1Clear = { selectedF1 = emptySet() },
-                    onFilter2Toggle = { opt ->
-                        selectedF2 = if (opt in selectedF2) selectedF2 - opt else selectedF2 + opt
-                    },
-                    onFilter2Clear = { selectedF2 = emptySet() },
-                    onFilter3Toggle = { opt ->
-                        selectedF3 = if (opt in selectedF3) selectedF3 - opt else selectedF3 + opt
-                    },
-                    onFilter3Clear = { selectedF3 = emptySet() },
-                    onCountChange = { questionCount = it },
-                    onStart = {
-                        onStartQuiz(target, selectedStatus, selectedF1, selectedF2, selectedF3, questionCount)
-                        configuringBank = null
-                    }
-                )
-            },
-            confirmButton = {},
-            shape = RoundedCornerShape(18.dp),
-            containerColor = Color.White
-        )
+            }
+        }
     }
 }
 
@@ -3069,12 +3012,6 @@ private fun QuestionBankConfigView(
     onCountChange: (Int) -> Unit,
     onStart: () -> Unit
 ) {
-    val totalCount = questions.size
-    val knowCount = remember(questions) { questions.count { it.status.equals("know", true) } }
-    val reviewCount = remember(questions) { questions.count { it.status.equals("confusion", true) || it.status.equals("review", true) } }
-    val dontKnowCount = remember(questions) { questions.count { it.status.equals("dont_know", true) } }
-    val unratedCount = remember(questions) { questions.count { it.status.isBlank() || it.status.equals("unrated", true) } }
-
     val f1Label = questions.mapNotNull { it.filter1Label }.firstOrNull { it.isNotBlank() }
         ?: questions.firstOrNull()?.filter1Label?.ifBlank { "Course" } ?: "Course"
     val f2Label = questions.mapNotNull { it.filter2Label }.firstOrNull { it.isNotBlank() }
@@ -3092,23 +3029,15 @@ private fun QuestionBankConfigView(
         questions.mapNotNull { it.filter3 }.map { it.trim() }.filter { it.isNotBlank() }.distinct().sorted()
     }
 
-    val matchedCount = remember(questions, selectedStatus, selectedFilters1, selectedFilters2, selectedFilters3) {
+    val matchedCount = remember(questions, selectedFilters1, selectedFilters2, selectedFilters3) {
         questions.count { q ->
-            (when (selectedStatus.lowercase()) {
-                "all", "" -> true
-                "know" -> q.status.equals("know", true)
-                "confusion", "review" -> q.status.equals("confusion", true) || q.status.equals("review", true)
-                "dont_know" -> q.status.equals("dont_know", true)
-                "unrated" -> q.status.isBlank() || q.status.equals("unrated", true)
-                else -> q.status.equals(selectedStatus, ignoreCase = true)
-            }) &&
             (selectedFilters1.isEmpty() || (q.filter1 != null && q.filter1 in selectedFilters1)) &&
             (selectedFilters2.isEmpty() || (q.filter2 != null && q.filter2 in selectedFilters2)) &&
             (selectedFilters3.isEmpty() || (q.filter3 != null && q.filter3 in selectedFilters3))
         }
     }
 
-    val hasActiveFilters = selectedStatus != "all" || selectedFilters1.isNotEmpty() || selectedFilters2.isNotEmpty() || selectedFilters3.isNotEmpty()
+    val hasActiveFilters = selectedFilters1.isNotEmpty() || selectedFilters2.isNotEmpty() || selectedFilters3.isNotEmpty()
 
     Column(
         modifier = Modifier
@@ -3135,7 +3064,6 @@ private fun QuestionBankConfigView(
                     fontWeight = FontWeight.SemiBold,
                     color = IndigoPrimary,
                     modifier = Modifier.clickable {
-                        onStatusChange("all")
                         onFilter1Clear()
                         onFilter2Clear()
                         onFilter3Clear()
@@ -3144,85 +3072,7 @@ private fun QuestionBankConfigView(
             }
         }
 
-        // Status Filter Icon Buttons: All, Know, Review, Don't Know, Unrated
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                text = "Status",
-                fontFamily = PoppinsFontFamily,
-                fontSize = 11.5.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = SlateMuted
-            )
-            val statusIcons = listOf(
-                Triple("all", Icons.Default.DoneAll, IndigoPrimary),
-                Triple("know", Icons.Default.CheckCircle, EmeraldSuccess),
-                Triple("review", Icons.Default.Psychology, AmberWarning),
-                Triple("dont_know", Icons.Default.Cancel, RoseError),
-                Triple("unrated", Icons.Default.HelpOutline, SlateMuted)
-            )
-            val statusCounts = mapOf(
-                "all" to totalCount,
-                "know" to knowCount,
-                "review" to reviewCount,
-                "dont_know" to dontKnowCount,
-                "unrated" to unratedCount
-            )
-            val statusTitles = mapOf(
-                "all" to "All",
-                "know" to "Know",
-                "review" to "Review",
-                "dont_know" to "Don't Know",
-                "unrated" to "Unrated"
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                statusIcons.forEach { (stKey, icon, brandColor) ->
-                    val isSelected = selectedStatus.equals(stKey, ignoreCase = true)
-                    val count = statusCounts[stKey] ?: 0
-                    Surface(
-                        onClick = { onStatusChange(stKey) },
-                        shape = RoundedCornerShape(10.dp),
-                        color = if (isSelected) brandColor else Color(0xFFF8FAFC),
-                        border = BorderStroke(
-                            if (isSelected) 1.5.dp else 1.dp,
-                            if (isSelected) brandColor else SlateBorder
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp)
-                            .testTag("qb_filter_status_$stKey")
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 2.dp, vertical = 3.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = icon,
-                                contentDescription = statusTitles[stKey],
-                                tint = if (isSelected) Color.White else brandColor,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "$count",
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 10.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) Color.White else SlateMuted
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // 3 Minimized and Iconized Filter Buttons: Course, Q.type, Session
+        // 3 Minimized Filter Buttons: Course, Q.type, Session
         if (f1Values.isNotEmpty() || f2Values.isNotEmpty() || f3Values.isNotEmpty()) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
@@ -3238,7 +3088,7 @@ private fun QuestionBankConfigView(
                 ) {
                     CompactFilterMenuButton(
                         label = f1Label,
-                        icon = Icons.Default.School,
+                        icon = null,
                         options = f1Values,
                         selectedOptions = selectedFilters1,
                         onToggleOption = onFilter1Toggle,
@@ -3247,7 +3097,7 @@ private fun QuestionBankConfigView(
                     )
                     CompactFilterMenuButton(
                         label = f2Label,
-                        icon = Icons.Default.Adjust,
+                        icon = null,
                         options = f2Values,
                         selectedOptions = selectedFilters2,
                         onToggleOption = onFilter2Toggle,
@@ -3256,7 +3106,7 @@ private fun QuestionBankConfigView(
                     )
                     CompactFilterMenuButton(
                         label = f3Label,
-                        icon = Icons.Default.MenuBook,
+                        icon = null,
                         options = f3Values,
                         selectedOptions = selectedFilters3,
                         onToggleOption = onFilter3Toggle,
@@ -3319,18 +3169,12 @@ private fun QuestionBankConfigView(
             shape = RoundedCornerShape(10.dp),
             colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
-                Text(
-                    text = if (matchedCount > 0) "Start (${minOf(questionCount, matchedCount)} of $matchedCount Qs)" else "No Questions Match",
-                    fontFamily = PoppinsFontFamily,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.5.sp
-                )
-            }
+            Text(
+                text = if (matchedCount > 0) "Start (${minOf(questionCount, matchedCount)} of $matchedCount Qs)" else "No Questions Match",
+                fontFamily = PoppinsFontFamily,
+                fontWeight = FontWeight.Bold,
+                fontSize = 12.5.sp
+            )
         }
     }
 }
@@ -3338,7 +3182,7 @@ private fun QuestionBankConfigView(
 @Composable
 private fun CompactFilterMenuButton(
     label: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
     options: List<String>,
     selectedOptions: Set<String>,
     onToggleOption: (String) -> Unit,
@@ -3368,15 +3212,17 @@ private fun CompactFilterMenuButton(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = label,
-                    tint = if (isFilterActive) IndigoPrimary else SlateMuted,
-                    modifier = Modifier.size(15.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
+                if (icon != null) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = label,
+                        tint = if (isFilterActive) IndigoPrimary else SlateMuted,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
                 Text(
-                    text = if (isFilterActive) "${label.take(6)} (${selectedOptions.size})" else label.take(8),
+                    text = if (isFilterActive) "${label.take(7)} (${selectedOptions.size})" else label.take(9),
                     fontFamily = PoppinsFontFamily,
                     fontSize = 11.sp,
                     fontWeight = if (isFilterActive) FontWeight.Bold else FontWeight.Medium,
@@ -6055,86 +5901,55 @@ private fun QbTypographyFilterDialog(
     var aFontState by remember { mutableStateOf(answerFont) }
     var eFontState by remember { mutableStateOf(explanationFont) }
 
-    var selectedTab by remember { mutableIntStateOf(0) } // 0: Question, 1: Answer, 2: Explanation
-
-    val fontOptions = listOf(
-        Pair("auto", "Auto / Default"),
-        Pair("poppins", "Poppins"),
-        Pair("kalpurush", "Kalpurush"),
-        Pair("aikya", "Aikya"),
-        Pair("serif", "Serif"),
-        Pair("sans", "Sans-Serif"),
-        Pair("mono", "Monospace")
-    )
-
-    AlertDialog(
+    Dialog(
         onDismissRequest = {
             onApplySettings(qSize, aSize, eSize, qFontState, aFontState, eFontState)
             onDismiss()
-        },
-        title = {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(34.dp)
-                            .clip(CircleShape)
-                            .background(IndigoLight),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Tune,
-                            contentDescription = null,
-                            tint = IndigoPrimary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                    Column {
-                        Text(
-                            text = "Question Sheet Filter",
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = SlateText
-                        )
-                        Text(
-                            text = "Order, filters & appearance",
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 11.5.sp,
-                            color = SlateMuted
-                        )
-                    }
-                }
-                IconButton(
-                    onClick = {
-                        onApplySettings(qSize, aSize, eSize, qFontState, aFontState, eFontState)
-                        onDismiss()
-                    },
-                    modifier = Modifier.size(30.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Close",
-                        tint = SlateMuted,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-        },
-        text = {
+        }
+    ) {
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = Color.White,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp)
+        ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .padding(18.dp)
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
+                // Header: Clean title + close button
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Question Sheet Settings",
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = SlateText
+                    )
+                    IconButton(
+                        onClick = {
+                            onApplySettings(qSize, aSize, eSize, qFontState, aFontState, eFontState)
+                            onDismiss()
+                        },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = SlateMuted,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
                 // 1. Question Order Control (Serial vs Random)
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
@@ -6163,13 +5978,6 @@ private fun QbTypographyFilterDialog(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.Center
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.FormatListNumbered,
-                                    contentDescription = null,
-                                    tint = if (questionOrder == "serial") Color.White else IndigoPrimary,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                                Spacer(modifier = Modifier.width(5.dp))
                                 Text(
                                     text = "Serial",
                                     fontFamily = PoppinsFontFamily,
@@ -6191,13 +5999,6 @@ private fun QbTypographyFilterDialog(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.Center
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Shuffle,
-                                    contentDescription = null,
-                                    tint = if (questionOrder == "random") Color.White else IndigoPrimary,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                                Spacer(modifier = Modifier.width(5.dp))
                                 Text(
                                     text = "Random",
                                     fontFamily = PoppinsFontFamily,
@@ -6210,7 +6011,7 @@ private fun QbTypographyFilterDialog(
                     }
                 }
 
-                // 2. 3 Minimized and Iconized Filter Buttons (Course, Q.type, Session)
+                // 2. Sheet Filters (Course, Q.type, Session)
                 if (f1Values.isNotEmpty() || f2Values.isNotEmpty() || f3Values.isNotEmpty()) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(
@@ -6246,7 +6047,7 @@ private fun QbTypographyFilterDialog(
                         ) {
                             CompactFilterMenuButton(
                                 label = f1Label,
-                                icon = Icons.Default.School,
+                                icon = null,
                                 options = f1Values,
                                 selectedOptions = selectedFilters1,
                                 onToggleOption = onFilter1Toggle,
@@ -6255,7 +6056,7 @@ private fun QbTypographyFilterDialog(
                             )
                             CompactFilterMenuButton(
                                 label = f2Label,
-                                icon = Icons.Default.Adjust,
+                                icon = null,
                                 options = f2Values,
                                 selectedOptions = selectedFilters2,
                                 onToggleOption = onFilter2Toggle,
@@ -6264,7 +6065,7 @@ private fun QbTypographyFilterDialog(
                             )
                             CompactFilterMenuButton(
                                 label = f3Label,
-                                icon = Icons.Default.MenuBook,
+                                icon = null,
                                 options = f3Values,
                                 selectedOptions = selectedFilters3,
                                 onToggleOption = onFilter3Toggle,
@@ -6275,403 +6076,110 @@ private fun QbTypographyFilterDialog(
                     }
                 }
 
-                HorizontalDivider(color = SlateBorder)
-
-                // Tab Selection: All | Question | Answer | Explanation
+                // 3. Font Size: Only +/- icons on the side
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFFF1F5F9))
-                        .padding(3.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        .background(Color(0xFFF8FAFC))
+                        .border(BorderStroke(1.dp, SlateBorder), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    listOf("All", "Question", "Answer", "Explanation").forEachIndexed { index, tabTitle ->
-                        val isSelected = selectedTab == index
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSelected) Color.White else Color.Transparent)
-                                .clickable { selectedTab = index }
-                                .padding(vertical = 7.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = tabTitle,
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 11.5.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) IndigoPrimary else SlateMuted
-                            )
-                        }
-                    }
-                }
-
-                when (selectedTab) {
-                    0 -> { // All Settings
-                        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                            QbTypographySection(
-                                title = "Question Font & Size",
-                                currentFont = qFontState,
-                                fontSize = qSize,
-                                minSize = 12f,
-                                maxSize = 26f,
-                                sizePresets = listOf(13f, 14f, 15f, 16f, 18f, 20f, 22f),
-                                fontOptions = fontOptions,
-                                onFontChange = { qFontState = it },
-                                onSizeChange = { qSize = it },
-                                onApplyFontToAll = {
-                                    qFontState = it
-                                    aFontState = it
-                                    eFontState = it
-                                }
-                            )
-
-                            HorizontalDivider(color = SlateBorder)
-
-                            QbTypographySection(
-                                title = "Answer Options Font & Size",
-                                currentFont = aFontState,
-                                fontSize = aSize,
-                                minSize = 11f,
-                                maxSize = 22f,
-                                sizePresets = listOf(12f, 13f, 14f, 15f, 16f, 18f),
-                                fontOptions = fontOptions,
-                                onFontChange = { aFontState = it },
-                                onSizeChange = { aSize = it },
-                                onApplyFontToAll = {
-                                    qFontState = it
-                                    aFontState = it
-                                    eFontState = it
-                                }
-                            )
-
-                            HorizontalDivider(color = SlateBorder)
-
-                            QbTypographySection(
-                                title = "Explanation Font & Size",
-                                currentFont = eFontState,
-                                fontSize = eSize,
-                                minSize = 10f,
-                                maxSize = 20f,
-                                sizePresets = listOf(10f, 11f, 12f, 13f, 14f, 16f),
-                                fontOptions = fontOptions,
-                                onFontChange = { eFontState = it },
-                                onSizeChange = { eSize = it },
-                                onApplyFontToAll = {
-                                    qFontState = it
-                                    aFontState = it
-                                    eFontState = it
-                                }
-                            )
-                        }
-                    }
-                    1 -> { // Question Settings
-                        QbTypographySection(
-                            title = "Question Font & Size",
-                            currentFont = qFontState,
-                            fontSize = qSize,
-                            minSize = 12f,
-                            maxSize = 26f,
-                            sizePresets = listOf(13f, 14f, 15f, 16f, 18f, 20f, 22f),
-                            fontOptions = fontOptions,
-                            onFontChange = { qFontState = it },
-                            onSizeChange = { qSize = it },
-                            onApplyFontToAll = {
-                                qFontState = it
-                                aFontState = it
-                                eFontState = it
-                            }
-                        )
-                    }
-                    2 -> { // Answer Settings
-                        QbTypographySection(
-                            title = "Answer Options Font & Size",
-                            currentFont = aFontState,
-                            fontSize = aSize,
-                            minSize = 11f,
-                            maxSize = 22f,
-                            sizePresets = listOf(12f, 13f, 14f, 15f, 16f, 18f),
-                            fontOptions = fontOptions,
-                            onFontChange = { aFontState = it },
-                            onSizeChange = { aSize = it },
-                            onApplyFontToAll = {
-                                qFontState = it
-                                aFontState = it
-                                eFontState = it
-                            }
-                        )
-                    }
-                    3 -> { // Explanation Settings
-                        QbTypographySection(
-                            title = "Explanation Font & Size",
-                            currentFont = eFontState,
-                            fontSize = eSize,
-                            minSize = 10f,
-                            maxSize = 20f,
-                            sizePresets = listOf(10f, 11f, 12f, 13f, 14f, 16f),
-                            fontOptions = fontOptions,
-                            onFontChange = { eFontState = it },
-                            onSizeChange = { eSize = it },
-                            onApplyFontToAll = {
-                                qFontState = it
-                                aFontState = it
-                                eFontState = it
-                            }
-                        )
-                    }
-                }
-
-                // Live Preview Card
-                Card(
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
-                    border = BorderStroke(1.dp, SlateBorder)
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    Text(
+                        text = "Font Size",
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = SlateText
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        IconButton(
+                            onClick = {
+                                if (qSize > 12f) {
+                                    qSize -= 1f
+                                    aSize = maxOf(10f, aSize - 1f)
+                                    eSize = maxOf(9f, eSize - 1f)
+                                }
+                            },
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFF1F5F9))
+                        ) {
+                            Text("-", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = SlateText)
+                        }
                         Text(
-                            text = "LIVE PREVIEW",
+                            text = "${qSize.toInt()} sp",
                             fontFamily = PoppinsFontFamily,
-                            fontSize = 10.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = IndigoPrimary,
-                            letterSpacing = 0.5.sp
+                            modifier = Modifier.widthIn(min = 38.dp),
+                            textAlign = TextAlign.Center
                         )
-
-                        // Sample Question
-                        Text(
-                            text = "What is the primary objective of this problem?",
-                            fontFamily = resolveQbFontFamily(qFontState, "What is the primary objective of this problem?"),
-                            fontSize = qSize.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = SlateText,
-                            lineHeight = (qSize * 1.35f).sp
-                        )
-
-                        // Sample Option (with NO stroke color!)
-                        Box(
+                        IconButton(
+                            onClick = {
+                                if (qSize < 26f) {
+                                    qSize += 1f
+                                    aSize = minOf(24f, aSize + 1f)
+                                    eSize = minOf(22f, eSize + 1f)
+                                }
+                            },
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
+                                .size(28.dp)
+                                .clip(CircleShape)
                                 .background(Color(0xFFF1F5F9))
-                                .padding(horizontal = 12.dp, vertical = 9.dp)
                         ) {
-                            Text(
-                                text = "A.  Correctly evaluate and deduce the answer",
-                                fontFamily = resolveQbFontFamily(aFontState, "A.  Correctly evaluate and deduce the answer"),
-                                fontSize = aSize.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = SlateText
-                            )
-                        }
-
-                        // Sample Explanation
-                        Card(
-                            shape = RoundedCornerShape(8.dp),
-                            colors = CardDefaults.cardColors(containerColor = IndigoLight.copy(alpha = 0.6f))
-                        ) {
-                            Column(modifier = Modifier.padding(8.dp)) {
-                                Text(
-                                    text = "Explanation: Step-by-step logic explains the reasoning clearly.",
-                                    fontFamily = resolveQbFontFamily(eFontState, "Explanation: Step-by-step logic explains the reasoning clearly."),
-                                    fontSize = eSize.sp,
-                                    color = SlateText,
-                                    lineHeight = (eSize * 1.35f).sp
-                                )
-                            }
+                            Text("+", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = SlateText)
                         }
                     }
                 }
-            }
-        },
-        confirmButton = {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                TextButton(
-                    onClick = {
-                        qSize = 16f
-                        aSize = 14f
-                        eSize = 12f
-                        qFontState = "auto"
-                        aFontState = "auto"
-                        eFontState = "auto"
-                    }
+
+                Spacer(modifier = Modifier.height(2.dp))
+
+                // Action Buttons: Reset Defaults & Done
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "Reset Defaults",
-                        fontFamily = PoppinsFontFamily,
-                        fontSize = 12.sp,
-                        color = SlateMuted
-                    )
-                }
-
-                Button(
-                    onClick = {
-                        onApplySettings(qSize, aSize, eSize, qFontState, aFontState, eFontState)
-                        onDismiss()
-                    },
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
-                ) {
-                    Text(
-                        text = "Done",
-                        fontFamily = PoppinsFontFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 12.5.sp
-                    )
-                }
-            }
-        },
-        shape = RoundedCornerShape(18.dp),
-        containerColor = Color.White
-    )
-}
-
-@Composable
-private fun QbTypographySection(
-    title: String,
-    currentFont: String,
-    fontSize: Float,
-    minSize: Float,
-    maxSize: Float,
-    sizePresets: List<Float>,
-    fontOptions: List<Pair<String, String>>,
-    onFontChange: (String) -> Unit,
-    onSizeChange: (Float) -> Unit,
-    onApplyFontToAll: (String) -> Unit
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        // Font Family Selector
-        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Font Family",
-                    fontFamily = PoppinsFontFamily,
-                    fontSize = 11.5.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = SlateMuted
-                )
-                Text(
-                    text = "Apply to all",
-                    fontFamily = PoppinsFontFamily,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = IndigoPrimary,
-                    modifier = Modifier.clickable { onApplyFontToAll(currentFont) }
-                )
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                fontOptions.forEach { (key, label) ->
-                    val isSelected = currentFont.equals(key, ignoreCase = true)
-                    Surface(
-                        onClick = { onFontChange(key) },
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (isSelected) IndigoPrimary else Color(0xFFF8FAFC),
-                        border = BorderStroke(1.dp, if (isSelected) IndigoPrimary else SlateBorder)
+                    TextButton(
+                        onClick = {
+                            qSize = 16f
+                            aSize = 14f
+                            eSize = 12f
+                            qFontState = "auto"
+                            aFontState = "auto"
+                            eFontState = "auto"
+                        }
                     ) {
                         Text(
-                            text = label,
-                            fontFamily = resolveQbFontFamily(key, label),
-                            fontSize = 11.5.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isSelected) Color.White else SlateText,
-                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+                            text = "Reset Defaults",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 12.sp,
+                            color = SlateMuted
                         )
                     }
-                }
-            }
-        }
 
-        // Font Size Stepper & Presets
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Font Size",
-                    fontFamily = PoppinsFontFamily,
-                    fontSize = 11.5.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = SlateMuted
-                )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    IconButton(
-                        onClick = { onSizeChange(maxOf(minSize, fontSize - 1f)) },
-                        modifier = Modifier
-                            .size(26.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFFF1F5F9))
-                    ) {
-                        Text("-", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = SlateText)
-                    }
-                    Text(
-                        text = "${fontSize.toInt()} sp",
-                        fontFamily = PoppinsFontFamily,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = IndigoPrimary,
-                        modifier = Modifier.widthIn(min = 36.dp),
-                        textAlign = TextAlign.Center
-                    )
-                    IconButton(
-                        onClick = { onSizeChange(minOf(maxSize, fontSize + 1f)) },
-                        modifier = Modifier
-                            .size(26.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFFF1F5F9))
-                    ) {
-                        Text("+", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = SlateText)
-                    }
-                }
-            }
-
-            // Quick Preset Buttons
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                sizePresets.forEach { size ->
-                    val isSelected = fontSize.toInt() == size.toInt()
-                    Surface(
-                        onClick = { onSizeChange(size) },
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (isSelected) IndigoLight else Color(0xFFF8FAFC),
-                        border = BorderStroke(1.dp, if (isSelected) IndigoPrimary else SlateBorder)
+                    Button(
+                        onClick = {
+                            onApplySettings(qSize, aSize, eSize, qFontState, aFontState, eFontState)
+                            onDismiss()
+                        },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 6.dp)
                     ) {
                         Text(
-                            text = "${size.toInt()}sp",
+                            text = "Done",
                             fontFamily = PoppinsFontFamily,
-                            fontSize = 11.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                            color = if (isSelected) IndigoPrimary else SlateText,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.5.sp
                         )
                     }
                 }

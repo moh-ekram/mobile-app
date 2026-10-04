@@ -21,6 +21,19 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
+data class SavedWordProgressRecord(
+    val id: String,
+    val word: String,
+    val status: String,
+    val timesReviewed: Int = 0,
+    val lastReviewedAt: Long = 0L,
+    val quizCorrectCount: Int = 0,
+    val quizIncorrectCount: Int = 0,
+    val lastQuizStatus: String? = null,
+    val isReported: Boolean = false,
+    val reportReason: String? = null
+)
+
 class BackupManager(private val context: Context, private val database: AppDatabase) {
 
     private val prefs = context.getSharedPreferences("memorizer_prefs", Context.MODE_PRIVATE)
@@ -117,6 +130,60 @@ class BackupManager(private val context: Context, private val database: AppDatab
         } catch (e: Exception) {
             emptyMap()
         }
+    }
+
+    /**
+     * Reads saved vocabulary word progress from memorizer_progress.json (or memorizer_backup.json) on disk if present.
+     * Maps by both word ID and normalized word text.
+     */
+    suspend fun getSavedWordProgressMap(): Map<String, SavedWordProgressRecord> = withContext(Dispatchers.IO) {
+        val map = mutableMapOf<String, SavedWordProgressRecord>()
+        try {
+            val jsonFile = if (getJsonBackupFile().exists() && getJsonBackupFile().length() > 0) {
+                getJsonBackupFile()
+            } else {
+                val alt = File(getBackupDirectory(), "memorizer_backup.json")
+                if (alt.exists() && alt.length() > 0) alt else null
+            }
+
+            if (jsonFile != null) {
+                val content = jsonFile.readText(Charsets.UTF_8)
+                val root = JSONObject(content)
+                val wordsArr = root.optJSONArray("words") ?: root.optJSONArray("vocabulary") ?: JSONArray()
+                for (i in 0 until wordsArr.length()) {
+                    val obj = wordsArr.optJSONObject(i) ?: continue
+                    val id = obj.optString("id").trim()
+                    val word = obj.optString("word").trim()
+                    val status = obj.optString("status", "unrated")
+                    val timesReviewed = obj.optInt("timesReviewed", 0)
+                    val lastReviewedAt = obj.optLong("lastReviewedAt", 0L)
+                    val quizCorrect = obj.optInt("quizCorrectCount", 0)
+                    val quizIncorrect = obj.optInt("quizIncorrectCount", 0)
+                    val lastQuizStatus = if (obj.has("lastQuizStatus")) obj.optString("lastQuizStatus") else null
+                    val isReported = obj.optBoolean("isReported", false)
+                    val reportReason = if (obj.has("reportReason")) obj.optString("reportReason") else null
+
+                    val record = SavedWordProgressRecord(
+                        id = id,
+                        word = word,
+                        status = status,
+                        timesReviewed = timesReviewed,
+                        lastReviewedAt = lastReviewedAt,
+                        quizCorrectCount = quizCorrect,
+                        quizIncorrectCount = quizIncorrect,
+                        lastQuizStatus = lastQuizStatus,
+                        isReported = isReported,
+                        reportReason = reportReason
+                    )
+                    // Per user instruction:
+                    // "word এর প্রগ্রেস শুধু মৌলিক ও এককভাবে id কলাম অনুযায়ী ম্যাচ হবে৷ কোনভাবেই অন্য কোন কলামের ডেটার সাথে মিলিয়ে ম্যাচ করবে না।"
+                    if (id.isNotBlank()) {
+                        map[id] = record
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        map
     }
 
     fun parseQbProgressJsonToMap(jsonStr: String): Map<String, com.example.data.model.QbProgressRecord> {
@@ -1729,19 +1796,19 @@ class BackupManager(private val context: Context, private val database: AppDatab
                 }
             }
 
-            // Remap words to winner courses and merge duplicate words (preserving higher progress)
+            // Remap words to winner courses and merge duplicate words (strictly by ID, preserving higher progress)
             val wordsGroupedByWinner = mutableMapOf<String, MutableMap<String, VocabularyWordEntity>>()
             for (w in wordsToInsert) {
                 val targetCourseId = incomingIdRemap[w.courseId] ?: w.courseId
                 val wordMap = wordsGroupedByWinner.getOrPut(targetCourseId) { mutableMapOf() }
-                val normWord = w.word.trim().lowercase()
-                val existingW = wordMap[normWord]
+                val wordId = w.id
+                val existingW = wordMap[wordId]
                 if (existingW == null) {
-                    wordMap[normWord] = w.copy(courseId = targetCourseId)
+                    wordMap[wordId] = w.copy(courseId = targetCourseId)
                 } else {
-                    // Same word in duplicate courses: keep the one with higher learning progress!
+                    // Same word ID in duplicate courses: keep the one with higher learning progress!
                     if (calculateWordProgressScore(w) > calculateWordProgressScore(existingW)) {
-                        wordMap[normWord] = w.copy(id = existingW.id, courseId = targetCourseId)
+                        wordMap[wordId] = w.copy(id = existingW.id, courseId = targetCourseId)
                     }
                 }
             }
@@ -1829,10 +1896,9 @@ class BackupManager(private val context: Context, private val database: AppDatab
                         finalCoursesToInsert.add(resCourse)
                         globalCourseIdRemap[matchInDb.id] = resCourse.id
 
-                        val restoredWordMap = incomingCourseWords.associateBy { it.word.trim().lowercase() }
+                        val restoredWordMap = incomingCourseWords.associateBy { it.id }
                         for (dbW in dbWords) {
-                            val normW = dbW.word.trim().lowercase()
-                            if (!restoredWordMap.containsKey(normW)) {
+                            if (!restoredWordMap.containsKey(dbW.id)) {
                                 finalWordsToInsert.add(dbW.copy(courseId = resCourse.id))
                             }
                         }
