@@ -47,6 +47,74 @@ object FileParsers {
         return parseCourseRows(rows, courseId)
     }
 
+    data class ColumnPlaceInfo(
+        val colIndex: Int,
+        var placeNumber: Int,
+        val rawHeader: String,
+        var cleanLabel: String
+    )
+
+    fun extractPlaceNumber(rawHeader: String): Int? {
+        val clean = rawHeader.trim()
+        // 1. Matches "place_index 1", "place index 1", "place_index: 1", "place-index-1", "placeindex1", etc.
+        val placeIndexMatch = Regex("""(?i)place[\s_-]*index[\s_.:#]*(\d+)""").find(clean)
+        if (placeIndexMatch != null) {
+            return placeIndexMatch.groupValues[1].toIntOrNull()
+        }
+        // 2. Matches "place 1", "place1", "place_1", "place-1", "place:1", "place#1", "place #1", "place.1"
+        val englishMatch = Regex("""(?i)place[\s_.:#]*(\d+)""").find(clean)
+        if (englishMatch != null) {
+            return englishMatch.groupValues[1].toIntOrNull()
+        }
+        // 3. Matches "(place 1)", "(place_index 1)", "[place 1]"
+        val parenMatch = Regex("""(?i)[\(\[]place[\s_-]*(?:index)?[\s_.:#]*(\d+)[\)\]]""").find(clean)
+        if (parenMatch != null) {
+            return parenMatch.groupValues[1].toIntOrNull()
+        }
+        // 4. Matches "p1", "p2", "p3", "p4", "p5" (when prefix like p1, p_1, p-1, p:1)
+        val pMatch = Regex("""(?i)^p[\s_.:#]*(\d+)(?:\b|[:_-])""").find(clean)
+        if (pMatch != null) {
+            return pMatch.groupValues[1].toIntOrNull()
+        }
+        // 5. Matches "col 1", "column 1", "col_1", "col:1"
+        val colMatch = Regex("""(?i)^(?:col|column)[\s_.:#]*(\d+)""").find(clean)
+        if (colMatch != null) {
+            return colMatch.groupValues[1].toIntOrNull()
+        }
+        // 6. Bengali matches: "প্লেস ইনডেক্স ১" or "প্লেস 1" (supports Bengali digits ০-৯ and English digits 0-9!)
+        val bengaliPlaceIndexMatch = Regex("""(?i)প্লেস[\s_-]*ইনডেক্স[\s_.:#]*([০-৯\d]+)""").find(clean)
+        if (bengaliPlaceIndexMatch != null) {
+            val digits = bengaliPlaceIndexMatch.groupValues[1].map { if (it in '০'..'৯') '0' + (it - '০') else it }.joinToString("")
+            return digits.toIntOrNull()
+        }
+        val bengaliMatch = Regex("""(?i)প্লেস[\s_.:#]*([০-৯\d]+)""").find(clean)
+        if (bengaliMatch != null) {
+            val digits = bengaliMatch.groupValues[1].map { if (it in '০'..'৯') '0' + (it - '০') else it }.joinToString("")
+            return digits.toIntOrNull()
+        }
+        val bengaliParenMatch = Regex("""(?i)[\(\[]প্লেস[\s_-]*(?:ইনডেক্স)?[\s_.:#]*([০-৯\d]+)[\)\]]""").find(clean)
+        if (bengaliParenMatch != null) {
+            val digits = bengaliParenMatch.groupValues[1].map { if (it in '০'..'৯') '0' + (it - '০') else it }.joinToString("")
+            return digits.toIntOrNull()
+        }
+        return null
+    }
+
+    fun extractCleanLabel(rawHeader: String, placeNumber: Int): String {
+        var cleanLabel = if (rawHeader.contains(":")) rawHeader.substringAfter(":").trim() else rawHeader.trim()
+        cleanLabel = cleanLabel.replace(Regex("""(?i)^place[\s_-]*index[\s_.:#]*\d*[\s_.:#-]*"""), "").trim()
+        cleanLabel = cleanLabel.replace(Regex("""(?i)^place[\s_.:#]*\d*[\s_.:#-]*"""), "").trim()
+        cleanLabel = cleanLabel.replace(Regex("""(?i)^p[\s_.:#]*\d*[\s_.:#-]*"""), "").trim()
+        cleanLabel = cleanLabel.replace(Regex("""(?i)\s*[\(\[]place[\s_-]*(?:index)?[\s_.:#]*\d*[\)\]]"""), "").trim()
+        cleanLabel = cleanLabel.replace(Regex("""(?i)^প্লেস[\s_-]*ইনডেক্স[\s_.:#]*[০-৯\d]*[\s_.:#-]*"""), "").trim()
+        cleanLabel = cleanLabel.replace(Regex("""(?i)^প্লেস[\s_.:#]*[০-৯\d]*[\s_.:#-]*"""), "").trim()
+        cleanLabel = cleanLabel.replace(Regex("""(?i)\s*[\(\[]প্লেস[\s_-]*(?:ইনডেক্স)?[\s_.:#]*[০-৯\d]*[\)\]]"""), "").trim()
+        if (cleanLabel.isBlank() || cleanLabel.equals("place", ignoreCase = true) || cleanLabel.equals("প্লেস", ignoreCase = true)) {
+            cleanLabel = if (placeNumber == 1) "Word" else "Place $placeNumber"
+        }
+        return cleanLabel
+    }
+
     /**
      * Parses tabular rows (from CSV or Excel sheets) into VocabularyWordEntity items.
      * ID tracking is fully supported: uses existing 'id', 'no', 'sl', '#' column or generates
@@ -61,7 +129,7 @@ object FileParsers {
 
         val headers = rows[0].map { it.trim() }
 
-        // Map column indices
+        // Map system column indices
         var idIndex = -1
         var groupIndex = -1
         var courseIdIndex = -1
@@ -76,65 +144,108 @@ object FileParsers {
         var extraIndex = -1
         var mnemonicIndex = -1
 
-        val customPlacesMap = mutableMapOf<Int, String>()
+        val placeDefs = mutableListOf<ColumnPlaceInfo>()
+        val unassignedColIndices = mutableListOf<Int>()
 
         headers.forEachIndexed { index, rawHeader ->
-            val lower = rawHeader.lowercase()
-            var cleanLabel = if (rawHeader.contains(":")) rawHeader.substringAfter(":").trim() else rawHeader.trim()
-            cleanLabel = cleanLabel.replace(Regex("""(?i)^place\s*\d+\s*[-_:]?\s*"""), "").trim()
-            cleanLabel = cleanLabel.replace(Regex("""(?i)\s*\(place\s*\d+\)"""), "").trim()
-            if (cleanLabel.isBlank()) {
-                cleanLabel = when {
-                    lower.contains("1") -> "Word"
-                    lower.contains("2") -> "Meaning"
-                    lower.contains("3") -> "Example"
-                    lower.contains("4") -> "Synonyms"
-                    lower.contains("5") -> "Forms"
-                    else -> rawHeader.trim()
-                }
-            }
+            val lower = rawHeader.lowercase().trim()
 
             when {
                 lower in listOf("id", "id*", "word_id", "wordid", "no", "no.", "sl", "sl.", "serial", "#") -> idIndex = index
-                lower == "group" || lower == "group_id" || lower == "unit" || lower == "chapter" -> groupIndex = index
-                lower == "courseid" || lower == "course_id" -> courseIdIndex = index
-                lower == "coursetitle" || lower == "course_title" || lower == "coursename" -> courseTitleIndex = index
+                lower in listOf("group", "group_id", "unit", "chapter") -> groupIndex = index
+                lower in listOf("courseid", "course_id") -> courseIdIndex = index
+                lower in listOf("coursetitle", "course_title", "coursename") -> courseTitleIndex = index
                 lower == "status" -> statusIndex = index
                 lower in listOf("isreported", "is_reported", "flagged", "isflagged", "is_flagged") -> isReportedIndex = index
                 lower in listOf("reportreason", "report_reason", "flagreason", "flag_reason") -> reportReasonIndex = index
-                lower.startsWith("place1") || (wordIndex == -1 && (lower.contains("word") || lower == "term" || lower == "vocabulary")) -> {
-                    wordIndex = index
-                    customPlacesMap[index] = cleanLabel
-                }
-                lower.startsWith("place2") || (meaningIndex == -1 && (lower.contains("meaning") || lower.contains("definition") || lower.contains("translation"))) -> {
-                    meaningIndex = index
-                    customPlacesMap[index] = cleanLabel
-                }
                 else -> {
-                    customPlacesMap[index] = cleanLabel
-                    val labelLower = cleanLabel.lowercase()
-                    when {
-                        labelLower.contains("word") && wordIndex == -1 -> wordIndex = index
-                        labelLower.contains("meaning") || labelLower.contains("definition") || labelLower.contains("translation") -> {
-                            if (meaningIndex == -1) meaningIndex = index
-                        }
-                        labelLower.contains("example") || labelLower.contains("sentence") -> exampleIndex = index
-                        labelLower.contains("synonym") -> synonymsIndex = index
-                        labelLower.contains("extra") || labelLower.contains("derivative") || labelLower.contains("form") -> extraIndex = index
-                        labelLower.contains("mnemonic") || labelLower.contains("trick") -> mnemonicIndex = index
+                    val explicitPlace = extractPlaceNumber(rawHeader)
+                    if (explicitPlace != null) {
+                        val clean = extractCleanLabel(rawHeader, explicitPlace)
+                        placeDefs.add(ColumnPlaceInfo(index, explicitPlace, rawHeader, clean))
+                    } else {
+                        unassignedColIndices.add(index)
                     }
                 }
             }
         }
 
-        // Fallbacks if not recognized
-        if (wordIndex == -1 && headers.isNotEmpty()) {
-            wordIndex = if (headers.size > 2 && (idIndex != -1 || groupIndex != -1)) 2 else 0
+        // Two-pass resolution for unassigned columns:
+        // Pass 1: Semantic keywords (word -> place 1, meaning -> place 2, example -> place 3, synonym -> place 4, form/extra -> place 5)
+        val remainingUnassigned = mutableListOf<Int>()
+        for (colIdx in unassignedColIndices) {
+            val rawHeader = headers[colIdx]
+            val lower = rawHeader.lowercase().trim()
+            val hasPlace1 = placeDefs.any { it.placeNumber == 1 }
+            val hasPlace2 = placeDefs.any { it.placeNumber == 2 }
+            val hasPlace3 = placeDefs.any { it.placeNumber == 3 }
+            val hasPlace4 = placeDefs.any { it.placeNumber == 4 }
+            val hasPlace5 = placeDefs.any { it.placeNumber == 5 }
+
+            when {
+                !hasPlace1 && (lower.contains("word") || lower == "term" || lower == "vocabulary" || lower == "headword") -> {
+                    val clean = extractCleanLabel(rawHeader, 1)
+                    placeDefs.add(ColumnPlaceInfo(colIdx, 1, rawHeader, clean))
+                }
+                !hasPlace2 && (lower.contains("meaning") || lower.contains("definition") || lower.contains("translation") ||
+                        lower.contains("bangla") || lower.contains("bengali") || lower.contains("অর্থ")) -> {
+                    val clean = extractCleanLabel(rawHeader, 2)
+                    placeDefs.add(ColumnPlaceInfo(colIdx, 2, rawHeader, clean))
+                }
+                !hasPlace3 && (lower.contains("example") || lower.contains("sentence") || lower.contains("usage")) -> {
+                    val clean = extractCleanLabel(rawHeader, 3)
+                    placeDefs.add(ColumnPlaceInfo(colIdx, 3, rawHeader, clean))
+                }
+                !hasPlace4 && lower.contains("synonym") -> {
+                    val clean = extractCleanLabel(rawHeader, 4)
+                    placeDefs.add(ColumnPlaceInfo(colIdx, 4, rawHeader, clean))
+                }
+                !hasPlace5 && (lower.contains("form") || lower.contains("extra") || lower.contains("derivative")) -> {
+                    val clean = extractCleanLabel(rawHeader, 5)
+                    placeDefs.add(ColumnPlaceInfo(colIdx, 5, rawHeader, clean))
+                }
+                else -> {
+                    remainingUnassigned.add(colIdx)
+                }
+            }
         }
-        if (meaningIndex == -1 && headers.size > 1) {
-            meaningIndex = if (wordIndex == 0) 1 else if (wordIndex + 1 < headers.size) wordIndex + 1 else -1
-            if (meaningIndex != -1 && !customPlacesMap.containsKey(meaningIndex)) {
-                customPlacesMap[meaningIndex] = headers[meaningIndex]
+
+        // Pass 2: Remaining unassigned columns (like BY_PART, RULE, etc.) get the next sequential available place numbers
+        for (colIdx in remainingUnassigned) {
+            val rawHeader = headers[colIdx]
+            val usedPlaces = placeDefs.map { it.placeNumber }.toSet()
+            var nextPlace = 1
+            while (usedPlaces.contains(nextPlace)) {
+                nextPlace++
+            }
+            val clean = extractCleanLabel(rawHeader, nextPlace)
+            placeDefs.add(ColumnPlaceInfo(colIdx, nextPlace, rawHeader, clean))
+        }
+
+        // Sort by placeNumber ascending (Place 1, Place 2, Place 3, Place 4...)
+        val sortedPlaceDefs = placeDefs.sortedBy { it.placeNumber }
+
+        val place1Def = sortedPlaceDefs.firstOrNull { it.placeNumber == 1 }
+        val place2Def = sortedPlaceDefs.firstOrNull { it.placeNumber == 2 }
+
+        wordIndex = place1Def?.colIndex ?: (if (headers.isNotEmpty()) 0 else -1)
+        meaningIndex = place2Def?.colIndex ?: (if (headers.size > 1) 1 else -1)
+
+        sortedPlaceDefs.forEach { def ->
+            val labelLower = def.cleanLabel.lowercase()
+            when {
+                (def.placeNumber == 3 || labelLower.contains("example") || labelLower.contains("sentence")) && exampleIndex == -1 -> {
+                    exampleIndex = def.colIndex
+                }
+                (def.placeNumber == 4 || labelLower.contains("synonym")) && synonymsIndex == -1 -> {
+                    synonymsIndex = def.colIndex
+                }
+                (def.placeNumber == 5 || labelLower.contains("extra") || labelLower.contains("derivative") || labelLower.contains("form")) && extraIndex == -1 -> {
+                    extraIndex = def.colIndex
+                }
+                (labelLower.contains("mnemonic") || labelLower.contains("trick")) && mnemonicIndex == -1 -> {
+                    mnemonicIndex = def.colIndex
+                }
             }
         }
 
@@ -149,7 +260,13 @@ object FileParsers {
                 courseId
             }
 
-            val rawWord = if (wordIndex in values.indices) values[wordIndex].trim() else "Word $i"
+            // Word is ALWAYS strictly from Place 1
+            val rawWord = if (wordIndex in values.indices && values[wordIndex].isNotBlank()) {
+                values[wordIndex].trim()
+            } else if (place1Def != null && place1Def.colIndex in values.indices && values[place1Def.colIndex].isNotBlank()) {
+                values[place1Def.colIndex].trim()
+            } else "Word $i"
+
             if (rawWord.isBlank()) continue
 
             val stableWordSlug = rawWord.lowercase().replace(Regex("[^a-z0-9]"), "_").take(24).trim('_')
@@ -167,7 +284,13 @@ object FileParsers {
                 if (cleanDefaultGroup.isNotBlank() && cleanDefaultGroup.any { it.isDigit() }) cleanDefaultGroup else defaultGroupName
             }
 
-            val meaning = if (meaningIndex in values.indices) values[meaningIndex].trim() else ""
+            // Meaning is ALWAYS strictly from Place 2
+            val meaning = if (meaningIndex in values.indices && values[meaningIndex].isNotBlank()) {
+                values[meaningIndex].trim()
+            } else if (place2Def != null && place2Def.colIndex in values.indices) {
+                values[place2Def.colIndex].trim()
+            } else ""
+
             val example = if (exampleIndex in values.indices && values[exampleIndex].isNotBlank()) values[exampleIndex].trim() else null
             val synonyms = if (synonymsIndex in values.indices && values[synonymsIndex].isNotBlank()) values[synonymsIndex].trim() else null
             val extraWord = if (extraIndex in values.indices && values[extraIndex].isNotBlank()) values[extraIndex].trim() else null
@@ -178,11 +301,12 @@ object FileParsers {
             } else false
             val reportReason = if (reportReasonIndex in values.indices && values[reportReasonIndex].isNotBlank()) values[reportReasonIndex].trim() else null
 
-            // Record custom places exactly as present in this row
+            // Build customPlacesJson strictly ordered by placeNumber (Place 1, Place 2, Place 3, Place 4...)
             val placeJsonObj = JSONObject()
-            customPlacesMap.forEach { (colIdx, label) ->
-                if (colIdx in values.indices && values[colIdx].isNotBlank()) {
-                    placeJsonObj.put(label, values[colIdx].trim())
+            sortedPlaceDefs.forEach { placeDef ->
+                if (placeDef.colIndex in values.indices && values[placeDef.colIndex].isNotBlank()) {
+                    val key = "Place ${placeDef.placeNumber}: ${placeDef.cleanLabel}"
+                    placeJsonObj.put(key, values[placeDef.colIndex].trim())
                 }
             }
 

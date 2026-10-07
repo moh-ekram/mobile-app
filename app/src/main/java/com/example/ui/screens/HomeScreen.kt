@@ -36,6 +36,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -320,87 +322,6 @@ fun HomeScreen(
         contentPadding = PaddingValues(top = 16.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Welcome Header Card
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = IndigoPrimary),
-                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 18.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = user?.displayName ?: "Vocabulary Learner",
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.White
-                        )
-
-                        // User Profile Photo
-                        Box(
-                            modifier = Modifier
-                                .size(46.dp)
-                                .clip(CircleShape)
-                                .border(2.dp, Color.White.copy(alpha = 0.85f), CircleShape)
-                                .background(Color.White.copy(alpha = 0.2f))
-                                .clickable { onNavigate("settings") }
-                                .testTag("home_user_profile_avatar"),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (!user?.avatarUri.isNullOrBlank()) {
-                                AsyncImage(
-                                    model = user.avatarUri,
-                                    contentDescription = "User Profile Photo",
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
-                                )
-                            } else {
-                                Text(
-                                    text = (user?.displayName?.take(1) ?: "U").uppercase(),
-                                    fontFamily = PoppinsFontFamily,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    fontSize = 20.sp,
-                                    color = Color.White
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    LinearProgressIndicator(
-                        progress = { animatedProgress },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(8.dp)
-                            .clip(CircleShape),
-                        color = EmeraldSuccess,
-                        trackColor = Color.White.copy(alpha = 0.25f)
-                    )
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    Text(
-                        text = "$animatedMasteryPercent% Mastered",
-                        fontFamily = PoppinsFontFamily,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                }
-            }
-        }
-
         // Course Selection Section with 'Select course' button
         item {
             Card(
@@ -621,63 +542,58 @@ fun HomeScreen(
             }
         }
 
-        val groups = activeWords.mapNotNull { it.group?.takeIf { g -> g.isNotBlank() } }.distinct().sorted()
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                groups.forEach { grp ->
-                    val grpWords = activeWords.filter { it.group == grp }
-                    val grpKnow = grpWords.count { it.status == "know" }
-                    val grpPercent = if (grpWords.isNotEmpty()) (grpKnow * 100 / grpWords.size) else 0
-
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                onSelectGroup(grp)
-                                onNavigate("flashcard")
-                            },
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = if (palette.isDark) palette.surface else Color.White),
-                        border = CardDefaults.outlinedCardBorder().copy(
-                            brush = androidx.compose.ui.graphics.SolidColor(
-                                if (grpPercent == 100) EmeraldSuccess.copy(alpha = 0.5f) else SlateBorder
-                            )
-                        )
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+        val groups = activeWords.mapNotNull { it.group?.takeIf { g -> g.isNotBlank() } }.distinct()
+            .sortedWith(compareBy({ it.toIntOrNull() ?: Int.MAX_VALUE }, { it }))
+        if (groups.isNotEmpty()) {
+            val groupChunks = groups.chunked(4)
+            item {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("home_groups_circles_container")
+                ) {
+                    groupChunks.forEach { rowGroups ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            val displayGrpName = if (grp.isNotBlank() && grp.all { it.isDigit() }) "Group $grp" else grp
-                            Text(
-                                text = displayGrpName,
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = palette.textPrimary
-                            )
+                            rowGroups.forEach { grp ->
+                                val grpWords = activeWords.filter { it.group == grp }
+                                val grpKnow = grpWords.count { it.status == "know" }
+                                val grpPercent = if (grpWords.isNotEmpty()) (grpKnow * 100 / grpWords.size) else 0
+                                val displayGrpName = if (grp.isNotBlank() && grp.all { it.isDigit() }) "Group $grp" else grp
 
-                            // Color fill progress bar
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                LinearProgressIndicator(
-                                    progress = { if (grpWords.isNotEmpty()) grpKnow.toFloat() / grpWords.size else 0f },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(8.dp)
-                                        .clip(CircleShape),
-                                    color = EmeraldSuccess,
-                                    trackColor = if (palette.isDark) Color(0xFF334155) else Color(0xFFE2E8F0)
-                                )
+                                val circleStrokeColor = when {
+                                    grpPercent == 100 -> EmeraldSuccess
+                                    grpPercent >= 50 -> IndigoPrimary
+                                    grpPercent > 0 -> AmberWarning
+                                    else -> if (palette.isDark) Color(0xFF64748B) else Color(0xFFCBD5E1)
+                                }
+                                val circleTextColor = when {
+                                    grpPercent == 100 -> EmeraldSuccess
+                                    grpPercent >= 50 -> IndigoPrimary
+                                    grpPercent > 0 -> AmberWarning
+                                    else -> palette.textMuted
+                                }
 
-                                Text(
-                                    text = "$grpKnow of ${grpWords.size} mastered",
-                                    fontFamily = PoppinsFontFamily,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = palette.textMuted
+                                GroupCircle(
+                                    title = displayGrpName,
+                                    percentage = grpPercent,
+                                    progress = if (grpWords.isNotEmpty()) grpKnow.toFloat() / grpWords.size else 0f,
+                                    strokeColor = circleStrokeColor,
+                                    textColor = circleTextColor,
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        onSelectGroup(grp)
+                                        onNavigate("flashcard")
+                                    }
                                 )
+                            }
+                            // Fill remaining slots in 4-column row
+                            repeat(4 - rowGroups.size) {
+                                Spacer(modifier = Modifier.weight(1f))
                             }
                         }
                     }
@@ -827,6 +743,87 @@ private fun QuickPracticeTile(
                 maxLines = 1
             )
         }
+    }
+}
+
+@Composable
+private fun GroupCircle(
+    title: String,
+    percentage: Int,
+    progress: Float,
+    strokeColor: Color,
+    textColor: Color,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
+) {
+    val palette = LocalAppPalette.current
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
+            .padding(vertical = 4.dp, horizontal = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier.size(64.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val strokeWidthPx = 4.2.dp.toPx()
+                val radius = (size.minDimension - strokeWidthPx) / 2f
+                val centerOffset = center
+
+                // 1. Solid surface filled center circle
+                val innerRadius = radius - (strokeWidthPx / 2f) + 0.5f
+                drawCircle(
+                    color = if (palette.isDark) palette.surface else Color.White,
+                    radius = maxOf(0f, innerRadius),
+                    center = centerOffset
+                )
+
+                // 2. Inactive background track ring
+                drawCircle(
+                    color = strokeColor.copy(alpha = 0.15f),
+                    radius = radius,
+                    center = centerOffset,
+                    style = Stroke(width = strokeWidthPx, cap = StrokeCap.Round)
+                )
+
+                // 3. Active circular percentage arc
+                if (progress > 0f) {
+                    val sweepAngle = (progress.coerceIn(0f, 1f)) * 360f
+                    drawArc(
+                        color = strokeColor,
+                        startAngle = -90f,
+                        sweepAngle = sweepAngle,
+                        useCenter = false,
+                        style = Stroke(width = strokeWidthPx, cap = StrokeCap.Round)
+                    )
+                }
+            }
+
+            // In the center: data percentage
+            Text(
+                text = "$percentage%",
+                fontFamily = PoppinsFontFamily,
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = textColor
+            )
+        }
+
+        Spacer(modifier = Modifier.height(5.dp))
+
+        Text(
+            text = title,
+            fontFamily = PoppinsFontFamily,
+            fontSize = 10.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = palette.textPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center
+        )
     }
 }
 

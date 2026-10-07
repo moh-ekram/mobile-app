@@ -10,7 +10,10 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.Crossfade
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,12 +27,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
 import com.example.ui.screens.*
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.MemorizerViewModel
@@ -262,15 +267,17 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
         }
     }
 
-    if (currentUser == null) {
-        LoginScreen(
-            onLoginSuccess = { /* user state already updated */ },
-            onCredentialsLogin = { id, pass -> viewModel.loginWithCredentials(id, pass) },
-            onGoogleLogin = { viewModel.loginWithGoogle() }
-        )
-    } else {
+        val user = currentUser
+        if (user == null) {
+            LoginScreen(
+                onLoginSuccess = { /* user state already updated */ },
+                onCredentialsLogin = { id, pass -> viewModel.loginWithCredentials(id, pass) },
+                onGoogleLogin = { viewModel.loginWithGoogle() }
+            )
+        } else {
         var selectedGameSection by remember { mutableStateOf<String?>(null) }
         var showFlashcardFilterDialog by remember { mutableStateOf(false) }
+        var showHomeProfileDialog by remember { mutableStateOf(false) }
 
         LaunchedEffect(currentRoute) {
             if (currentRoute != "games") selectedGameSection = null
@@ -280,6 +287,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
         val hideTopBar = (currentRoute == "flashcard" && isFocusMode) ||
                          currentRoute == "article_reader" ||
                          currentRoute == "question_bank" ||
+                         currentRoute == "courses" ||
                          (currentRoute == "games" && selectedGameSection != null)
         val hideBottomBar = currentRoute == "flashcard" ||
                             currentRoute == "question_bank" ||
@@ -335,6 +343,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                                     val screenTitle = when (currentRoute) {
                                         "flashcard" -> "Flashcards"
                                         "games" -> "Practice Games"
+                                        "courses" -> "Course Library"
                                         "settings", "admin", "profile" -> "Settings"
                                         else -> currentRoute.replaceFirstChar { it.uppercase() }
                                     }
@@ -349,7 +358,39 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             }
                         },
                         actions = {
-                            if (currentRoute == "flashcard") {
+                            if (currentRoute == "home") {
+                                // Home screen user avatar in top right corner (Clickable -> Opens Profile popup)
+                                Box(
+                                    modifier = Modifier
+                                        .padding(end = 12.dp)
+                                        .size(34.dp)
+                                        .clip(CircleShape)
+                                        .background(if (palette.isDark) Color(0xFF1E293B) else IndigoLight)
+                                        .border(1.5.dp, IndigoPrimary.copy(alpha = 0.8f), CircleShape)
+                                        .clickable { showHomeProfileDialog = true }
+                                        .testTag("home_user_avatar_button"),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    val avatarUrl = user.avatarUri
+                                    if (!avatarUrl.isNullOrBlank()) {
+                                        AsyncImage(
+                                            model = avatarUrl,
+                                            contentDescription = "User Profile",
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        val firstLetter = user.displayName.firstOrNull()?.uppercaseChar()?.toString() ?: "U"
+                                        Text(
+                                            text = firstLetter,
+                                            fontFamily = PoppinsFontFamily,
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = IndigoPrimary
+                                        )
+                                    }
+                                }
+                            } else if (currentRoute == "flashcard") {
                                 val hasActiveFilters = selectedGroups.isNotEmpty() || selectedStatuses.isNotEmpty() || cardSortOrder != "default" || showOnlyFlagged
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
@@ -377,22 +418,6 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                                         )
                                     }
                                 }
-                            } else if (currentRoute != "home") {
-                                Box(
-                                    modifier = Modifier
-                                        .padding(end = 12.dp)
-                                        .clip(CircleShape)
-                                        .background(if (palette.isDark) Color(0xFF312E81) else IndigoLight)
-                                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        text = currentUser?.displayName ?: "User #1235",
-                                        fontFamily = PoppinsFontFamily,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary
-                                    )
-                                }
                             }
                         },
                         colors = TopAppBarDefaults.topAppBarColors(
@@ -413,6 +438,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             NavigationItem("home", "Home", Icons.Default.Home),
                             NavigationItem("flashcard", "Flashcard", Icons.Default.Style),
                             NavigationItem("games", "Games", Icons.Default.SportsEsports),
+                            NavigationItem("courses", "Courses", Icons.Default.School),
                             NavigationItem("settings", "Settings", Icons.Default.Settings)
                         )
 
@@ -466,7 +492,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             courses = allCourses,
                             activeCourseId = activeCourseId,
                             onSelectCourse = { cId -> viewModel.setActiveCourse(cId) },
-                            onCreateCourseClick = { viewModel.setRoute("settings") },
+                            onCreateCourseClick = { viewModel.setRoute("courses") },
                             onNavigate = { target -> viewModel.setRoute(target) },
                             onSelectGroup = { grp -> viewModel.selectGroup(grp) },
                             onSelectStatus = { status ->
@@ -594,6 +620,31 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                                 onBack = { viewModel.navigateBack() }
                             )
                         }
+                        "courses" -> CoursesScreen(
+                            courses = allCourses,
+                            activeCourseId = activeCourseId,
+                            words = allWords,
+                            isSyncingDrive = isSyncingDrive,
+                            driveSyncUrl = driveSyncUrl,
+                            driveSyncSummary = driveSyncSummary,
+                            driveCourses = driveCourses,
+                            isRefreshingDriveCourses = isRefreshingDriveCourses,
+                            downloadingCourseFileIds = downloadingCourseFileIds,
+                            onRefreshDriveCourses = { viewModel.refreshDriveCoursesList() },
+                            onDownloadDriveCourse = { item -> viewModel.downloadAndAddDriveCourse(item) },
+                            onSelectCourse = { cId -> viewModel.setActiveCourse(cId) },
+                            onDeleteCourse = { cId, keepProgress -> viewModel.deleteCourse(cId, keepProgress) },
+                            onUpdateCourse = { cId, title, desc -> viewModel.updateCourse(cId, title, desc) },
+                            onCreateCourse = { title, desc, fileContent, isJson -> viewModel.createCourse(title, desc, fileContent, isJson) },
+                            onSyncFromDrive = { url, preserve -> viewModel.syncCoursesFromDrive(url, preserve) },
+                            onBatchImportFiles = { files, preserve -> viewModel.importMultipleCourseFiles(files, preserve) },
+                            onClearDriveSummary = { viewModel.clearDriveSyncSummary() },
+                            onManageWords = { cId ->
+                                viewModel.setActiveCourse(cId)
+                                viewModel.setRoute("settings")
+                            },
+                            onBack = { viewModel.setRoute("home") }
+                        )
                         "settings", "admin", "profile" -> SettingsScreen(
                             user = currentUser,
                             progress = userProgress,
@@ -617,7 +668,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             downloadingCourseFileIds = downloadingCourseFileIds,
                             onRefreshDriveCourses = { viewModel.refreshDriveCoursesList() },
                             onDownloadDriveCourse = { item -> viewModel.downloadAndAddDriveCourse(item) },
-                            initialTab = if (currentRoute == "admin") 1 else 0,
+                            initialTab = if (currentRoute == "admin") 3 else 0,
                             onToggleDarkTheme = { enable -> viewModel.setDarkTheme(enable) },
                             onToggleFlipAnimation = { enable -> viewModel.setFlipAnimationEnabled(enable) },
                             onToggleFocusMode = { enable -> viewModel.setFocusMode(enable) },
@@ -672,6 +723,21 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                         )
                     }
                 }
+            }
+
+            if (showHomeProfileDialog) {
+                EditProfileModal(
+                    currentName = user.displayName,
+                    currentAvatar = user.avatarUri,
+                    currentTargetExam = user.targetExam,
+                    currentGoal = user.dailyWordGoal,
+                    currentBio = user.bio,
+                    onDismiss = { showHomeProfileDialog = false },
+                    onSave = { name, avatar, exam, goal, bio ->
+                        viewModel.updateProfile(name, avatar, exam, goal, bio)
+                        showHomeProfileDialog = false
+                    }
+                )
             }
         }
     }

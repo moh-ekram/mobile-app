@@ -19,6 +19,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -208,6 +210,59 @@ fun Flashcard(
     }
 }
 
+fun extractPlaceNumberFromLabel(label: String): Int? {
+    val clean = label.trim()
+    val placeIndexMatch = Regex("""(?i)place[\s_-]*index[\s_.:#]*(\d+)""").find(clean)
+    if (placeIndexMatch != null) {
+        return placeIndexMatch.groupValues[1].toIntOrNull()
+    }
+    val englishMatch = Regex("""(?i)place[\s_.:#]*(\d+)""").find(clean)
+    if (englishMatch != null) {
+        return englishMatch.groupValues[1].toIntOrNull()
+    }
+    val parenMatch = Regex("""(?i)[\(\[]place[\s_-]*(?:index)?[\s_.:#]*(\d+)[\)\]]""").find(clean)
+    if (parenMatch != null) {
+        return parenMatch.groupValues[1].toIntOrNull()
+    }
+    val pMatch = Regex("""(?i)^p[\s_.:#]*(\d+)(?:\b|[:_-])""").find(clean)
+    if (pMatch != null) {
+        return pMatch.groupValues[1].toIntOrNull()
+    }
+    val colMatch = Regex("""(?i)^(?:col|column)[\s_.:#]*(\d+)""").find(clean)
+    if (colMatch != null) {
+        return colMatch.groupValues[1].toIntOrNull()
+    }
+    val bengaliPlaceIndexMatch = Regex("""(?i)প্লেস[\s_-]*ইনডেক্স[\s_.:#]*([০-৯\d]+)""").find(clean)
+    if (bengaliPlaceIndexMatch != null) {
+        val digits = bengaliPlaceIndexMatch.groupValues[1].map { if (it in '০'..'৯') '0' + (it - '০') else it }.joinToString("")
+        return digits.toIntOrNull()
+    }
+    val bengaliMatch = Regex("""(?i)প্লেস[\s_.:#]*([০-৯\d]+)""").find(clean)
+    if (bengaliMatch != null) {
+        val digits = bengaliMatch.groupValues[1].map { if (it in '০'..'৯') '0' + (it - '০') else it }.joinToString("")
+        return digits.toIntOrNull()
+    }
+    val bengaliParenMatch = Regex("""(?i)[\(\[]প্লেস[\s_-]*(?:ইনডেক্স)?[\s_.:#]*([০-৯\d]+)[\)\]]""").find(clean)
+    if (bengaliParenMatch != null) {
+        val digits = bengaliParenMatch.groupValues[1].map { if (it in '০'..'৯') '0' + (it - '০') else it }.joinToString("")
+        return digits.toIntOrNull()
+    }
+    return null
+}
+
+/**
+ * Capitalizes each word in the provided string (Title Case for each word).
+ * e.g., "hello world" -> "Hello World", "eloquent speaker" -> "Eloquent Speaker"
+ */
+fun capitalizeEachWord(text: String): String {
+    if (text.isBlank()) return text
+    return text.split(Regex("(?<=\\s)|(?=\\s)"))
+        .joinToString("") { token ->
+            if (token.isBlank()) token
+            else token.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+        }
+}
+
 @Composable
 private fun FrontFaceContent(
     word: VocabularyWordEntity,
@@ -249,22 +304,44 @@ private fun FrontFaceContent(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            val frontLabel = remember(word.customPlacesJson) {
+            val (frontWord, frontLabel) = remember(word.customPlacesJson, word.word) {
                 if (!word.customPlacesJson.isNullOrBlank()) {
                     try {
                         val json = org.json.JSONObject(word.customPlacesJson)
                         val keys = json.keys()
-                        if (keys.hasNext()) {
-                            val firstKey = keys.next()
-                            var clean = firstKey.replace(Regex("""(?i)^place\s*\d+\s*[-_:]?\s*"""), "").trim()
+                        var p1Val: String? = null
+                        var p1Key: String? = null
+                        while (keys.hasNext()) {
+                            val k = keys.next()
+                            val placeNum = extractPlaceNumberFromLabel(k)
+                            val kClean = k.lowercase().replace("_", "").replace(" ", "").replace("-", "")
+                            if (placeNum == 1 || kClean.startsWith("place1") || kClean == "word") {
+                                val v = json.optString(k, "").trim()
+                                if (v.isNotBlank()) {
+                                    p1Val = v
+                                    p1Key = k
+                                    break
+                                }
+                            }
+                        }
+                        val chosenWord = p1Val ?: word.word
+                        val cleanHeader = if (p1Key != null) {
+                            var clean = if (p1Key.contains(":")) p1Key.substringAfter(":").trim() else p1Key.trim()
+                            clean = clean.replace(Regex("""(?i)^place[\s_-]*index[\s_.:#]*\d*[\s_.:#-]*"""), "").trim()
+                            clean = clean.replace(Regex("""(?i)^place[\s_.:#]*\d*[\s_.:#-]*"""), "").trim()
+                            clean = clean.replace(Regex("""(?i)^p[\s_.:#]*\d*[\s_.:#-]*"""), "").trim()
+                            clean = clean.replace(Regex("""(?i)^প্লেস[\s_-]*ইনডেক্স[\s_.:#]*[০-৯\d]*[\s_.:#-]*"""), "").trim()
+                            clean = clean.replace(Regex("""(?i)^প্লেস[\s_.:#]*[০-৯\d]*[\s_.:#-]*"""), "").trim()
                             clean = clean.replace("_", " ").replace("-", " ").replace("and", "&", ignoreCase = true).trim()
-                            if (clean.isNotBlank()) clean.uppercase() else "WORD"
+                            if (clean.isNotBlank() && !clean.equals("place", ignoreCase = true) && !clean.equals("প্লেস", ignoreCase = true)) clean.uppercase() else "WORD"
                         } else "WORD"
+                        // Capitalize each word for Place 1
+                        Pair(capitalizeEachWord(chosenWord), cleanHeader)
                     } catch (_: Exception) {
-                        "WORD"
+                        Pair(capitalizeEachWord(word.word), "WORD")
                     }
                 } else {
-                    "WORD"
+                    Pair(capitalizeEachWord(word.word), "WORD")
                 }
             }
 
@@ -287,7 +364,7 @@ private fun FrontFaceContent(
                 else -> if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary
             }
 
-            val wordLen = word.word.length
+            val wordLen = frontWord.length
             val dynamicFontSize = when {
                 wordLen <= 6 -> if (isFocusMode) 38.sp else 34.sp
                 wordLen <= 10 -> if (isFocusMode) 32.sp else 28.sp
@@ -300,8 +377,8 @@ private fun FrontFaceContent(
 
             // Place 1 Word (Only place1 is shown on front side)
             Text(
-                text = word.word,
-                fontFamily = selectFontForText(word.word),
+                text = frontWord,
+                fontFamily = selectFontForText(frontWord),
                 fontSize = dynamicFontSize,
                 fontWeight = FontWeight.ExtraBold,
                 color = wordColor,
@@ -414,6 +491,13 @@ private fun FrontFaceContent(
     }
 }
 
+private data class BackCardDetail(
+    val placeNum: Int,
+    val label: String,
+    val value: String,
+    val isPrimaryMeaning: Boolean
+)
+
 @Composable
 private fun BackFaceContent(
     word: VocabularyWordEntity,
@@ -431,16 +515,19 @@ private fun BackFaceContent(
         if (!word.customPlacesJson.isNullOrBlank()) {
             try {
                 val json = org.json.JSONObject(word.customPlacesJson)
-                val list = mutableListOf<Pair<String, String>>()
+                val list = mutableListOf<Triple<Int, String, String>>()
                 val keys = json.keys()
+                var fallbackOrder = 100
                 while (keys.hasNext()) {
                     val k = keys.next()
                     val v = json.optString(k, "").trim()
                     if (v.isNotBlank()) {
-                        list.add(k to v)
+                        val placeNum = extractPlaceNumberFromLabel(k) ?: fallbackOrder++
+                        list.add(Triple(placeNum, k, v))
                     }
                 }
-                list
+                list.sortBy { it.first }
+                list.map { it.second to it.third }
             } catch (_: Exception) {
                 emptyList()
             }
@@ -470,131 +557,138 @@ private fun BackFaceContent(
             onSpeak = onSpeak
         )
 
-        // Center Details Section (Only renders columns that were present in the uploaded course file, excluding place1/word)
+        // Center Details Section: Displays ALL columns from custom places and all word data
+        val backDetailsList = remember(customPlacesList, word) {
+            val list = mutableListOf<BackCardDetail>()
+            val seenValues = mutableSetOf<String>()
+            val wordTrimmed = word.word.trim()
+            val frontNormalized = wordTrimmed.filter { it.isLetterOrDigit() }.lowercase()
+
+            // 1. Incorporate custom places from customPlacesJson (excluding Place 1 / primary front word)
+            customPlacesList.forEach { (label, value) ->
+                val vTrimmed = value.trim()
+                if (vTrimmed.isBlank()) return@forEach
+
+                val placeNum = extractPlaceNumberFromLabel(label)
+                val labelLower = label.lowercase().trim()
+                val labelClean = labelLower.replace("_", "").replace(" ", "").replace("-", "")
+
+                // Place 1 is exclusively shown on the front face
+                val isPlace1 = placeNum == 1 ||
+                        labelClean.startsWith("place1") ||
+                        labelLower.contains("place 1") ||
+                        labelLower.contains("place1") ||
+                        labelLower.contains("place_1") ||
+                        labelLower.contains("(place 1)") ||
+                        (placeNum == null && (labelLower == "word" || labelLower == "headword" || labelLower == "vocabulary") &&
+                                (vTrimmed.equals(wordTrimmed, ignoreCase = true) || vTrimmed.filter { it.isLetterOrDigit() }.lowercase() == frontNormalized))
+
+                if (isPlace1) return@forEach
+
+                var cleaned = label.trim()
+                if (cleaned.contains(":")) cleaned = cleaned.substringAfter(":").trim()
+                cleaned = cleaned.replace(Regex("""(?i)^place[\s_-]*index[\s_.:#]*\d*[\s_.:#-]*"""), "").trim()
+                cleaned = cleaned.replace(Regex("""(?i)^place[\s_.:#]*\d*[\s_.:#-]*"""), "").trim()
+                cleaned = cleaned.replace(Regex("""(?i)^p[\s_.:#]*\d*[\s_.:#-]*"""), "").trim()
+                cleaned = cleaned.replace(Regex("""(?i)\s*[\(\[]place[\s_-]*(?:index)?[\s_.:#]*\d*[\)\]]"""), "").trim()
+                cleaned = cleaned.replace(Regex("""(?i)^প্লেস[\s_-]*ইনডেক্স[\s_.:#]*[০-৯\d]*[\s_.:#-]*"""), "").trim()
+                cleaned = cleaned.replace(Regex("""(?i)^প্লেস[\s_.:#]*[০-৯\d]*[\s_.:#-]*"""), "").trim()
+                cleaned = cleaned.replace(Regex("""(?i)\s*[\(\[]প্লেস[\s_-]*(?:ইনডেক্স)?[\s_.:#]*[০-৯\d]*[\)\]]"""), "").trim()
+
+                val isMeaningVal = word.meaning.isNotBlank() && vTrimmed.equals(word.meaning.trim(), ignoreCase = true)
+                val isPlace2 = (placeNum == 2) || isMeaningVal ||
+                        labelClean.startsWith("place2") ||
+                        labelLower.contains("place 2") ||
+                        labelLower.contains("place2") ||
+                        labelLower.contains("meaning") ||
+                        labelLower.contains("definition") ||
+                        labelLower.contains("translation") ||
+                        labelLower.contains("bangla") ||
+                        labelLower.contains("bengali") ||
+                        labelLower.contains("অর্থ")
+
+                val displayLabel = if (cleaned.isNotBlank()) {
+                    cleaned
+                } else if (placeNum != null) {
+                    "Place $placeNum"
+                } else {
+                    label.trim()
+                }
+
+                val effectivePlace = placeNum ?: if (isPlace2) 2 else 99
+                val finalVal = if (effectivePlace == 2 || effectivePlace == 3) {
+                    capitalizeEachWord(vTrimmed)
+                } else {
+                    vTrimmed
+                }
+                list.add(BackCardDetail(effectivePlace, displayLabel, finalVal, isPlace2))
+                seenValues.add(vTrimmed.lowercase())
+            }
+
+            // 2. Also incorporate any entity columns (meaning, example, extraWord, synonyms, extraMeaning, mnemonic)
+            // if their content was not already present in customPlacesList
+            if (word.meaning.isNotBlank() && !seenValues.contains(word.meaning.trim().lowercase())) {
+                list.add(BackCardDetail(2, "Meaning", capitalizeEachWord(word.meaning.trim()), true))
+                seenValues.add(word.meaning.trim().lowercase())
+            }
+            if (!word.example.isNullOrBlank() && !seenValues.contains(word.example.trim().lowercase())) {
+                list.add(BackCardDetail(3, "Example Sentence", capitalizeEachWord(word.example.trim()), false))
+                seenValues.add(word.example.trim().lowercase())
+            }
+            if (!word.synonyms.isNullOrBlank() && !seenValues.contains(word.synonyms.trim().lowercase())) {
+                list.add(BackCardDetail(4, "Synonyms", word.synonyms.trim(), false))
+                seenValues.add(word.synonyms.trim().lowercase())
+            }
+            if (!word.extraWord.isNullOrBlank() && !seenValues.contains(word.extraWord.trim().lowercase())) {
+                list.add(BackCardDetail(5, "Derivative / Forms", word.extraWord.trim(), false))
+                seenValues.add(word.extraWord.trim().lowercase())
+            }
+            if (!word.extraMeaning.isNullOrBlank() && !seenValues.contains(word.extraMeaning.trim().lowercase())) {
+                list.add(BackCardDetail(6, "Extra Meaning", word.extraMeaning.trim(), false))
+                seenValues.add(word.extraMeaning.trim().lowercase())
+            }
+            if (!word.mnemonic.isNullOrBlank() && !seenValues.contains(word.mnemonic.trim().lowercase())) {
+                list.add(BackCardDetail(7, "Mnemonic / Trick", word.mnemonic.trim(), false))
+                seenValues.add(word.mnemonic.trim().lowercase())
+            }
+
+            // 3. Sort strictly by placeNum ascending
+            list.sortBy { it.placeNum }
+
+            // If none is marked as primary meaning and list is not empty, mark the first item
+            if (list.none { it.isPrimaryMeaning } && list.isNotEmpty()) {
+                val first = list.removeAt(0)
+                list.add(0, first.copy(isPrimaryMeaning = true))
+            }
+
+            list
+        }
+
+        // Center Details Section (Scrollable so ALL columns are completely visible)
+        val scrollState = rememberScrollState()
         Column(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .padding(vertical = 4.dp),
+                .padding(vertical = 4.dp, horizontal = 2.dp)
+                .verticalScroll(scrollState),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceEvenly
+            verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically)
         ) {
-            // Filter out place1 because place1 (the word) is exclusively shown on the front face
-            val backPlacesList = remember(customPlacesList, word.word) {
-                customPlacesList.filterNot { (label, value) ->
-                    val labelLower = label.lowercase().trim()
-                    val labelClean = labelLower.replace("_", "").replace(" ", "").replace("-", "")
-                    val valTrimmed = value.trim()
-                    val wordTrimmed = word.word.trim()
-
-                    // 1. Value matches front-face word directly (case-insensitive or alphanumeric match)
-                    val isValueMatch = valTrimmed.equals(wordTrimmed, ignoreCase = true) ||
-                            (valTrimmed.isNotBlank() && wordTrimmed.isNotBlank() &&
-                                valTrimmed.filter { it.isLetterOrDigit() }.equals(wordTrimmed.filter { it.isLetterOrDigit() }, ignoreCase = true))
-
-                    // 2. Explicit Place 1 label match
-                    val isPlace1Label = labelClean.startsWith("place1") ||
-                            labelLower.contains("place 1") ||
-                            labelLower.contains("place1") ||
-                            labelLower.contains("place_1") ||
-                            labelLower.contains("place-1") ||
-                            labelLower.contains("(place 1)") ||
-                            labelLower.contains("(place1)")
-
-                    // 3. Semantic label match for primary word/headword/term/vocabulary
-                    val isSemanticWordLabel = labelLower == "word" ||
-                            labelLower == "headword" ||
-                            labelLower == "vocabulary" ||
-                            labelLower == "term" ||
-                            labelLower == "target word" ||
-                            labelLower == "main word" ||
-                            labelLower == "english" ||
-                            labelLower == "english word" ||
-                            labelLower.startsWith("word ") ||
-                            labelLower.endsWith(" word")
-
-                    isValueMatch || isPlace1Label || isSemanticWordLabel
-                }
-            }
-
-            // Check if there is an explicit Place 2 item in backPlacesList
-            val hasExplicitPlace2 = remember(backPlacesList, word.meaning) {
-                backPlacesList.any { (label, value) ->
-                    val labelLower = label.lowercase().trim()
-                    val labelClean = labelLower.replace("_", "").replace(" ", "").replace("-", "")
-                    val isMeaningVal = word.meaning.isNotBlank() && value.trim().equals(word.meaning.trim(), ignoreCase = true)
-                    val isPlace2Label = labelClean.startsWith("place2") ||
-                            labelLower.contains("place 2") ||
-                            labelLower.contains("place2") ||
-                            labelLower.contains("place_2") ||
-                            labelLower.contains("place-2") ||
-                            labelLower.contains("meaning") ||
-                            labelLower.contains("definition") ||
-                            labelLower.contains("translation") ||
-                            labelLower.contains("bangla") ||
-                            labelLower.contains("bengali") ||
-                            labelLower.contains("অর্থ")
-                    isMeaningVal || isPlace2Label
-                }
-            }
-
-            if (backPlacesList.isNotEmpty()) {
-                // Dynamically show columns present in the uploaded course excel file
-                backPlacesList.forEachIndexed { index, (label, value) ->
-                    val isBengali = isBengaliText(value)
-                    val font = selectFontForText(value)
-                    val labelLower = label.lowercase().trim()
-                    val labelClean = labelLower.replace("_", "").replace(" ", "").replace("-", "")
-                    
-                    val isMeaningVal = word.meaning.isNotBlank() && value.trim().equals(word.meaning.trim(), ignoreCase = true)
-                    val isPlace2Explicit = labelClean.startsWith("place2") ||
-                            labelLower.contains("place 2") ||
-                            labelLower.contains("place2") ||
-                            labelLower.contains("place_2") ||
-                            labelLower.contains("place-2") ||
-                            labelLower.contains("meaning") ||
-                            labelLower.contains("definition") ||
-                            labelLower.contains("translation") ||
-                            labelLower.contains("bangla") ||
-                            labelLower.contains("bengali") ||
-                            labelLower.contains("অর্থ")
-
-                    // If an explicit Place 2 exists, match it; otherwise since Place 1 is strictly excluded, the first item is Place 2
-                    val isPlace2 = if (hasExplicitPlace2) (isMeaningVal || isPlace2Explicit) else (index == 0)
-
-                    // Place 4 or Place 5 detection (Forms, Synonyms, Derivatives, Sentences, etc.)
-                    val isPlace4or5 = labelLower.startsWith("place4") || labelLower.contains("place 4") ||
-                            labelLower.startsWith("place5") || labelLower.contains("place 5") ||
-                            labelLower.contains("synonym") || labelLower.contains("extra") ||
-                            labelLower.contains("example") || labelLower.contains("form") ||
-                            labelLower.contains("sentence")
-
-                    val displayLabel = run {
-                        var cleaned = label.trim()
-                        if (cleaned.contains(":")) cleaned = cleaned.substringAfter(":").trim()
-                        cleaned = cleaned.replace(Regex("""(?i)^place\s*\d+\s*[-_:]?\s*"""), "").trim()
-                        cleaned = cleaned.replace(Regex("""(?i)\s*\(place\s*\d+\)"""), "").trim()
-                        if (cleaned.isBlank() || (isPlace2 && cleaned.equals("word", ignoreCase = true))) {
-                            when {
-                                isPlace2 -> "Meaning"
-                                labelLower.contains("1") -> "Word"
-                                labelLower.contains("2") -> "Meaning"
-                                labelLower.contains("3") -> "Example"
-                                labelLower.contains("4") -> "Synonyms"
-                                labelLower.contains("5") -> "Forms"
-                                else -> label.trim()
-                            }
-                        } else cleaned
-                    }
+            if (backDetailsList.isNotEmpty()) {
+                backDetailsList.forEach { detail ->
+                    val isBengali = isBengaliText(detail.value)
+                    val font = selectFontForText(detail.value)
+                    val isMeaning = detail.isPrimaryMeaning
 
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 3.dp)
+                            .padding(vertical = 2.dp)
                     ) {
                         Text(
-                            text = displayLabel.uppercase(),
+                            text = detail.label.uppercase(),
                             fontFamily = PoppinsFontFamily,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
@@ -603,159 +697,27 @@ private fun BackFaceContent(
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = if (isPlace2) {
-                                AnnotatedString(value)
+                            text = if (isMeaning) {
+                                AnnotatedString(detail.value)
                             } else {
-                                // If place4/place5 contains place1's word, highlight it in red (RoseError)
-                                formatLineWithRedWord(value, word.word)
+                                formatLineWithRedWord(detail.value, word.word)
                             },
                             fontFamily = font,
-                            fontSize = if (isPlace2) 21.sp else if (isBengali) 16.sp else 14.sp,
-                            fontWeight = if (isPlace2) FontWeight.ExtraBold else FontWeight.Medium,
-                            color = if (isPlace2) EmeraldSuccess else SlateText,
+                            fontSize = if (isMeaning) 21.sp else if (isBengali) 16.sp else 14.sp,
+                            fontWeight = if (isMeaning) FontWeight.ExtraBold else FontWeight.Medium,
+                            color = if (isMeaning) EmeraldSuccess else SlateText,
                             textAlign = TextAlign.Center,
-                            lineHeight = if (isPlace2) 26.sp else 20.sp
+                            lineHeight = if (isMeaning) 26.sp else 20.sp
                         )
                     }
                 }
             } else {
-                // Default fallback when customPlacesJson is not present
-                if (word.meaning.isNotBlank()) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = "MEANING",
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = SlateLight,
-                            letterSpacing = 1.sp
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = word.meaning,
-                            fontFamily = selectFontForText(word.meaning),
-                            fontSize = 21.sp,
-                            fontWeight = FontWeight.Black,
-                            color = EmeraldSuccess,
-                            textAlign = TextAlign.Center,
-                            lineHeight = 26.sp
-                        )
-                    }
-                }
-
-                if (!word.example.isNullOrBlank()) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp)
-                    ) {
-                        Text(
-                            text = "EXAMPLE SENTENCE",
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = SlateLight,
-                            letterSpacing = 1.sp
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = formatLineWithRedWord(word.example, word.word),
-                            fontFamily = selectFontForText(word.example),
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = SlateText,
-                            textAlign = TextAlign.Center,
-                            lineHeight = 19.sp
-                        )
-                    }
-                }
-
-                if (!word.extraWord.isNullOrBlank()) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp)
-                    ) {
-                        Text(
-                            text = "DERIVATIVE / FORMS",
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = SlateLight,
-                            letterSpacing = 1.sp
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = formatLineWithRedWord(word.extraWord, word.word),
-                            fontFamily = selectFontForText(word.extraWord),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            textAlign = TextAlign.Center,
-                            lineHeight = 17.sp
-                        )
-                    }
-                }
-
-                if (!word.synonyms.isNullOrBlank()) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp)
-                    ) {
-                        Text(
-                            text = "SYNONYMS",
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = SlateLight,
-                            letterSpacing = 1.sp
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = formatLineWithRedWord(word.synonyms, word.word),
-                            fontFamily = selectFontForText(word.synonyms),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            textAlign = TextAlign.Center,
-                            lineHeight = 17.sp
-                        )
-                    }
-                }
-
-                if (!word.mnemonic.isNullOrBlank()) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp)
-                    ) {
-                        Text(
-                            text = "MNEMONIC / TRICK",
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = SlateLight,
-                            letterSpacing = 1.sp
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = word.mnemonic,
-                            fontFamily = selectFontForText(word.mnemonic),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            fontStyle = FontStyle.Italic,
-                            color = IndigoPrimary,
-                            textAlign = TextAlign.Center,
-                            lineHeight = 16.sp
-                        )
-                    }
-                }
+                Text(
+                    text = "No additional details available",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 13.sp,
+                    color = SlateLight
+                )
             }
         }
 
@@ -807,21 +769,11 @@ private fun TopBarSection(
             )
         }
 
-        // Actions & Course Name
+        // Actions (Top-right corner)
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (courseName.isNotBlank()) {
-                Text(
-                    text = courseName,
-                    fontFamily = PoppinsFontFamily,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = palette.textMuted
-                )
-            }
-
             if (showSpeakButton) {
                 // Speak Word Button
                 Box(
