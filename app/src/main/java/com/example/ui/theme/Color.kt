@@ -34,3 +34,22 @@ val Purple40 = IndigoPrimary
 val PurpleGrey40 = Color(0xFF625b71)
 val Pink40 = Color(0xFF7D5260)
 
+fun normalizeWordStatus(rawStatus: String?): String {
+    val s = rawStatus?.lowercase()?.trim() ?: return "unrated"
+    return when {
+        s == "know" || s == "known" || s == "learned" || s.contains("know") && !s.contains("dont") && !s.contains("not") -> "know"
+        s == "dont_know" || s == "dontknow" || s == "don't know" || s == "unknown" || s.contains("dont") || s.contains("don't") -> "dont_know"
+        s == "confusion" || s == "confused" || s.contains("confus") -> "confusion"
+        else -> "unrated"
+    }
+}
+
+fun getWordStatusColor(rawStatus: String?, isDark: Boolean = false): Color {
+    return when (normalizeWordStatus(rawStatus)) {
+        "know" -> EmeraldSuccess
+        "dont_know" -> RoseError
+        "confusion" -> AmberWarning
+        else -> if (isDark) Color(0xFFA5B4FC) else IndigoPrimary
+    }
+}
+

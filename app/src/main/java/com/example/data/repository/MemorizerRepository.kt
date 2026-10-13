@@ -357,13 +357,8 @@ class MemorizerRepository(
     suspend fun recordWordQuizAnswer(wordId: String, isCorrect: Boolean, userId: String = "1235") = withContext(Dispatchers.IO) {
         val quizStatus = if (isCorrect) "correct" else "incorrect"
         database.vocabularyDao().recordQuizAttempt(wordId, quizStatus, isCorrect)
-
-        // Correct option marks word as 'know', Incorrect option marks as 'dont_know'
-        val ratingStatus = if (isCorrect) "know" else "dont_know"
-        database.vocabularyDao().updateWordStatus(wordId, ratingStatus)
-
-        // Sync and refresh stats for Flashcard and Homepage
-        refreshProgressAndSync(userId)
+        // Quiz answers maintain their own dedicated stats (quizCorrectCount, quizIncorrectCount, lastQuizStatus)
+        // and do not change flashcard rating status (know/confusion/dont_know/unrated)
     }
 
     suspend fun addQuestionBankItem(item: QuestionBankEntity) = withContext(Dispatchers.IO) {

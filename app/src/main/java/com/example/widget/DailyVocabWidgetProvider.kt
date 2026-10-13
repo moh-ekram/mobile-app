@@ -52,14 +52,27 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
 
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
-        if (intent.action == ACTION_NEXT_WORD) {
-            updateAllWidgets(context)
+        when (intent.action) {
+            ACTION_NEXT_WORD -> {
+                updateAllWidgets(context, direction = 1)
+            }
+            ACTION_PREV_WORD -> {
+                updateAllWidgets(context, direction = -1)
+            }
+            ACTION_REVEAL_MEANING -> {
+                updateAllWidgets(context, direction = 0, forceRevealMeaning = true)
+            }
+            else -> {
+                updateAllWidgets(context)
+            }
         }
         startFrequentTicker(context)
     }
 
     companion object {
         const val ACTION_NEXT_WORD = "com.example.widget.ACTION_NEXT_WORD"
+        const val ACTION_PREV_WORD = "com.example.widget.ACTION_PREV_WORD"
+        const val ACTION_REVEAL_MEANING = "com.example.widget.ACTION_REVEAL_MEANING"
         const val PREFS_NAME = "widget_prefs"
         const val KEY_WIDGET_COURSE_ID = "widget_course_id"
         const val KEY_WIDGET_COURSE_IDS = "widget_course_ids"
@@ -69,6 +82,9 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
         const val KEY_ROTATE_10S = "widget_rotate_10s"
         const val KEY_ROTATE_ON_HOME_RETURN = "widget_rotate_on_home_return"
         const val KEY_LAST_SHOWN_WORD_ID = "last_widget_word_id"
+        const val KEY_PLACE2_DELAY_SECONDS = "widget_place2_delay_seconds"
+
+        private var place2Job: Job? = null
 
         fun getSelectedCourseIds(context: Context): Set<String> {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -121,7 +137,7 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
                     val is10sEnabled = prefs.getBoolean(KEY_ROTATE_10S, true)
                     if (is10sEnabled) {
                         try {
-                            updateAllWidgets(appContext)
+                            updateAllWidgets(appContext, direction = 1)
                         } catch (_: Exception) {}
                     }
                 }
@@ -134,17 +150,83 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
             tickerJob = null
         }
 
-        fun updateAllWidgets(context: Context) {
+        fun updateAllWidgets(
+            context: Context,
+            direction: Int = 0,
+            forceRevealMeaning: Boolean = false
+        ) {
             try {
                 val appWidgetManager = AppWidgetManager.getInstance(context) ?: return
                 val thisWidget = ComponentName(context, DailyVocabWidgetProvider::class.java)
                 val allWidgetIds = appWidgetManager.getAppWidgetIds(thisWidget) ?: return
                 for (widgetId in allWidgetIds) {
-                    updateAppWidget(context, appWidgetManager, widgetId)
+                    updateAppWidget(context, appWidgetManager, widgetId, direction, forceRevealMeaning)
+                }
+
+                val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                val delaySec = prefs.getFloat(KEY_PLACE2_DELAY_SECONDS, 1.0f)
+                if (!forceRevealMeaning && delaySec > 0f) {
+                    place2Job?.cancel()
+                    place2Job = CoroutineScope(Dispatchers.Default).launch {
+                        delay((delaySec * 1000).toLong())
+                        try {
+                            val mgr = AppWidgetManager.getInstance(context) ?: return@launch
+                            val ids = mgr.getAppWidgetIds(thisWidget) ?: return@launch
+                            for (wid in ids) {
+                                updateAppWidget(context, mgr, wid, direction = 0, forceRevealMeaning = true)
+                            }
+                        } catch (_: Exception) {}
+                    }
                 }
             } catch (e: Exception) {
                 android.util.Log.e("DailyVocabWidget", "Error updating all widgets", e)
             }
+        }
+
+        private fun getWordStatusColorInt(rawStatus: String?): Int {
+            val normalized = com.example.ui.theme.normalizeWordStatus(rawStatus)
+            return when (normalized) {
+                "know" -> Color.parseColor("#059669") // EmeraldSuccess
+                "dont_know" -> Color.parseColor("#E11D48") // RoseError
+                "confusion" -> Color.parseColor("#D97706") // AmberWarning
+                else -> Color.parseColor("#4F46E5") // IndigoPrimary default
+            }
+        }
+
+        private fun extractPlace1AndPlace2(word: com.example.data.model.VocabularyWordEntity?): Pair<String, String> {
+            if (word == null) {
+                return Pair("Ephemeral", "Lasting for a very short time; fleeting or transient.")
+            }
+            var place1Val: String? = null
+            var place2Val: String? = null
+
+            if (!word.customPlacesJson.isNullOrBlank()) {
+                try {
+                    val json = org.json.JSONObject(word.customPlacesJson)
+                    val keys = json.keys()
+                    while (keys.hasNext()) {
+                        val k = keys.next()
+                        val v = json.optString(k, "").trim()
+                        if (v.isNotBlank()) {
+                            val placeNum = com.example.ui.components.extractPlaceNumberFromLabel(k)
+                            val kClean = k.lowercase().replace("_", "").replace(" ", "").replace("-", "")
+                            if (place1Val == null && (placeNum == 1 || kClean.startsWith("place1") || kClean == "word")) {
+                                place1Val = v
+                            } else if (place2Val == null && (placeNum == 2 || kClean.startsWith("place2") || kClean == "meaning" || kClean == "definition")) {
+                                place2Val = v
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
+            val finalP1 = place1Val ?: word.word.ifBlank { "Ephemeral" }
+            val finalP2 = place2Val ?: word.meaning.ifBlank { "Lasting for a very short time; fleeting or transient." }
+
+            return Pair(
+                com.example.ui.components.capitalizeEachWord(finalP1),
+                com.example.ui.components.capitalizeEachWord(finalP2)
+            )
         }
 
         data class ResponsiveWidgetConfig(
@@ -311,20 +393,24 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
 
             views.setInt(R.id.widget_word_title, "setMaxLines", config.maxTitleLines)
             views.setInt(R.id.widget_word_meaning, "setMaxLines", config.maxMeaningLines)
+            views.setInt(R.id.widget_meaning_placeholder, "setMaxLines", config.maxMeaningLines)
             views.setInt(R.id.widget_word_example, "setMaxLines", config.maxExampleLines)
 
             views.setTextViewTextSize(R.id.widget_word_title, TypedValue.COMPLEX_UNIT_SP, finalTitleSp)
             views.setTextViewTextSize(R.id.widget_word_meaning, TypedValue.COMPLEX_UNIT_SP, finalMeaningSp)
+            views.setTextViewTextSize(R.id.widget_meaning_placeholder, TypedValue.COMPLEX_UNIT_SP, finalMeaningSp)
             views.setTextViewTextSize(R.id.widget_word_example, TypedValue.COMPLEX_UNIT_SP, finalExampleSp)
             views.setTextViewTextSize(R.id.widget_course_title, TypedValue.COMPLEX_UNIT_SP, finalCourseSp)
-            views.setTextViewTextSize(R.id.widget_badge, TypedValue.COMPLEX_UNIT_SP, finalBadgeSp)
             views.setTextViewTextSize(R.id.widget_next_button, TypedValue.COMPLEX_UNIT_SP, finalNextSp)
+            views.setTextViewTextSize(R.id.widget_prev_button, TypedValue.COMPLEX_UNIT_SP, finalNextSp)
         }
 
         fun updateAppWidget(
             context: Context,
             appWidgetManager: AppWidgetManager,
-            appWidgetId: Int
+            appWidgetId: Int,
+            direction: Int = 0,
+            forceRevealMeaning: Boolean = false
         ) {
             val scope = CoroutineScope(Dispatchers.IO)
             scope.launch {
@@ -352,7 +438,6 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
                     if (optMaxH > 0) optMaxH else optMinH
                 }
 
-                // If resized by user, launchers update min/max dimensions. Take maximum resolved bounds so font scales up appropriately.
                 val resolvedW = maxOf(rawWidthDp, optMinW, optMaxW)
                 val resolvedH = maxOf(rawHeightDp, optMinH, optMaxH)
 
@@ -368,7 +453,6 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
                     val courseMap = allCourses.associateBy { it.id }
                     val allWords = db.vocabularyDao().getAllWordsList()
 
-                    // Robust Multi-Course Filtering: filter words belonging to any of the selected courses
                     val courseWords = if (selectedCourseIds.isNotEmpty()) {
                         val filtered = allWords.filter { it.courseId in selectedCourseIds }
                         if (filtered.isNotEmpty()) filtered else allWords
@@ -376,7 +460,6 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
                         allWords
                     }
 
-                    // Filter by multi-status tags (know, confusion, dont_know, unrated, flagged)
                     val filteredByTag = if (selectedTags.isNotEmpty()) {
                         courseWords.filter { word ->
                             selectedTags.any { tag ->
@@ -390,7 +473,6 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
                         courseWords
                     }
 
-                    // Strict fallback hierarchy guarantees candidate list is NEVER empty
                     val finalCandidates = when {
                         filteredByTag.isNotEmpty() -> filteredByTag
                         courseWords.isNotEmpty() -> courseWords
@@ -398,13 +480,22 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
                         else -> com.example.data.repository.SampleData.sampleWords
                     }
 
-                    // Sequential cycle or non-repeating selection
+                    // Cycle according to direction (-1 = prev, 1 = next, 0 = keep current / default)
                     val currentIndex = finalCandidates.indexOfFirst { it.id == lastShownWordId }
                     val word = if (finalCandidates.size > 1) {
-                        if (currentIndex >= 0) {
-                            finalCandidates[(currentIndex + 1) % finalCandidates.size]
-                        } else {
-                            finalCandidates.random()
+                        when {
+                            direction > 0 -> {
+                                if (currentIndex >= 0) finalCandidates[(currentIndex + 1) % finalCandidates.size]
+                                else finalCandidates.first()
+                            }
+                            direction < 0 -> {
+                                if (currentIndex > 0) finalCandidates[currentIndex - 1]
+                                else finalCandidates.last()
+                            }
+                            else -> {
+                                if (currentIndex >= 0) finalCandidates[currentIndex]
+                                else finalCandidates.first()
+                            }
                         }
                     } else {
                         finalCandidates.firstOrNull()
@@ -421,34 +512,27 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
                         "MEMORIZER"
                     }
 
-                    val displayWord = word?.word ?: "Ephemeral"
-                    val displayMeaning = word?.meaning ?: "Lasting for a very short time; fleeting or transient."
+                    val (displayPlace1, displayPlace2) = extractPlace1AndPlace2(word)
+                    val place1ColorInt = getWordStatusColorInt(word?.status)
 
-                    // Tag details & matching color for Place 1
-                    val (tagLabel, tagColorInt) = when (word?.status) {
-                        "know" -> Pair("KNOW", Color.parseColor("#059669")) // Emerald
-                        "confusion" -> Pair("CONFUSION", Color.parseColor("#D97706")) // Amber
-                        "dont_know" -> Pair("DON'T KNOW", Color.parseColor("#E11D48")) // Rose
-                        else -> {
-                            val grp = word?.group?.trim() ?: ""
-                            val groupLabel = if (grp.isNotBlank()) {
-                                if (grp.all { it.isDigit() }) "GROUP $grp" else grp.uppercase()
-                            } else "UNRATED"
-                            Pair(groupLabel, Color.parseColor("#4F46E5")) // Indigo
-                        }
-                    }
-
-                    // Top: Small course name & tag badge
+                    // Top: Course title; status tag badge is hidden per user request
                     views.setTextViewText(R.id.widget_course_title, displayCourse)
-                    views.setTextViewText(R.id.widget_badge, tagLabel)
-                    views.setTextColor(R.id.widget_badge, tagColorInt)
+                    views.setViewVisibility(R.id.widget_badge, View.GONE)
 
-                    // Place 1 (Word): text color matches tag color
-                    views.setTextViewText(R.id.widget_word_title, displayWord)
-                    views.setTextColor(R.id.widget_word_title, tagColorInt)
+                    // Place 1 (Word): Formatted and colorized according to selected word status
+                    views.setTextViewText(R.id.widget_word_title, displayPlace1)
+                    views.setTextColor(R.id.widget_word_title, place1ColorInt)
 
-                    // Place 2 (Meaning)
-                    views.setTextViewText(R.id.widget_word_meaning, displayMeaning)
+                    // Place 2 (Meaning) with ViewFlipper animation & delay
+                    views.setTextViewText(R.id.widget_word_meaning, displayPlace2)
+                    val delaySec = prefs.getFloat(KEY_PLACE2_DELAY_SECONDS, 1.0f)
+                    val shouldRevealNow = forceRevealMeaning || delaySec <= 0f
+
+                    if (shouldRevealNow) {
+                        views.setDisplayedChild(R.id.widget_meaning_flipper, 1)
+                    } else {
+                        views.setDisplayedChild(R.id.widget_meaning_flipper, 0)
+                    }
 
                     // Apply fully responsive typography, paddings, line counts & spacing
                     applyResponsiveStyling(context, views, config, prefFontSize)
@@ -474,7 +558,19 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
                     )
                     views.setOnClickPendingIntent(R.id.widget_root, openAppPendingIntent)
 
-                    // Click intent for "Next" button -> cycles to another word
+                    // Click intent for "Prev" button -> cycles to previous word
+                    val prevIntent = Intent(context, DailyVocabWidgetProvider::class.java).apply {
+                        action = ACTION_PREV_WORD
+                    }
+                    val prevPendingIntent = PendingIntent.getBroadcast(
+                        context,
+                        3,
+                        prevIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                    views.setOnClickPendingIntent(R.id.widget_prev_button, prevPendingIntent)
+
+                    // Click intent for "Next" button -> cycles to next word
                     val nextIntent = Intent(context, DailyVocabWidgetProvider::class.java).apply {
                         action = ACTION_NEXT_WORD
                     }
@@ -486,16 +582,31 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
                     )
                     views.setOnClickPendingIntent(R.id.widget_next_button, nextPendingIntent)
 
+                    // Click intent for meaning placeholder -> instantly reveal meaning
+                    val revealIntent = Intent(context, DailyVocabWidgetProvider::class.java).apply {
+                        action = ACTION_REVEAL_MEANING
+                    }
+                    val revealPendingIntent = PendingIntent.getBroadcast(
+                        context,
+                        2,
+                        revealIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                    views.setOnClickPendingIntent(R.id.widget_meaning_placeholder, revealPendingIntent)
+
+                    // Tapping word title advances to next word
+                    views.setOnClickPendingIntent(R.id.widget_word_title, nextPendingIntent)
+
                     appWidgetManager.updateAppWidget(appWidgetId, views)
                 } catch (e: Exception) {
                     try {
                         val views = RemoteViews(context.packageName, R.layout.widget_daily_vocab)
                         views.setTextViewText(R.id.widget_course_title, "MEMORIZER")
                         views.setTextViewText(R.id.widget_word_title, "Ephemeral")
-                        views.setTextColor(R.id.widget_word_title, Color.parseColor("#4F46E5"))
+                        views.setTextColor(R.id.widget_word_title, Color.parseColor("#1E293B"))
                         views.setTextViewText(R.id.widget_word_meaning, "Lasting for a very short time; fleeting or transient.")
-                        views.setTextViewText(R.id.widget_badge, "DAILY VOCAB")
-                        views.setTextColor(R.id.widget_badge, Color.parseColor("#4F46E5"))
+                        views.setViewVisibility(R.id.widget_badge, View.GONE)
+                        views.setDisplayedChild(R.id.widget_meaning_flipper, 1)
                         views.setTextViewText(R.id.widget_word_example, "Tap to open Memorizer")
 
                         applyResponsiveStyling(context, views, config, prefFontSize)

@@ -175,6 +175,126 @@ object SampleData {
             status = "unrated",
             courseId = "course_gre_essential"
         ),
+        VocabularyWordEntity(
+            id = "word_gre_13",
+            word = "Allusion",
+            meaning = "পরোক্ষ ইঙ্গিত, উল্লেখ; An indirect or passing reference",
+            group = "3",
+            synonyms = "Reference, hint, intimation, mention, insinuation",
+            extraWord = "Allude (verb): The author alludes to ancient mythology.",
+            example = "The poem contains an allusion to Shakespeare's Hamlet.",
+            mnemonic = "Allusion = a reference to something else.",
+            status = "unrated",
+            courseId = "course_gre_essential"
+        ),
+        VocabularyWordEntity(
+            id = "word_gre_14",
+            word = "Illusion",
+            meaning = "বিভ্রম, অলীক কল্পনা; A deceptive appearance or impression",
+            group = "3",
+            synonyms = "Delusion, hallucination, mirage, fantasy, chimera",
+            extraWord = "Illusory (adj): The oasis was merely an illusory mirage.",
+            example = "Mirrors on the wall created an illusion of vast space in the tiny room.",
+            mnemonic = "Illusion = tricks the eyes (ill-vision).",
+            status = "unrated",
+            courseId = "course_gre_essential"
+        ),
+        VocabularyWordEntity(
+            id = "word_gre_15",
+            word = "Complement",
+            meaning = "পরিপূরক, সম্পূর্ণ করা; A thing that completes or brings to perfection",
+            group = "4",
+            synonyms = "Counterpart, addition, companion, supplement",
+            extraWord = "Complementary (adj): Their distinct skill sets were complementary.",
+            example = "The spicy sauce was the perfect complement to the savory grilled meat.",
+            mnemonic = "Comple-ment completes the whole.",
+            status = "unrated",
+            courseId = "course_gre_essential"
+        ),
+        VocabularyWordEntity(
+            id = "word_gre_16",
+            word = "Compliment",
+            meaning = "প্রশংসা, তারিফ করা; A polite expression of praise or admiration",
+            group = "4",
+            synonyms = "Praise, accolade, commendation, tribute, flattery",
+            extraWord = "Complimentary (adj): He gave her a complimentary review.",
+            example = "She received a heartfelt compliment from her supervisor on the project.",
+            mnemonic = "Compl-I-ment: 'I' love praise.",
+            status = "unrated",
+            courseId = "course_gre_essential"
+        ),
+        VocabularyWordEntity(
+            id = "word_gre_17",
+            word = "Elicit",
+            meaning = "বের করে আনা, উদ্ঘাটন করা; Evoke or draw out a reaction or fact",
+            group = "4",
+            synonyms = "Evoke, extract, obtain, deduce, draw out",
+            extraWord = "Elicitation (noun): The detective's skillful elicitation of the truth.",
+            example = "The comedian's opening joke failed to elicit any laughter from the audience.",
+            mnemonic = "Elicit = e-lect truth out into the open.",
+            status = "unrated",
+            courseId = "course_gre_essential"
+        ),
+        VocabularyWordEntity(
+            id = "word_gre_18",
+            word = "Illicit",
+            meaning = "অবৈধ, নীতিবহির্ভূত; Forbidden by law, rules, or custom",
+            group = "4",
+            synonyms = "Illegal, unlawful, illegitimate, criminal, banned",
+            extraWord = "Illicitness (noun): The illicitness of the contraband ring.",
+            example = "The police cracked down on the illicit trade of endangered wildlife.",
+            mnemonic = "Il-licit = not legitimate or legal.",
+            status = "unrated",
+            courseId = "course_gre_essential"
+        ),
+        VocabularyWordEntity(
+            id = "word_gre_19",
+            word = "Principal",
+            meaning = "প্রধান, মূল ব্যক্তি বা মূলধন; First in order of importance; main",
+            group = "5",
+            synonyms = "Main, chief, primary, dominant, foremost",
+            extraWord = "Principally (adv): The town is principally known for agriculture.",
+            example = "The principal reason for the meeting was to discuss budget allocation.",
+            mnemonic = "The school principal is your pal.",
+            status = "unrated",
+            courseId = "course_gre_essential"
+        ),
+        VocabularyWordEntity(
+            id = "word_gre_20",
+            word = "Principle",
+            meaning = "নীতি, মৌলিক সত্য বা সূত্র; A fundamental truth or proposition",
+            group = "5",
+            synonyms = "Rule, doctrine, tenet, code, ethos",
+            extraWord = "Principled (adj): She was a principled leader with moral conviction.",
+            example = "He refused to compromise his ethical principles for financial gain.",
+            mnemonic = "Principle ends in 'le', like rule.",
+            status = "unrated",
+            courseId = "course_gre_essential"
+        ),
+        VocabularyWordEntity(
+            id = "word_gre_21",
+            word = "Affect",
+            meaning = "প্রভাবিত করা; Have an effect on; make a difference to",
+            group = "5",
+            synonyms = "Influence, impact, alter, modify, sway",
+            extraWord = "Affective (adj): Dealing with affective emotional states.",
+            example = "The damp weather began to affect his arthritic joints.",
+            mnemonic = "Affect is an Action (verb).",
+            status = "unrated",
+            courseId = "course_gre_essential"
+        ),
+        VocabularyWordEntity(
+            id = "word_gre_22",
+            word = "Effect",
+            meaning = "প্রভাব, ফল; A change which is a result or consequence of an action",
+            group = "5",
+            synonyms = "Result, consequence, outcome, aftermath, impact",
+            extraWord = "Effective (adj): An effective solution to the traffic congestion.",
+            example = "The new regulation had an immediate positive effect on local safety.",
+            mnemonic = "Effect is the End result (noun).",
+            status = "unrated",
+            courseId = "course_gre_essential"
+        ),
 
         // Course 2: IELTS Academic Core
         VocabularyWordEntity(

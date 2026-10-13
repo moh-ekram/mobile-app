@@ -41,6 +41,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.example.data.model.ArticleEntity
 import com.example.data.model.CourseEntity
 import com.example.data.model.UserProgressEntity
 import com.example.data.model.UserSession
@@ -61,6 +62,8 @@ fun HomeScreen(
     onSelectGroup: (String?) -> Unit,
     onSelectStatus: (String) -> Unit = {},
     onSelectFlagged: () -> Unit = {},
+    articles: List<ArticleEntity> = emptyList(),
+    onSelectArticle: (ArticleEntity) -> Unit = {},
     widgetWord: VocabularyWordEntity? = null,
     widgetCategory: String = "all",
     onSetWidgetCategory: (String) -> Unit = {},
@@ -178,6 +181,9 @@ fun HomeScreen(
     val palette = LocalAppPalette.current
 
     var showCourseDialog by remember { mutableStateOf(false) }
+    var featuredArticleIndex by remember(articles) {
+        mutableIntStateOf(if (articles.isNotEmpty()) kotlin.random.Random.nextInt(articles.size) else 0)
+    }
 
     // Course Selection Dialog Popup
     if (showCourseDialog) {
@@ -511,6 +517,156 @@ fun HomeScreen(
                     modifier = Modifier.weight(1f),
                     onClick = { onNavigate("article_reader") }
                 )
+            }
+        }
+
+        // Featured Article Section (Randomly featured article)
+        if (articles.isNotEmpty()) {
+            val featuredArticle = articles.getOrNull(featuredArticleIndex) ?: articles.firstOrNull()
+
+            if (featuredArticle != null) {
+                item {
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF8FAFC)
+                        ),
+                        border = BorderStroke(
+                            1.dp,
+                            if (palette.isDark) Color(0xFF334155) else Color(0xFFE2E8F0)
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                            .clickable {
+                                onSelectArticle(featuredArticle)
+                                onNavigate("article_reader")
+                            }
+                            .testTag("home_featured_article_card")
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Header row: Badge + Shuffle/Next icon
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = IndigoPrimary.copy(alpha = 0.12f)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.AutoAwesome,
+                                            contentDescription = null,
+                                            tint = IndigoPrimary,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Text(
+                                            text = "FEATURED ARTICLE",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = PoppinsFontFamily,
+                                            color = IndigoPrimary,
+                                            letterSpacing = 0.5.sp
+                                        )
+                                    }
+                                }
+
+                                if (articles.size > 1) {
+                                    IconButton(
+                                        onClick = {
+                                            featuredArticleIndex = (featuredArticleIndex + 1) % articles.size
+                                        },
+                                        modifier = Modifier.size(26.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Refresh,
+                                            contentDescription = "Shuffle article",
+                                            tint = palette.textMuted,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Article Title
+                            val isTitleBengali = isBengaliText(featuredArticle.title)
+                            Text(
+                                text = featuredArticle.title,
+                                fontFamily = if (isTitleBengali) AikyaFontFamily else PoppinsFontFamily,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = palette.textPrimary,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+
+                            // Article Excerpt Snippet
+                            val cleanSnippet = remember(featuredArticle.content) {
+                                featuredArticle.content
+                                    .replace(Regex("<[^>]*>"), " ")
+                                    .replace(Regex("\\s+"), " ")
+                                    .trim()
+                            }
+                            if (cleanSnippet.isNotBlank()) {
+                                val isSnippetBengali = isBengaliText(cleanSnippet)
+                                Text(
+                                    text = cleanSnippet,
+                                    fontFamily = if (isSnippetBengali) AikyaFontFamily else PoppinsFontFamily,
+                                    fontSize = 12.sp,
+                                    color = palette.textMuted,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    lineHeight = 17.sp
+                                )
+                            }
+
+                            // Footer: Author & Read Now Button
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val readingTime = (featuredArticle.wordCount / 180).coerceAtLeast(1)
+                                Text(
+                                    text = "${featuredArticle.author.ifBlank { "Memorizer Reader" }} • $readingTime min read",
+                                    fontSize = 10.5.sp,
+                                    color = palette.textMuted,
+                                    fontFamily = PoppinsFontFamily
+                                )
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                ) {
+                                    Text(
+                                        text = "Read Now",
+                                        fontSize = 11.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = IndigoPrimary,
+                                        fontFamily = PoppinsFontFamily
+                                    )
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                        contentDescription = null,
+                                        tint = IndigoPrimary,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 

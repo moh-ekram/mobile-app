@@ -24,7 +24,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="GRE VOCABULARY"
+            android:text="VOCABULARY"
             android:textSize="9.5sp"
             android:textStyle="bold"
             android:textColor="#64748B"
@@ -32,21 +32,26 @@
             android:ellipsize="end"
             android:includeFontPadding="false" />
 
-        <!-- Tag Badge -->
+        <!-- Status Tag Badge (Hidden per user request) -->
         <TextView
             android:id="@+id/widget_badge"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="KNOW"
-            android:textSize="8.5sp"
+            android:visibility="gone" />
+
+        <!-- Previous Button -->
+        <TextView
+            android:id="@+id/widget_prev_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="◀"
+            android:textSize="10.5sp"
             android:textStyle="bold"
-            android:textColor="#059669"
-            android:background="@drawable/widget_badge_bg"
-            android:paddingLeft="5dp"
-            android:paddingRight="5dp"
-            android:paddingTop="1.5dp"
-            android:paddingBottom="1.5dp"
-            android:layout_marginEnd="6dp"
+            android:textColor="#6366F1"
+            android:paddingLeft="6dp"
+            android:paddingRight="6dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
             android:includeFontPadding="false" />
 
         <!-- Next Button -->
@@ -54,14 +59,14 @@
             android:id="@+id/widget_next_button"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Next ➔"
+            android:text="Next ▶"
             android:textSize="10.5sp"
             android:textStyle="bold"
             android:textColor="#4F46E5"
-            android:paddingLeft="5dp"
+            android:paddingLeft="4dp"
             android:paddingRight="2dp"
-            android:paddingTop="1dp"
-            android:paddingBottom="1dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
             android:includeFontPadding="false" />
     </LinearLayout>
 
@@ -84,24 +89,46 @@
             android:text="Ephemeral"
             android:textSize="17sp"
             android:textStyle="bold"
-            android:textColor="#059669"
+            android:textColor="#1E293B"
             android:maxLines="2"
             android:ellipsize="end"
             android:includeFontPadding="false" />
 
-        <!-- Place 2: Meaning -->
-        <TextView
-            android:id="@+id/widget_word_meaning"
+        <!-- Place 2: Meaning (Inside ViewFlipper with fade_in transition animation) -->
+        <ViewFlipper
+            android:id="@+id/widget_meaning_flipper"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
-            android:text="Lasting for a very short time; fleeting or transient."
-            android:textSize="11.5sp"
-            android:textColor="#334155"
-            android:maxLines="3"
-            android:ellipsize="end"
-            android:lineSpacingMultiplier="1.15"
-            android:includeFontPadding="false" />
+            android:inAnimation="@android:anim/fade_in">
+
+            <!-- Child 0: Guessing / Waiting Placeholder -->
+            <TextView
+                android:id="@+id/widget_meaning_placeholder"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="🤔 Tap to reveal meaning..."
+                android:textSize="11sp"
+                android:textStyle="italic"
+                android:textColor="#94A3B8"
+                android:maxLines="2"
+                android:ellipsize="end"
+                android:includeFontPadding="false" />
+
+            <!-- Child 1: The Meaning (Place 2) -->
+            <TextView
+                android:id="@+id/widget_word_meaning"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="Lasting for a very short time; fleeting or transient."
+                android:textSize="11.5sp"
+                android:textColor="#334155"
+                android:maxLines="3"
+                android:ellipsize="end"
+                android:lineSpacingMultiplier="1.15"
+                android:includeFontPadding="false" />
+        </ViewFlipper>
 
         <!-- Extra: Example or note -->
         <TextView

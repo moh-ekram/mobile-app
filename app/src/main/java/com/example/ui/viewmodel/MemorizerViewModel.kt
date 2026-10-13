@@ -126,6 +126,10 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
     val isRefreshingDriveCourses = MutableStateFlow(false)
     val downloadingCourseFileIds = MutableStateFlow<Set<String>>(emptySet())
 
+    // Google Drive Question Banks Catalog (Folder: 1DMmfgwslw7oEdZDm-moxDJRXQ3QGdd75)
+    val driveQBFiles = MutableStateFlow<List<DiscoveredDriveFile>>(GoogleDriveSyncService.DEFAULT_FALLBACK_DRIVE_QB_FILES)
+    val isRefreshingDriveQB = MutableStateFlow(false)
+
     fun refreshDriveCoursesList() {
         viewModelScope.launch {
             isRefreshingDriveCourses.value = true
@@ -136,6 +140,19 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
                 }
             } catch (_: Exception) {}
             isRefreshingDriveCourses.value = false
+        }
+    }
+
+    fun refreshDriveQBList() {
+        viewModelScope.launch {
+            isRefreshingDriveQB.value = true
+            try {
+                val list = GoogleDriveSyncService.fetchFolderFileList(GoogleDriveSyncService.DEFAULT_QB_DRIVE_FOLDER_ID)
+                if (list.isNotEmpty()) {
+                    driveQBFiles.value = list
+                }
+            } catch (_: Exception) {}
+            isRefreshingDriveQB.value = false
         }
     }
 
@@ -179,6 +196,7 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
             }
         }
         refreshDriveCoursesList()
+        refreshDriveQBList()
     }
 
     fun toggleCourseSelection(courseId: String) {
@@ -301,6 +319,29 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
                 }
             }.onFailure { err ->
                 _statusMessage.value = "Failed to download ${item.title}: ${err.message}"
+            }
+        }
+    }
+
+    fun downloadAndAddDriveQB(item: DiscoveredDriveFile) {
+        val fid = item.fileId
+        if (fid in downloadingCourseFileIds.value) return
+        downloadingCourseFileIds.value = downloadingCourseFileIds.value + fid
+
+        viewModelScope.launch {
+            _statusMessage.value = "Downloading ${item.title} for Question Bank..."
+            try {
+                val downloaded = GoogleDriveSyncService.downloadSingleDriveFile(item)
+                val result = repository.importQuestionBankFromBytes(downloaded.bytes, downloaded.fileName, clearExisting = false)
+                downloadingCourseFileIds.value = downloadingCourseFileIds.value - fid
+                result.onSuccess { count ->
+                    _statusMessage.value = "${item.title.substringBeforeLast(".")} added to Question Bank ($count questions)!"
+                }.onFailure { err ->
+                    _statusMessage.value = "Failed to add ${item.title}: ${err.message}"
+                }
+            } catch (e: Exception) {
+                downloadingCourseFileIds.value = downloadingCourseFileIds.value - fid
+                _statusMessage.value = "Failed to download ${item.title}: ${e.message}"
             }
         }
     }

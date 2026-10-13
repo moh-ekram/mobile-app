@@ -2068,7 +2068,7 @@ class BackupManager(private val context: Context, private val database: AppDatab
             notifObj.put("sound_enabled", notifPrefs.getBoolean(NotificationHelper.KEY_SOUND_ENABLED, true))
             sObj.put("notification_preferences", notifObj)
 
-            // Game Stats & Accuracy Ratio Backup (Column Match, Archer Aim, Quiz Test)
+            // Game Stats & Accuracy Ratio Backup (Quiz Test)
             val cmPrefs = context.getSharedPreferences("column_match_stats_prefs", Context.MODE_PRIVATE)
             val archerPrefs = context.getSharedPreferences("archer_aim_stats_prefs", Context.MODE_PRIVATE)
             val quizStatsPrefs = context.getSharedPreferences("quiz_test_stats_prefs", Context.MODE_PRIVATE)

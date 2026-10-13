@@ -40,6 +40,17 @@ object GoogleDriveSyncService {
     const val DEFAULT_DRIVE_FOLDER_ID = "1FTKJCe98AEK3VzIyNK8t1siQEXdTUcJ9"
     const val DEFAULT_DRIVE_FOLDER_URL = "https://drive.google.com/drive/folders/1FTKJCe98AEK3VzIyNK8t1siQEXdTUcJ9"
 
+    const val DEFAULT_QB_DRIVE_FOLDER_ID = "1DMmfgwslw7oEdZDm-moxDJRXQ3QGdd75"
+    const val DEFAULT_QB_DRIVE_FOLDER_URL = "https://drive.google.com/drive/folders/1DMmfgwslw7oEdZDm-moxDJRXQ3QGdd75"
+
+    val DEFAULT_FALLBACK_DRIVE_QB_FILES = listOf(
+        DiscoveredDriveFile("1QQy7FAcpG9UvDSS3Y4_bHsHuNBooVNAf", "BCS Q.Bank.xlsx"),
+        DiscoveredDriveFile("15uZbA6b0RGIYLnk-0r4KKE6ubPyy60Nm", "GRE analytical practice.xlsx"),
+        DiscoveredDriveFile("1FSe4g6TEMCjUeBadJhPd_95wDRlxkrTh", "GRE analytical T1 S1-S4.xlsx"),
+        DiscoveredDriveFile("1iD9Tnxl1x3yUOefejn3tHmoBBQkrs8Ka", "IBA English QB.xlsx"),
+        DiscoveredDriveFile("1XeQunZhB4-LTfLLLPS5xRx7IfW5zO92a", "TOEFL All Exercise.xlsx")
+    )
+
     val DEFAULT_FALLBACK_DRIVE_COURSES = listOf(
         DiscoveredDriveFile("1NdowDhMVRs--uhIgw767NwSFjVqe8pV5", "Bank-BCS-GRE.xlsx"),
         DiscoveredDriveFile("1vUeX5zqmwhT4SOkCN2pxlKRRfQgDEvga", "Barron.xlsx"),
@@ -216,6 +227,9 @@ object GoogleDriveSyncService {
         if (folderId == DEFAULT_DRIVE_FOLDER_ID) {
             return@withContext DEFAULT_FALLBACK_DRIVE_COURSES
         }
+        if (folderId == DEFAULT_QB_DRIVE_FOLDER_ID) {
+            return@withContext DEFAULT_FALLBACK_DRIVE_QB_FILES
+        }
         return@withContext emptyList()
     }
 
@@ -280,6 +294,17 @@ object GoogleDriveSyncService {
         while (m3.find()) {
             val id = m3.group(1) ?: continue
             val title = (m3.group(2) ?: "Course_${id.take(6)}").trim()
+            if (id != folderId && seenIds.add(id)) {
+                list.add(DiscoveredDriveFile(id, title))
+            }
+        }
+
+        // Pattern 4: Embedded folderview flip-entry items
+        val p4 = Pattern.compile("""href=["'][^"']*file/d/([a-zA-Z0-9_-]{15,})/view[^"']*["'][\s\S]*?class=["'][^"']*flip-entry-title[^"']*["'][^>]*>([^<]+)<""", Pattern.CASE_INSENSITIVE)
+        val m4 = p4.matcher(html)
+        while (m4.find()) {
+            val id = m4.group(1) ?: continue
+            val title = (m4.group(2) ?: "File_${id.take(6)}").trim()
             if (id != folderId && seenIds.add(id)) {
                 list.add(DiscoveredDriveFile(id, title))
             }

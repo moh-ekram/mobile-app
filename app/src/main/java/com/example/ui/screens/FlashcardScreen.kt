@@ -40,6 +40,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import com.example.data.model.VocabularyWordEntity
 import com.example.ui.components.Flashcard
 import com.example.ui.theme.*
@@ -96,6 +98,17 @@ fun FlashcardScreen(
     var internalShowFilterDialog by remember { mutableStateOf(false) }
     val isFilterDialogVisible = showFilterDialog || internalShowFilterDialog
     var wordToReport by remember { mutableStateOf<VocabularyWordEntity?>(null) }
+    var isAutoAdvanceEnabled by remember { mutableStateOf(true) }
+
+    // Auto-advance to next word every 10 seconds (with safe cancellation on manual swipe / rating / pause)
+    LaunchedEffect(isAutoAdvanceEnabled, currentIndex, words.size) {
+        if (isAutoAdvanceEnabled && words.size > 1) {
+            delay(10_000L) // 10 seconds
+            if (isActive) {
+                onNext()
+            }
+        }
+    }
 
     val hasActiveFilters = selectedGroups.isNotEmpty() || selectedStatuses.isNotEmpty() || sortOrder != "default" || showOnlyFlagged
 
@@ -182,14 +195,15 @@ fun FlashcardScreen(
                 }
             }
 
-            // Card Counter
+            // Card Counter & Auto 10s Advance Controller
             if (words.isNotEmpty()) {
                 val safeIndex = currentIndex.coerceIn(0, words.size - 1)
-                Box(
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 4.dp, vertical = 2.dp),
-                    contentAlignment = Alignment.Center
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "Card ${safeIndex + 1} of ${words.size}",
@@ -198,6 +212,37 @@ fun FlashcardScreen(
                         fontWeight = FontWeight.SemiBold,
                         color = SlateMuted
                     )
+
+                    // Auto 10s indicator & toggle button
+                    Surface(
+                        onClick = { isAutoAdvanceEnabled = !isAutoAdvanceEnabled },
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (isAutoAdvanceEnabled) IndigoPrimary.copy(alpha = 0.12f) else palette.cardBorder.copy(alpha = 0.4f),
+                        border = BorderStroke(
+                            1.dp,
+                            if (isAutoAdvanceEnabled) IndigoPrimary.copy(alpha = 0.4f) else palette.cardBorder
+                        )
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isAutoAdvanceEnabled) Icons.Default.Timer else Icons.Default.TimerOff,
+                                contentDescription = "Auto 10s Advance",
+                                tint = if (isAutoAdvanceEnabled) IndigoPrimary else palette.textMuted,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Text(
+                                text = if (isAutoAdvanceEnabled) "Auto 10s: ON" else "Auto 10s: OFF",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isAutoAdvanceEnabled) IndigoPrimary else palette.textMuted
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -246,23 +291,24 @@ fun FlashcardScreen(
                     label = "flashcard_slide_transition",
                     modifier = Modifier.fillMaxSize()
                 ) { targetWord ->
+                    val resolvedWord = words.firstOrNull { it.id == targetWord.id } ?: targetWord
                     Flashcard(
-                        word = targetWord,
-                        status = targetWord.status,
+                        word = resolvedWord,
+                        status = resolvedWord.status,
                         courseName = courseName,
                         isFlipAnimationEnabled = isFlipAnimationEnabled,
                         isFocusMode = isFocusMode,
                         isHapticEnabled = isHapticEnabled,
                         onRate = { newStatus ->
                             if (isHapticEnabled) hapticHelper.ratingSelected()
-                            onRate(targetWord.id, newStatus)
+                            onRate(resolvedWord.id, newStatus)
                         },
                         onNext = {
                             if (isHapticEnabled) hapticHelper.cardSwipe()
                             onNext()
                         },
                         onSpeak = { text -> ttsManager.speak(text) },
-                        onReportClick = { wordToReport = targetWord },
+                        onReportClick = { wordToReport = resolvedWord },
                         modifier = Modifier.fillMaxWidth()
                     )
                 }

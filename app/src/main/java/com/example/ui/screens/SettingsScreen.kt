@@ -77,6 +77,7 @@ import com.example.data.repository.LocalCourseFileInput
 import com.example.data.sync.DiscoveredDriveFile
 import com.example.notification.NotificationHelper
 import com.example.ui.theme.*
+import com.example.ui.util.ApkShareHelper
 import com.example.widget.DailyVocabWidgetProvider
 import org.json.JSONArray
 import org.json.JSONObject
@@ -1008,8 +1009,72 @@ private fun GeneralSettingsTab(
                             }
                         }
                     }
+
+                    HorizontalDivider(color = palette.border.copy(alpha = 0.5f))
+
+                    // Question Sheet Font Size Control
+                    val qbPrefs = remember { context.getSharedPreferences("qb_typography_settings", Context.MODE_PRIVATE) }
+                    var qbFontSize by remember { mutableFloatStateOf(qbPrefs.getFloat("qb_q_font_size", 16f)) }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(Icons.Default.FormatSize, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(18.dp))
+                            Text("Question Sheet Font Size", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = palette.textPrimary)
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            FilledTonalIconButton(
+                                onClick = {
+                                    if (qbFontSize > 12f) {
+                                        qbFontSize -= 1f
+                                        qbPrefs.edit().putFloat("qb_q_font_size", qbFontSize).apply()
+                                    }
+                                },
+                                modifier = Modifier.size(28.dp),
+                                shape = CircleShape
+                            ) {
+                                Icon(Icons.Default.Remove, contentDescription = "Decrease", modifier = Modifier.size(14.dp))
+                            }
+                            Text(
+                                text = "${qbFontSize.toInt()} sp",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.5.sp,
+                                color = IndigoPrimary,
+                                modifier = Modifier.widthIn(min = 40.dp),
+                                textAlign = TextAlign.Center
+                            )
+                            FilledTonalIconButton(
+                                onClick = {
+                                    if (qbFontSize < 26f) {
+                                        qbFontSize += 1f
+                                        qbPrefs.edit().putFloat("qb_q_font_size", qbFontSize).apply()
+                                    }
+                                },
+                                modifier = Modifier.size(28.dp),
+                                shape = CircleShape
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = "Increase", modifier = Modifier.size(14.dp))
+                            }
+                        }
+                    }
                 }
             }
+        }
+
+        // Share App (APK File)
+        item {
+            ShareAppApkCard(palette = palette)
         }
 
         // Logout
@@ -2238,18 +2303,23 @@ private fun WidgetAndRemindersTab(
     var rotate10s by remember {
         mutableStateOf(widgetPrefs.getBoolean(DailyVocabWidgetProvider.KEY_ROTATE_10S, true))
     }
+    var selectedPlace2Delay by remember {
+        mutableFloatStateOf(widgetPrefs.getFloat(DailyVocabWidgetProvider.KEY_PLACE2_DELAY_SECONDS, 1.0f))
+    }
 
     fun persistAllSettings(
         newStatusFilters: Set<String> = selectedStatusFilters,
         newFontSize: String = selectedFontSize,
         newWidgetSize: String = selectedWidgetSize,
-        newRotate10s: Boolean = rotate10s
+        newRotate10s: Boolean = rotate10s,
+        newPlace2Delay: Float = selectedPlace2Delay
     ) {
         DailyVocabWidgetProvider.saveSelectedTagFilters(context, newStatusFilters)
         widgetPrefs.edit()
             .putString(DailyVocabWidgetProvider.KEY_WIDGET_FONT_SIZE, newFontSize)
             .putString(DailyVocabWidgetProvider.KEY_WIDGET_SIZE, newWidgetSize)
             .putBoolean(DailyVocabWidgetProvider.KEY_ROTATE_10S, newRotate10s)
+            .putFloat(DailyVocabWidgetProvider.KEY_PLACE2_DELAY_SECONDS, newPlace2Delay)
             .apply()
         DailyVocabWidgetProvider.updateAllWidgets(context)
         onRefreshWidget()
@@ -2860,6 +2930,50 @@ private fun WidgetAndRemindersTab(
                             persistAllSettings(newRotate10s = it)
                         }
                     )
+
+                    HorizontalDivider(color = palette.border.copy(alpha = 0.5f))
+
+                    // Place 2 Reveal Delay (Instant Guess) Option
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "Place 2 (Meaning) Reveal Delay",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = palette.textPrimary
+                        )
+                        Text(
+                            text = "Shows Place 1 (Word) first, then reveals Place 2 with animation for instant guessing.",
+                            fontSize = 10.5.sp,
+                            color = palette.textMuted,
+                            lineHeight = 14.sp
+                        )
+
+                        val delayOptions = listOf(
+                            0f to "Instant",
+                            0.5f to "0.5s",
+                            1.0f to "1.0s",
+                            1.5f to "1.5s",
+                            2.0f to "2.0s",
+                            3.0f to "3.0s"
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            delayOptions.forEach { (sec, label) ->
+                                FilterChip(
+                                    selected = selectedPlace2Delay == sec,
+                                    onClick = {
+                                        selectedPlace2Delay = sec
+                                        persistAllSettings(newPlace2Delay = sec)
+                                    },
+                                    label = { Text(label, fontSize = 10.5.sp) }
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -3245,36 +3359,6 @@ private fun BackupSettingsTab(
                             }
                         }
 
-                        // Status Tag Count Summary Chips
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            val counts = listOf(
-                                Triple("Know", words.count { it.status.equals("know", ignoreCase = true) }, EmeraldSuccess),
-                                Triple("Confusion", words.count { it.status.equals("confusion", ignoreCase = true) }, AmberWarning),
-                                Triple("Don't Know", words.count { it.status.equals("dont_know", ignoreCase = true) }, Color(0xFFE11D48)),
-                                Triple("Unrated", words.count { it.status.equals("unrated", ignoreCase = true) }, Color(0xFF64748B)),
-                                Triple("Flagged", words.count { it.isReported }, Color(0xFFE11D48))
-                            )
-                            counts.forEach { (lbl, cnt, clr) ->
-                                Surface(
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = clr.copy(alpha = 0.08f),
-                                    border = BorderStroke(0.5.dp, clr.copy(alpha = 0.25f))
-                                ) {
-                                    Text(
-                                        text = "$lbl: $cnt",
-                                        fontSize = 10.sp,
-                                        color = clr,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-                            }
-                        }
                     }
 
                     HorizontalDivider(color = palette.border.copy(alpha = 0.5f))
@@ -3286,12 +3370,26 @@ private fun BackupSettingsTab(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(
-                                text = "Courses (${exportSelectedCourseIds.size}/${courses.size})",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.5.sp,
-                                color = palette.textPrimary
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier
+                                    .clickable { isCoursesExpanded = !isCoursesExpanded }
+                                    .padding(vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "Courses (${exportSelectedCourseIds.size}/${courses.size})",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.5.sp,
+                                    color = palette.textPrimary
+                                )
+                                Icon(
+                                    imageVector = if (isCoursesExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                    contentDescription = if (isCoursesExpanded) "Collapse courses" else "Expand courses",
+                                    tint = palette.textMuted,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(
                                     text = "Select All",
@@ -3319,110 +3417,101 @@ private fun BackupSettingsTab(
                             }
                         }
 
-                        // Courses multi-select list/grid with icons
-                        if (courses.isEmpty()) {
-                            Text("No courses found", fontSize = 11.sp, color = palette.textMuted)
-                        } else {
-                            val displayedCourses = if (isCoursesExpanded || courses.size <= 4) courses else courses.take(4)
+                        // Courses multi-select list/grid with icons (Collapsed by default, expands on arrow click)
+                        AnimatedVisibility(
+                            visible = isCoursesExpanded,
+                            enter = expandVertically() + fadeIn(),
+                            exit = shrinkVertically() + fadeOut()
+                        ) {
+                            if (courses.isEmpty()) {
+                                Text("No courses found", fontSize = 11.sp, color = palette.textMuted)
+                            } else {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    courses.forEach { course ->
+                                        val isSelected = course.id in exportSelectedCourseIds
+                                        val courseWordsCount = words.count { it.courseId == course.id }
 
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                displayedCourses.forEach { course ->
-                                    val isSelected = course.id in exportSelectedCourseIds
-                                    val courseWordsCount = words.count { it.courseId == course.id }
-
-                                    Surface(
-                                        onClick = {
-                                            exportSelectedCourseIds = if (isSelected) {
-                                                exportSelectedCourseIds - course.id
-                                            } else {
-                                                exportSelectedCourseIds + course.id
-                                            }
-                                        },
-                                        shape = RoundedCornerShape(10.dp),
-                                        color = if (isSelected) IndigoLight.copy(alpha = 0.5f) else (if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF8FAFC)),
-                                        border = BorderStroke(
-                                            1.dp,
-                                            if (isSelected) IndigoPrimary.copy(alpha = 0.6f) else palette.border
-                                        ),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        Surface(
+                                            onClick = {
+                                                exportSelectedCourseIds = if (isSelected) {
+                                                    exportSelectedCourseIds - course.id
+                                                } else {
+                                                    exportSelectedCourseIds + course.id
+                                                }
+                                            },
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = if (isSelected) IndigoLight.copy(alpha = 0.5f) else (if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF8FAFC)),
+                                            border = BorderStroke(
+                                                1.dp,
+                                                if (isSelected) IndigoPrimary.copy(alpha = 0.6f) else palette.border
+                                            ),
+                                            modifier = Modifier.fillMaxWidth()
                                         ) {
                                             Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 10.dp, vertical = 8.dp),
                                                 verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                                modifier = Modifier.weight(1f)
+                                                horizontalArrangement = Arrangement.SpaceBetween
                                             ) {
-                                                // Course Icon
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                    modifier = Modifier.weight(1f)
+                                                ) {
+                                                    // Course Icon
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(26.dp)
+                                                            .clip(CircleShape)
+                                                            .background(if (isSelected) IndigoPrimary else palette.border.copy(alpha = 0.4f)),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.School,
+                                                            contentDescription = null,
+                                                            modifier = Modifier.size(14.dp),
+                                                            tint = if (isSelected) Color.White else palette.textMuted
+                                                        )
+                                                    }
+
+                                                    Column {
+                                                        Text(
+                                                            text = course.title,
+                                                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                                            fontSize = 12.sp,
+                                                            color = palette.textPrimary,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                        Text(
+                                                            text = "$courseWordsCount words",
+                                                            fontSize = 10.sp,
+                                                            color = palette.textMuted
+                                                        )
+                                                    }
+                                                }
+
+                                                // Multi-Select Check Icon
                                                 Box(
                                                     modifier = Modifier
-                                                        .size(26.dp)
+                                                        .size(20.dp)
                                                         .clip(CircleShape)
-                                                        .background(if (isSelected) IndigoPrimary else palette.border.copy(alpha = 0.4f)),
+                                                        .background(if (isSelected) IndigoPrimary else palette.cardBorder),
                                                     contentAlignment = Alignment.Center
                                                 ) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.School,
-                                                        contentDescription = null,
-                                                        modifier = Modifier.size(14.dp),
-                                                        tint = if (isSelected) Color.White else palette.textMuted
-                                                    )
-                                                }
-
-                                                Column {
-                                                    Text(
-                                                        text = course.title,
-                                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                                                        fontSize = 12.sp,
-                                                        color = palette.textPrimary,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                    Text(
-                                                        text = "$courseWordsCount words",
-                                                        fontSize = 10.sp,
-                                                        color = palette.textMuted
-                                                    )
-                                                }
-                                            }
-
-                                            // Multi-Select Check Icon
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(20.dp)
-                                                    .clip(CircleShape)
-                                                    .background(if (isSelected) IndigoPrimary else palette.cardBorder),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                if (isSelected) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Check,
-                                                        contentDescription = "Selected",
-                                                        tint = Color.White,
-                                                        modifier = Modifier.size(13.dp)
-                                                    )
+                                                    if (isSelected) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Check,
+                                                            contentDescription = "Selected",
+                                                            tint = Color.White,
+                                                            modifier = Modifier.size(13.dp)
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
                                     }
-                                }
-
-                                if (courses.size > 4) {
-                                    Text(
-                                        text = if (isCoursesExpanded) "Show Less ▲" else "+ Show ${courses.size - 4} More Courses ▼",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = IndigoPrimary,
-                                        modifier = Modifier
-                                            .align(Alignment.CenterHorizontally)
-                                            .clickable { isCoursesExpanded = !isCoursesExpanded }
-                                            .padding(vertical = 4.dp)
-                                    )
                                 }
                             }
                         }
@@ -3594,6 +3683,11 @@ private fun BackupSettingsTab(
             }
         }
 
+        // Share & Export App APK
+        item {
+            ShareAppApkCard(palette = palette)
+        }
+
         // Reset
         item {
             TextButton(
@@ -3601,6 +3695,206 @@ private fun BackupSettingsTab(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Reset to Sample Data", fontSize = 11.sp, color = Color(0xFFE11D48))
+            }
+        }
+    }
+}
+
+// ----------------------------------------------------
+// Share App APK Card
+// ----------------------------------------------------
+@Composable
+private fun ShareAppApkCard(palette: AppPalette) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var isSharing by remember { mutableStateOf(false) }
+    var isSaving by remember { mutableStateOf(false) }
+
+    val appVersion = remember { ApkShareHelper.getAppVersion(context) }
+    val apkSize = remember { ApkShareHelper.getApkFileSizeFormatted(context) }
+
+    val docLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/vnd.android.package-archive")
+    ) { uri: Uri? ->
+        if (uri != null) {
+            coroutineScope.launch {
+                isSaving = true
+                val result = ApkShareHelper.saveApkToUri(context, uri)
+                isSaving = false
+                if (result.isSuccess) {
+                    Toast.makeText(context, "APK saved successfully!", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, "Failed to save APK: ${result.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = palette.surface),
+        border = BorderStroke(1.dp, palette.border),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("share_app_apk_card")
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // Header: Icon + Title + Size badge
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.weight(1f, fill = false)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(IndigoLight),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = "Share App",
+                            tint = IndigoPrimary,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = "Share App (APK)",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.5.sp,
+                            color = palette.textPrimary
+                        )
+                        Text(
+                            text = "Share full installation package",
+                            fontSize = 11.sp,
+                            color = palette.textMuted
+                        )
+                    }
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = EmeraldSuccess.copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, EmeraldSuccess.copy(alpha = 0.35f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Android,
+                            contentDescription = null,
+                            tint = EmeraldSuccess,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Text(
+                            text = apkSize,
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = EmeraldSuccess
+                        )
+                    }
+                }
+            }
+
+            Text(
+                text = "Share the full Memorizer v$appVersion APK file with friends or other devices via Bluetooth, Quick Share, WhatsApp, Telegram, or Email so they can install the app directly.",
+                fontSize = 11.5.sp,
+                color = palette.textSecondary,
+                lineHeight = 16.sp
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = {
+                        if (!isSharing) {
+                            coroutineScope.launch {
+                                isSharing = true
+                                Toast.makeText(context, "Preparing APK file...", Toast.LENGTH_SHORT).show()
+                                val result = ApkShareHelper.shareApkFile(context)
+                                isSharing = false
+                                if (result.isFailure) {
+                                    Toast.makeText(context, "Failed: ${result.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }
+                    },
+                    modifier = Modifier.weight(1f).height(38.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                    enabled = !isSharing
+                ) {
+                    if (isSharing) {
+                        CircularProgressIndicator(
+                            color = Color.White,
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Preparing...", fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = null,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Share APK",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        val fileName = "Memorizer_v${appVersion}.apk"
+                        docLauncher.launch(fileName)
+                    },
+                    modifier = Modifier.height(38.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, palette.border),
+                    enabled = !isSaving
+                ) {
+                    if (isSaving) {
+                        CircularProgressIndicator(
+                            color = IndigoPrimary,
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = "Save APK",
+                            modifier = Modifier.size(15.dp),
+                            tint = IndigoPrimary
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Save APK",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = IndigoPrimary
+                        )
+                    }
+                }
             }
         }
     }
@@ -4664,6 +4958,7 @@ private fun WordSwipeableCard(
                         // Word title in status/tag color (Point 8)
                         Text(
                             text = word.word,
+                            fontFamily = selectFontForText(word.word),
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
                             color = statusColor
@@ -4681,6 +4976,7 @@ private fun WordSwipeableCard(
 
                     Text(
                         text = word.meaning,
+                        fontFamily = selectFontForText(word.meaning),
                         fontSize = 11.5.sp,
                         color = palette.textMuted,
                         maxLines = 1,
@@ -4690,6 +4986,7 @@ private fun WordSwipeableCard(
                     if (!word.example.isNullOrBlank()) {
                         Text(
                             text = word.example,
+                            fontFamily = selectFontForText(word.example),
                             fontSize = 10.sp,
                             color = palette.textMuted.copy(alpha = 0.8f),
                             maxLines = 1,

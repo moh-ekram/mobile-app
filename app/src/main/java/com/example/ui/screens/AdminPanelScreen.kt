@@ -1445,7 +1445,7 @@ private fun WordsAdminView(
 
                                     Text(
                                         text = word.meaning,
-                                        fontFamily = PoppinsFontFamily,
+                                        fontFamily = selectFontForText(word.meaning),
                                         fontSize = 13.sp,
                                         color = EmeraldSuccess,
                                         fontWeight = FontWeight.SemiBold
@@ -1454,7 +1454,7 @@ private fun WordsAdminView(
                                     if (!word.example.isNullOrBlank()) {
                                         Text(
                                             text = word.example,
-                                            fontFamily = PoppinsFontFamily,
+                                            fontFamily = selectFontForText(word.example),
                                             fontSize = 12.sp,
                                             color = SlateMuted
                                         )

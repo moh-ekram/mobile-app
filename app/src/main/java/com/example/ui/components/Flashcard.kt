@@ -357,12 +357,7 @@ private fun FrontFaceContent(
             Spacer(modifier = Modifier.height(10.dp))
 
             // The color of place1 word matches its selected status category color
-            val wordColor = when (status) {
-                "know" -> EmeraldSuccess
-                "dont_know" -> RoseError
-                "confusion" -> AmberWarning
-                else -> if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary
-            }
+            val wordColor = getWordStatusColor(status, palette.isDark)
 
             val wordLen = frontWord.length
             val dynamicFontSize = when {
@@ -536,12 +531,7 @@ private fun BackFaceContent(
         }
     }
 
-    val wordColor = when (status) {
-        "know" -> EmeraldSuccess
-        "dont_know" -> RoseError
-        "confusion" -> AmberWarning
-        else -> if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary
-    }
+    val wordColor = getWordStatusColor(status, palette.isDark)
 
     Column(
         modifier = Modifier.fillMaxSize(),
@@ -872,6 +862,7 @@ private fun RatingFooter(
     onNext: () -> Unit
 ) {
     val palette = LocalAppPalette.current
+    val normStatus = normalizeWordStatus(status)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -894,17 +885,17 @@ private fun RatingFooter(
             // Don't Know Button
             RatingItem(
                 title = "don't know",
-                isActive = status == "dont_know",
+                isActive = normStatus == "dont_know",
                 activeBg = RoseError,
                 activeBorder = Color(0xFFBE123C),
                 inactiveBg = if (palette.isDark) Color(0xFF381219) else RoseLight,
                 inactiveBorder = if (palette.isDark) Color(0xFF4C1D24) else RoseBorder,
-                tint = if (status == "dont_know") Color.White else RoseError,
+                tint = if (normStatus == "dont_know") Color.White else RoseError,
                 icon = {
                     Icon(
                         imageVector = Icons.Default.Close,
                         contentDescription = "Don't know",
-                        tint = if (status == "dont_know") Color.White else RoseError,
+                        tint = if (normStatus == "dont_know") Color.White else RoseError,
                         modifier = Modifier.size(22.dp)
                     )
                 },
@@ -914,17 +905,17 @@ private fun RatingFooter(
             // Confusion Button
             RatingItem(
                 title = "confusion",
-                isActive = status == "confusion",
+                isActive = normStatus == "confusion",
                 activeBg = AmberWarning,
                 activeBorder = Color(0xFFB45309),
                 inactiveBg = if (palette.isDark) Color(0xFF362005) else AmberLight,
                 inactiveBorder = if (palette.isDark) Color(0xFF4D2E07) else AmberBorder,
-                tint = if (status == "confusion") Color.White else AmberWarning,
+                tint = if (normStatus == "confusion") Color.White else AmberWarning,
                 icon = {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.HelpOutline,
                         contentDescription = "Confusion",
-                        tint = if (status == "confusion") Color.White else AmberWarning,
+                        tint = if (normStatus == "confusion") Color.White else AmberWarning,
                         modifier = Modifier.size(22.dp)
                     )
                 },
@@ -954,17 +945,17 @@ private fun RatingFooter(
             // Know Button
             RatingItem(
                 title = "know",
-                isActive = status == "know",
+                isActive = normStatus == "know",
                 activeBg = EmeraldSuccess,
                 activeBorder = Color(0xFF047857),
                 inactiveBg = if (palette.isDark) Color(0xFF064E3B) else EmeraldLight,
                 inactiveBorder = if (palette.isDark) Color(0xFF065F46) else EmeraldBorder,
-                tint = if (status == "know") Color.White else EmeraldSuccess,
+                tint = if (normStatus == "know") Color.White else EmeraldSuccess,
                 icon = {
                     Icon(
                         imageVector = Icons.Default.Check,
                         contentDescription = "Know",
-                        tint = if (status == "know") Color.White else EmeraldSuccess,
+                        tint = if (normStatus == "know") Color.White else EmeraldSuccess,
                         modifier = Modifier.size(22.dp)
                     )
                 },

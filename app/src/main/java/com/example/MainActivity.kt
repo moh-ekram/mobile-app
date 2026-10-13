@@ -233,6 +233,8 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
     val driveSyncSummary by viewModel.driveSyncSummary.collectAsState()
     val driveCourses by viewModel.driveCourses.collectAsState()
     val isRefreshingDriveCourses by viewModel.isRefreshingDriveCourses.collectAsState()
+    val driveQBFiles by viewModel.driveQBFiles.collectAsState()
+    val isRefreshingDriveQB by viewModel.isRefreshingDriveQB.collectAsState()
     val downloadingCourseFileIds by viewModel.downloadingCourseFileIds.collectAsState()
     val qbSyncUrl by viewModel.qbSyncUrl.collectAsState()
     val isSyncingQB by viewModel.isSyncingQB.collectAsState()
@@ -343,6 +345,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                                     val screenTitle = when (currentRoute) {
                                         "flashcard" -> "Flashcards"
                                         "games" -> "Practice Games"
+                                        "confusion_set" -> "Confusion Set"
                                         "courses" -> "Course Library"
                                         "settings", "admin", "profile" -> "Settings"
                                         else -> currentRoute.replaceFirstChar { it.uppercase() }
@@ -503,6 +506,8 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                                 viewModel.setShowOnlyFlagged(true)
                                 viewModel.setRoute("flashcard")
                             },
+                            articles = allArticles,
+                            onSelectArticle = { art -> viewModel.setActiveArticle(art) },
                             widgetWord = currentWidgetWord,
                             widgetCategory = widgetCategory,
                             onSetWidgetCategory = { cat -> viewModel.setWidgetCategory(cat) },
@@ -547,12 +552,24 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                                 }
                             )
                         }
-                        "games", "question_bank" -> GamePracticeScreen(
+                        "games", "question_bank", "confusion_set" -> GamePracticeScreen(
                             games = allGames,
                             questions = allQuestions,
                             courses = allCourses,
                             activeCourseId = activeCourseId,
-                            initialSection = if (currentRoute == "question_bank") "question_bank" else null,
+                            driveCourses = driveCourses,
+                            isRefreshingDriveCourses = isRefreshingDriveCourses,
+                            driveQBFiles = driveQBFiles,
+                            isRefreshingDriveQB = isRefreshingDriveQB,
+                            downloadingCourseFileIds = downloadingCourseFileIds,
+                            onRefreshDriveCourses = { viewModel.refreshDriveCoursesList() },
+                            onRefreshDriveQB = { viewModel.refreshDriveQBList() },
+                            onDownloadDriveQB = { item -> viewModel.downloadAndAddDriveQB(item) },
+                            initialSection = when (currentRoute) {
+                                "question_bank" -> "question_bank"
+                                "confusion_set" -> "confusion_set"
+                                else -> null
+                            },
                             onCompleteQuiz = { score, total ->
                                 viewModel.recordQuizCompletion(score, total)
                             },

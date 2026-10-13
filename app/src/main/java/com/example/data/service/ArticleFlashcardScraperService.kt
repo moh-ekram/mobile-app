@@ -422,7 +422,7 @@ class ArticleFlashcardScraperService(
 
     /**
      * Persists generated flashcards to Room's VocabularyDao under a course,
-     * enabling immediate review across FlashcardScreen, Archer Aim, and Column Match games.
+     * enabling immediate review across FlashcardScreen and Practice games.
      */
     suspend fun saveToVocabularyDatabase(
         context: Context,

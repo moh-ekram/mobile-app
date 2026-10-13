@@ -78,5 +78,6 @@ dependencies {
   implementation(libs.okhttp)
   implementation(libs.jsoup)
   debugImplementation(libs.androidx.ui.tooling)
+  testImplementation("junit:junit:4.13.2")
   "ksp"(libs.androidx.room.compiler)
 }
