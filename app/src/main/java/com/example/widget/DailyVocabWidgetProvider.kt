@@ -582,17 +582,8 @@ class DailyVocabWidgetProvider : AppWidgetProvider() {
                     )
                     views.setOnClickPendingIntent(R.id.widget_next_button, nextPendingIntent)
 
-                    // Click intent for meaning placeholder -> instantly reveal meaning
-                    val revealIntent = Intent(context, DailyVocabWidgetProvider::class.java).apply {
-                        action = ACTION_REVEAL_MEANING
-                    }
-                    val revealPendingIntent = PendingIntent.getBroadcast(
-                        context,
-                        2,
-                        revealIntent,
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                    )
-                    views.setOnClickPendingIntent(R.id.widget_meaning_placeholder, revealPendingIntent)
+                    // Tapping meaning placeholder opens the app (meaning reveals automatically after selected seconds)
+                    views.setOnClickPendingIntent(R.id.widget_meaning_placeholder, openAppPendingIntent)
 
                     // Tapping word title advances to next word
                     views.setOnClickPendingIntent(R.id.widget_word_title, nextPendingIntent)

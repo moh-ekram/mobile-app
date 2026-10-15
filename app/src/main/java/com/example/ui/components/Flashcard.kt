@@ -43,6 +43,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.delay
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -65,6 +66,7 @@ fun Flashcard(
     isFlipAnimationEnabled: Boolean = true,
     isFocusMode: Boolean = false,
     isHapticEnabled: Boolean = true,
+    isAutoAdvanceEnabled: Boolean = false,
     onRate: (String) -> Unit,
     onNext: () -> Unit,
     onSpeak: (String) -> Unit,
@@ -76,6 +78,20 @@ fun Flashcard(
     val hapticHelper = remember { HapticHelper(context) }
     var isFlipped by remember(word.id) { mutableStateOf(false) }
     var hasFlippedCurrentCard by remember(word.id) { mutableStateOf(false) }
+
+    // Auto 10s: After 5 seconds, auto-flip to backside to reveal meaning before advancing to next card
+    LaunchedEffect(word.id, isAutoAdvanceEnabled) {
+        if (isAutoAdvanceEnabled) {
+            delay(5_000L) // Show front for 5s, then flip to back
+            if (!isFlipped) {
+                if (isHapticEnabled) {
+                    hapticHelper.cardFlip()
+                }
+                isFlipped = true
+                hasFlippedCurrentCard = true
+            }
+        }
+    }
 
     // Persistent counter for "Click to Flip" limit (only show first 3 times)
     val prefs = remember { context.getSharedPreferences("flashcard_settings", android.content.Context.MODE_PRIVATE) }

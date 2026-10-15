@@ -101,17 +101,16 @@
             android:layout_height="wrap_content"
             android:inAnimation="@android:anim/fade_in">
 
-            <!-- Child 0: Guessing / Waiting Placeholder -->
+            <!-- Child 0: Waiting / Delay Placeholder (Reveals automatically after selected seconds) -->
             <TextView
                 android:id="@+id/widget_meaning_placeholder"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="2dp"
-                android:text="🤔 Tap to reveal meaning..."
-                android:textSize="11sp"
-                android:textStyle="italic"
+                android:text="···"
+                android:textSize="12sp"
                 android:textColor="#94A3B8"
-                android:maxLines="2"
+                android:maxLines="1"
                 android:ellipsize="end"
                 android:includeFontPadding="false" />
 

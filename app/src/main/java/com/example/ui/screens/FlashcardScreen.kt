@@ -299,6 +299,7 @@ fun FlashcardScreen(
                         isFlipAnimationEnabled = isFlipAnimationEnabled,
                         isFocusMode = isFocusMode,
                         isHapticEnabled = isHapticEnabled,
+                        isAutoAdvanceEnabled = isAutoAdvanceEnabled,
                         onRate = { newStatus ->
                             if (isHapticEnabled) hapticHelper.ratingSelected()
                             onRate(resolvedWord.id, newStatus)

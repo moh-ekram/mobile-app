@@ -181,9 +181,6 @@ fun HomeScreen(
     val palette = LocalAppPalette.current
 
     var showCourseDialog by remember { mutableStateOf(false) }
-    var featuredArticleIndex by remember(articles) {
-        mutableIntStateOf(if (articles.isNotEmpty()) kotlin.random.Random.nextInt(articles.size) else 0)
-    }
 
     // Course Selection Dialog Popup
     if (showCourseDialog) {
@@ -520,156 +517,6 @@ fun HomeScreen(
             }
         }
 
-        // Featured Article Section (Randomly featured article)
-        if (articles.isNotEmpty()) {
-            val featuredArticle = articles.getOrNull(featuredArticleIndex) ?: articles.firstOrNull()
-
-            if (featuredArticle != null) {
-                item {
-                    Card(
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF8FAFC)
-                        ),
-                        border = BorderStroke(
-                            1.dp,
-                            if (palette.isDark) Color(0xFF334155) else Color(0xFFE2E8F0)
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 8.dp)
-                            .clickable {
-                                onSelectArticle(featuredArticle)
-                                onNavigate("article_reader")
-                            }
-                            .testTag("home_featured_article_card")
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            // Header row: Badge + Shuffle/Next icon
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Surface(
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = IndigoPrimary.copy(alpha = 0.12f)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.AutoAwesome,
-                                            contentDescription = null,
-                                            tint = IndigoPrimary,
-                                            modifier = Modifier.size(13.dp)
-                                        )
-                                        Text(
-                                            text = "FEATURED ARTICLE",
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = PoppinsFontFamily,
-                                            color = IndigoPrimary,
-                                            letterSpacing = 0.5.sp
-                                        )
-                                    }
-                                }
-
-                                if (articles.size > 1) {
-                                    IconButton(
-                                        onClick = {
-                                            featuredArticleIndex = (featuredArticleIndex + 1) % articles.size
-                                        },
-                                        modifier = Modifier.size(26.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Refresh,
-                                            contentDescription = "Shuffle article",
-                                            tint = palette.textMuted,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                }
-                            }
-
-                            // Article Title
-                            val isTitleBengali = isBengaliText(featuredArticle.title)
-                            Text(
-                                text = featuredArticle.title,
-                                fontFamily = if (isTitleBengali) AikyaFontFamily else PoppinsFontFamily,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = palette.textPrimary,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-
-                            // Article Excerpt Snippet
-                            val cleanSnippet = remember(featuredArticle.content) {
-                                featuredArticle.content
-                                    .replace(Regex("<[^>]*>"), " ")
-                                    .replace(Regex("\\s+"), " ")
-                                    .trim()
-                            }
-                            if (cleanSnippet.isNotBlank()) {
-                                val isSnippetBengali = isBengaliText(cleanSnippet)
-                                Text(
-                                    text = cleanSnippet,
-                                    fontFamily = if (isSnippetBengali) AikyaFontFamily else PoppinsFontFamily,
-                                    fontSize = 12.sp,
-                                    color = palette.textMuted,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                    lineHeight = 17.sp
-                                )
-                            }
-
-                            // Footer: Author & Read Now Button
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                val readingTime = (featuredArticle.wordCount / 180).coerceAtLeast(1)
-                                Text(
-                                    text = "${featuredArticle.author.ifBlank { "Memorizer Reader" }} • $readingTime min read",
-                                    fontSize = 10.5.sp,
-                                    color = palette.textMuted,
-                                    fontFamily = PoppinsFontFamily
-                                )
-
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(3.dp)
-                                ) {
-                                    Text(
-                                        text = "Read Now",
-                                        fontSize = 11.5.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = IndigoPrimary,
-                                        fontFamily = PoppinsFontFamily
-                                    )
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                        contentDescription = null,
-                                        tint = IndigoPrimary,
-                                        modifier = Modifier.size(13.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         // Word Groups Breakdown
         item {
             Row(
@@ -701,10 +548,10 @@ fun HomeScreen(
         val groups = activeWords.mapNotNull { it.group?.takeIf { g -> g.isNotBlank() } }.distinct()
             .sortedWith(compareBy({ it.toIntOrNull() ?: Int.MAX_VALUE }, { it }))
         if (groups.isNotEmpty()) {
-            val groupChunks = groups.chunked(4)
+            val groupChunks = groups.chunked(5)
             item {
                 Column(
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("home_groups_circles_container")
@@ -747,8 +594,8 @@ fun HomeScreen(
                                     }
                                 )
                             }
-                            // Fill remaining slots in 4-column row
-                            repeat(4 - rowGroups.size) {
+                            // Fill remaining slots in 5-column row
+                            repeat(5 - rowGroups.size) {
                                 Spacer(modifier = Modifier.weight(1f))
                             }
                         }
@@ -915,17 +762,17 @@ private fun GroupCircle(
     val palette = LocalAppPalette.current
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(12.dp))
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
-            .padding(vertical = 4.dp, horizontal = 2.dp),
+            .padding(vertical = 3.dp, horizontal = 1.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
-            modifier = Modifier.size(64.dp),
+            modifier = Modifier.size(54.dp),
             contentAlignment = Alignment.Center
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
-                val strokeWidthPx = 4.2.dp.toPx()
+                val strokeWidthPx = 3.6.dp.toPx()
                 val radius = (size.minDimension - strokeWidthPx) / 2f
                 val centerOffset = center
 
@@ -962,18 +809,18 @@ private fun GroupCircle(
             Text(
                 text = "$percentage%",
                 fontFamily = PoppinsFontFamily,
-                fontSize = 13.5.sp,
+                fontSize = 11.5.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = textColor
             )
         }
 
-        Spacer(modifier = Modifier.height(5.dp))
+        Spacer(modifier = Modifier.height(4.dp))
 
         Text(
             text = title,
             fontFamily = PoppinsFontFamily,
-            fontSize = 10.5.sp,
+            fontSize = 9.5.sp,
             fontWeight = FontWeight.SemiBold,
             color = palette.textPrimary,
             maxLines = 1,

@@ -2936,13 +2936,13 @@ private fun WidgetAndRemindersTab(
                     // Place 2 Reveal Delay (Instant Guess) Option
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
-                            text = "Place 2 (Meaning) Reveal Delay",
+                            text = "Place 2 (Meaning) Display Delay",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = palette.textPrimary
                         )
                         Text(
-                            text = "Shows Place 1 (Word) first, then reveals Place 2 with animation for instant guessing.",
+                            text = "Shows Place 1 (Word) first, then automatically displays Place 2 (Meaning) after selected seconds.",
                             fontSize = 10.5.sp,
                             color = palette.textMuted,
                             lineHeight = 14.sp
@@ -2954,7 +2954,8 @@ private fun WidgetAndRemindersTab(
                             1.0f to "1.0s",
                             1.5f to "1.5s",
                             2.0f to "2.0s",
-                            3.0f to "3.0s"
+                            3.0f to "3.0s",
+                            5.0f to "5.0s"
                         )
                         Row(
                             modifier = Modifier
