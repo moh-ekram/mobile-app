@@ -384,7 +384,7 @@ fun HomeScreen(
                     Button(
                         onClick = {
                             if (courses.isEmpty()) {
-                                onNavigate("admin")
+                                onNavigate("courses")
                             } else {
                                 showCourseDialog = true
                             }

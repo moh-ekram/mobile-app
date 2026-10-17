@@ -79,6 +79,10 @@ import com.example.notification.NotificationHelper
 import com.example.ui.theme.*
 import com.example.ui.util.ApkShareHelper
 import com.example.widget.DailyVocabWidgetProvider
+import com.example.widget.ConfusionSetWidgetProvider
+import com.example.data.engine.ConfusionSetCacheManager
+import com.example.data.engine.ConfusionSimilarityEngine
+import com.example.data.local.AppDatabase
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
@@ -277,12 +281,14 @@ fun SettingsScreen(
         }
     }
 
-    // Settings tabs definition
+    // Settings tabs definition: Distinct sections for General, Flashcard Design, Widget, Notification, Vocabulary & Backup
     val tabs = listOf(
         SettingsTabItem("General", Icons.Default.Tune),
-        SettingsTabItem("Widget & Reminders", Icons.Default.Widgets),
-        SettingsTabItem("Backup", Icons.Default.CloudSync),
-        SettingsTabItem("Vocabulary", Icons.Default.Translate)
+        SettingsTabItem("Flashcard Design", Icons.Default.Style),
+        SettingsTabItem("Widget", Icons.Default.Widgets),
+        SettingsTabItem("Notification", Icons.Default.Notifications),
+        SettingsTabItem("Vocabulary", Icons.Default.Translate),
+        SettingsTabItem("Backup", Icons.Default.CloudSync)
     )
 
     val pagerState = rememberPagerState(initialPage = initialTab.coerceIn(0, tabs.size - 1)) { tabs.size }
@@ -298,11 +304,12 @@ fun SettingsScreen(
             .fillMaxSize()
             .background(palette.background)
     ) {
-        // Sleek Minimal Iconized Tab Row (Icons only, minimal & clean)
-        TabRow(
+        // Sleek Minimal Scrollable Tab Row with Icons & Labels
+        ScrollableTabRow(
             selectedTabIndex = pagerState.currentPage,
             containerColor = palette.surface,
             contentColor = IndigoPrimary,
+            edgePadding = 12.dp,
             indicator = { tabPositions ->
                 TabRowDefaults.SecondaryIndicator(
                     modifier = Modifier.tabIndicatorOffset(tabPositions[pagerState.currentPage]),
@@ -323,12 +330,21 @@ fun SettingsScreen(
                     },
                     modifier = Modifier
                         .height(48.dp)
-                        .testTag("settings_tab_${tab.title.lowercase()}"),
+                        .testTag("settings_tab_${tab.title.lowercase().replace(" ", "_")}"),
+                    text = {
+                        Text(
+                            text = tab.title,
+                            fontSize = 11.5.sp,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                            fontFamily = PoppinsFontFamily,
+                            maxLines = 1
+                        )
+                    },
                     icon = {
                         Icon(
                             imageVector = tab.icon,
                             contentDescription = tab.title,
-                            modifier = Modifier.size(22.dp),
+                            modifier = Modifier.size(18.dp),
                             tint = if (selected) (if (palette.isDark) Color(0xFFA5B4FC) else IndigoPrimary) else palette.textMuted
                         )
                     }
@@ -359,7 +375,8 @@ fun SettingsScreen(
                     onUpdateProfile = onUpdateProfile,
                     onLogout = onLogout
                 )
-                1 -> WidgetAndRemindersTab(
+                1 -> FlashcardDesignTab()
+                2 -> WidgetSettingsTab(
                     courses = courses,
                     words = words,
                     selectedCourseIds = selectedCourseIds,
@@ -368,26 +385,12 @@ fun SettingsScreen(
                     onDeselectAllCourses = onDeselectAllCourses,
                     onRefreshWidget = onRefreshWidget
                 )
-                2 -> BackupSettingsTab(
-                    progress = progress,
-                    backupDirectoryPath = backupDirectoryPath,
-                    customBackupTreeUri = customBackupTreeUri,
-                    courses = courses,
+                3 -> NotificationSettingsTab(
                     words = words,
-                    onSelectFolder = { folderPickerLauncher.launch(null) },
-                    onManualBackup = onManualBackup,
-                    onBackupToDriveDirect = onBackupToDriveDirect,
-                    onRestoreFromDriveDirect = onRestoreFromDriveDirect,
-                    onExportFile = { driveExportLauncher.launch("memorizer_backup_${System.currentTimeMillis()}.json") },
-                    onRestoreFile = { driveRestoreLauncher.launch(arrayOf("application/json", "text/*", "*/*")) },
-                    onCloudSync = onCloudSync,
-                    onDirectPasteRestore = { showRestoreDialog = true },
-                    onResetData = { showResetConfirmDialog = true },
-                    onImportQBClick = { showQbSyncDialog = true },
-                    onExportQBProgress = { qbProgressExportLauncher.launch("qb_progress_${System.currentTimeMillis()}.json") },
-                    onRestoreQBProgress = { qbProgressRestoreLauncher.launch(arrayOf("application/json", "text/*", "*/*")) }
+                    courses = courses,
+                    selectedCourseIds = selectedCourseIds
                 )
-                3 -> CoursesSettingsTab(
+                4 -> CoursesSettingsTab(
                     courses = courses,
                     activeCourseId = activeCourseId,
                     selectedCourseIds = selectedCourseIds,
@@ -422,6 +425,25 @@ fun SettingsScreen(
                     onClearAllQB = onClearAllQB,
                     onImportQBClick = { showQbSyncDialog = true },
                     onImportQBFileClick = { qbFilePicker.launch("*/*") }
+                )
+                5 -> BackupSettingsTab(
+                    progress = progress,
+                    backupDirectoryPath = backupDirectoryPath,
+                    customBackupTreeUri = customBackupTreeUri,
+                    courses = courses,
+                    words = words,
+                    onSelectFolder = { folderPickerLauncher.launch(null) },
+                    onManualBackup = onManualBackup,
+                    onBackupToDriveDirect = onBackupToDriveDirect,
+                    onRestoreFromDriveDirect = onRestoreFromDriveDirect,
+                    onExportFile = { driveExportLauncher.launch("memorizer_backup_${System.currentTimeMillis()}.json") },
+                    onRestoreFile = { driveRestoreLauncher.launch(arrayOf("application/json", "text/*", "*/*")) },
+                    onCloudSync = onCloudSync,
+                    onDirectPasteRestore = { showRestoreDialog = true },
+                    onResetData = { showResetConfirmDialog = true },
+                    onImportQBClick = { showQbSyncDialog = true },
+                    onExportQBProgress = { qbProgressExportLauncher.launch("qb_progress_${System.currentTimeMillis()}.json") },
+                    onRestoreQBProgress = { qbProgressRestoreLauncher.launch(arrayOf("application/json", "text/*", "*/*")) }
                 )
             }
         }
@@ -700,59 +722,29 @@ private fun GeneralSettingsTab(
                         }
                     }
 
-                    // Display Name
-                    Text(
-                        text = user?.displayName ?: "Learner",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp,
-                        color = palette.textPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-
-                    // Centered Action Buttons: Add/Change Photo & Edit Profile
+                    // Display Name (Clickable to Edit Profile)
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(top = 2.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onEditProfile() }
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
                     ) {
-                        OutlinedButton(
-                            onClick = {
-                                photoPicker.launch(
-                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                )
-                            },
-                            shape = RoundedCornerShape(10.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                            border = BorderStroke(1.dp, palette.border),
-                            modifier = Modifier.height(34.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (user?.avatarUri.isNullOrBlank()) Icons.Default.AddPhotoAlternate else Icons.Default.FlipCameraIos,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp),
-                                tint = IndigoPrimary
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (user?.avatarUri.isNullOrBlank()) "Add Photo" else "Change Photo",
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = IndigoPrimary
-                            )
-                        }
-
-                        Button(
-                            onClick = onEditProfile,
-                            shape = RoundedCornerShape(10.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
-                            modifier = Modifier.height(34.dp)
-                        ) {
-                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Edit Profile", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
-                        }
+                        Text(
+                            text = user?.displayName ?: "Learner",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = palette.textPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Edit Profile",
+                            tint = IndigoPrimary,
+                            modifier = Modifier.size(15.dp)
+                        )
                     }
                 }
             }
@@ -1071,6 +1063,7 @@ private fun GeneralSettingsTab(
                 }
             }
         }
+
 
         // Share App (APK File)
         item {
@@ -2215,10 +2208,10 @@ private fun CoursesSettingsTab(
 }
 
 // ----------------------------------------------------
-// TAB 2: Widget & Study Reminders (Unified)
+// TAB 2: Homescreen Widgets & System Control
 // ----------------------------------------------------
 @Composable
-private fun WidgetAndRemindersTab(
+private fun WidgetSettingsTab(
     courses: List<CourseEntity>,
     words: List<VocabularyWordEntity>,
     selectedCourseIds: Set<String>,
@@ -2229,9 +2222,940 @@ private fun WidgetAndRemindersTab(
 ) {
     val context = LocalContext.current
     val palette = LocalAppPalette.current
+    val coroutineScope = rememberCoroutineScope()
     val widgetPrefs = remember { context.getSharedPreferences(DailyVocabWidgetProvider.PREFS_NAME, Context.MODE_PRIVATE) }
 
-    // --- Notification Settings State ---
+    // --- Confusion Set Widget System Control State ---
+    var cAutoShuffle by remember { mutableStateOf(ConfusionSetWidgetProvider.isAutoShuffleEnabled(context)) }
+    var cIntervalSec by remember { mutableIntStateOf(ConfusionSetWidgetProvider.getShuffleIntervalSeconds(context)) }
+    var cThreshold by remember { mutableIntStateOf(ConfusionSetWidgetProvider.getMinSimilarityThreshold(context)) }
+    var cMaxWords by remember { mutableIntStateOf(ConfusionSetWidgetProvider.getMaxWordsPerGroup(context)) }
+    var cShowMeaning by remember { mutableStateOf(ConfusionSetWidgetProvider.isShowMeaning(context)) }
+    var cColorByStatus by remember { mutableStateOf(ConfusionSetWidgetProvider.isColorByStatus(context)) }
+    var isRecomputingConfusion by remember { mutableStateOf(false) }
+    var cachedConfusionGroupCount by remember { mutableIntStateOf(ConfusionSetCacheManager.getCachedGroupsForWidget(context).size) }
+
+    // --- Daily Vocab Widget State ---
+    var selectedStatusFilters by remember {
+        mutableStateOf(DailyVocabWidgetProvider.getSelectedTagFilters(context))
+    }
+    var selectedFontSize by remember {
+        mutableStateOf(widgetPrefs.getString(DailyVocabWidgetProvider.KEY_WIDGET_FONT_SIZE, "medium") ?: "medium")
+    }
+    var selectedWidgetSize by remember {
+        mutableStateOf(widgetPrefs.getString(DailyVocabWidgetProvider.KEY_WIDGET_SIZE, "standard") ?: "standard")
+    }
+    var rotate10s by remember {
+        mutableStateOf(widgetPrefs.getBoolean(DailyVocabWidgetProvider.KEY_ROTATE_10S, true))
+    }
+    var selectedPlace2Delay by remember {
+        mutableFloatStateOf(widgetPrefs.getFloat(DailyVocabWidgetProvider.KEY_PLACE2_DELAY_SECONDS, 1.0f))
+    }
+
+    fun persistDailyVocabSettings(
+        newStatusFilters: Set<String> = selectedStatusFilters,
+        newFontSize: String = selectedFontSize,
+        newWidgetSize: String = selectedWidgetSize,
+        newRotate10s: Boolean = rotate10s,
+        newPlace2Delay: Float = selectedPlace2Delay
+    ) {
+        DailyVocabWidgetProvider.saveSelectedTagFilters(context, newStatusFilters)
+        widgetPrefs.edit()
+            .putString(DailyVocabWidgetProvider.KEY_WIDGET_FONT_SIZE, newFontSize)
+            .putString(DailyVocabWidgetProvider.KEY_WIDGET_SIZE, newWidgetSize)
+            .putBoolean(DailyVocabWidgetProvider.KEY_ROTATE_10S, newRotate10s)
+            .putFloat(DailyVocabWidgetProvider.KEY_PLACE2_DELAY_SECONDS, newPlace2Delay)
+            .apply()
+        DailyVocabWidgetProvider.updateAllWidgets(context)
+        onRefreshWidget()
+    }
+
+    val wordFilterOptions = listOf(
+        Triple("all", "All", Icons.Default.DoneAll),
+        Triple("know", "Know", Icons.Default.CheckCircle),
+        Triple("confusion", "Confusion", Icons.Default.Psychology),
+        Triple("dont_know", "Don't Know", Icons.Default.Cancel),
+        Triple("unrated", "Unrated", Icons.Default.HelpOutline),
+        Triple("flagged", "Flagged", Icons.Default.Flag)
+    )
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        // Section Header
+        item {
+            Column(modifier = Modifier.padding(horizontal = 2.dp, vertical = 2.dp)) {
+                Text(
+                    text = "Homescreen Widgets",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = palette.textPrimary
+                )
+                Text(
+                    text = "Configure Confusion Set & Daily Vocabulary widgets",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 11.5.sp,
+                    color = palette.textMuted
+                )
+            }
+        }
+
+        // ====================================================
+        // SECTION 1: CONFUSION SET WIDGET SYSTEM CONTROL
+        // ====================================================
+        item {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = palette.surface),
+                border = BorderStroke(1.2.dp, IndigoPrimary.copy(alpha = 0.35f)),
+                modifier = Modifier.fillMaxWidth().testTag("confusion_widget_settings_card")
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(15.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Header with Icon & Active Badge
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(9.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(CircleShape)
+                                    .background(if (palette.isDark) Color(0xFF312E81) else Color(0xFFEEF2FF)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Psychology,
+                                    contentDescription = "Confusion Set Widget",
+                                    tint = IndigoPrimary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "Confusion Set Widget",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = palette.textPrimary
+                                )
+                                Text(
+                                    text = "System Control & Auto Shuffling",
+                                    fontSize = 11.sp,
+                                    color = palette.textMuted
+                                )
+                            }
+                        }
+
+                        // Status Badge
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (cAutoShuffle) EmeraldSuccess.copy(alpha = 0.15f) else palette.border.copy(alpha = 0.3f),
+                            border = BorderStroke(1.dp, if (cAutoShuffle) EmeraldSuccess else palette.border)
+                        ) {
+                            Text(
+                                text = if (cAutoShuffle) "${cIntervalSec}s Auto" else "Manual",
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (cAutoShuffle) EmeraldSuccess else palette.textMuted,
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = palette.border.copy(alpha = 0.5f))
+
+                    // 1. Auto-Shuffle Toggle
+                    SettingSwitchRow(
+                        icon = Icons.Default.Shuffle,
+                        title = "Auto Shuffle Groups",
+                        subtitle = "Automatically rotate to new confusion group on homescreen",
+                        checked = cAutoShuffle,
+                        onCheckedChange = { checked ->
+                            cAutoShuffle = checked
+                            ConfusionSetWidgetProvider.setAutoShuffleEnabled(context, checked)
+                        }
+                    )
+
+                    // 2. Interval Selection (if auto shuffle enabled)
+                    if (cAutoShuffle) {
+                        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Text(
+                                text = "Shuffle Interval",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = palette.textPrimary
+                            )
+                            val intervals = listOf(
+                                5 to "5s (Fast)",
+                                10 to "10s (Standard)",
+                                15 to "15s",
+                                30 to "30s",
+                                60 to "1m"
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                intervals.forEach { (sec, label) ->
+                                    val isSelected = cIntervalSec == sec
+                                    FilterChip(
+                                        selected = isSelected,
+                                        onClick = {
+                                            cIntervalSec = sec
+                                            ConfusionSetWidgetProvider.setShuffleIntervalSeconds(context, sec)
+                                        },
+                                        label = {
+                                            Text(
+                                                text = label,
+                                                fontSize = 10.5.sp,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = IndigoPrimary,
+                                            selectedLabelColor = Color.White
+                                        ),
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = palette.border.copy(alpha = 0.5f))
+
+                    // 3. Similarity Threshold Selector
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Similarity Threshold",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = palette.textPrimary
+                            )
+                            Text(
+                                text = "$cThreshold% Match",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = IndigoPrimary
+                            )
+                        }
+                        Text(
+                            text = "Pairs with similarity ≥ $cThreshold% will be grouped into the widget.",
+                            fontSize = 10.5.sp,
+                            color = palette.textMuted
+                        )
+                        val thresholds = listOf(
+                            60 to "60% (Broad)",
+                            70 to "70% (Standard)",
+                            80 to "80% (Close)",
+                            90 to "90% (Strict)"
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            thresholds.forEach { (pct, label) ->
+                                val isSelected = cThreshold == pct
+                                Surface(
+                                    onClick = {
+                                        cThreshold = pct
+                                        ConfusionSetWidgetProvider.setMinSimilarityThreshold(context, pct)
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (isSelected) IndigoLight else palette.cardBorder.copy(alpha = 0.2f),
+                                    border = BorderStroke(1.dp, if (isSelected) IndigoPrimary else palette.cardBorder),
+                                    modifier = Modifier.weight(1f).height(32.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                        Text(
+                                            text = "$pct%",
+                                            fontSize = 11.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isSelected) IndigoPrimary else palette.textPrimary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = palette.border.copy(alpha = 0.5f))
+
+                    // 4. Max Words Displayed per Group
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Max Words per Group",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = palette.textPrimary
+                            )
+                            Text(
+                                text = if (cMaxWords == 2) "Duo (2 words only)" else "Trio (up to 3 words)",
+                                fontSize = 10.5.sp,
+                                color = palette.textMuted
+                            )
+                        }
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf(2 to "2 Words", 3 to "3 Words").forEach { (count, label) ->
+                                val isSelected = cMaxWords == count
+                                FilterChip(
+                                    selected = isSelected,
+                                    onClick = {
+                                        cMaxWords = count
+                                        ConfusionSetWidgetProvider.setMaxWordsPerGroup(context, count)
+                                        ConfusionSetWidgetProvider.updateAllWidgets(context)
+                                    },
+                                    label = { Text(label, fontSize = 10.5.sp) }
+                                )
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = palette.border.copy(alpha = 0.5f))
+
+                    // 5. Show Meaning Toggle
+                    SettingSwitchRow(
+                        icon = Icons.Default.Notes,
+                        title = "Show Word Meanings",
+                        subtitle = "Display definition lines under each word in the widget",
+                        checked = cShowMeaning,
+                        onCheckedChange = { checked ->
+                            cShowMeaning = checked
+                            ConfusionSetWidgetProvider.setShowMeaning(context, checked)
+                            ConfusionSetWidgetProvider.updateAllWidgets(context)
+                        }
+                    )
+
+                    // 6. Color Code by Status Toggle
+                    SettingSwitchRow(
+                        icon = Icons.Default.Palette,
+                        title = "Color by Knowledge Status",
+                        subtitle = "Green for Know, Amber for Confusion, Red for Don't Know",
+                        checked = cColorByStatus,
+                        onCheckedChange = { checked ->
+                            cColorByStatus = checked
+                            ConfusionSetWidgetProvider.setColorByStatus(context, checked)
+                            ConfusionSetWidgetProvider.updateAllWidgets(context)
+                        }
+                    )
+
+                    HorizontalDivider(color = palette.border.copy(alpha = 0.5f))
+
+                    // 7. System Control Actions: Shuffle Now & Recompute Cache
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                ConfusionSetWidgetProvider.updateAllWidgets(context, direction = 1)
+                                Toast.makeText(context, "Rotated widget to next confusion group!", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                            contentPadding = PaddingValues(vertical = 8.dp)
+                        ) {
+                            Icon(Icons.Default.SkipNext, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text("Shuffle Now", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                isRecomputingConfusion = true
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    val db = AppDatabase.getDatabase(context)
+                                    val allWords = db.vocabularyDao().getAllWordsList()
+                                    val candidateWords = if (allWords.size > 200) allWords.take(200) else allWords
+                                    val config = ConfusionSimilarityEngine.ConfusionConfig(threshold = cThreshold.toDouble())
+                                    val newGroups = ConfusionSimilarityEngine.findConfusionGroups(
+                                        words = candidateWords,
+                                        config = config
+                                    ) { w, num ->
+                                        when (num) {
+                                            1 -> w.word
+                                            2 -> w.meaning
+                                            else -> w.synonyms ?: ""
+                                        }
+                                    }
+                                    ConfusionSetCacheManager.saveWidgetConfusionGroups(context, candidateWords, config, newGroups)
+                                    withContext(Dispatchers.Main) {
+                                        cachedConfusionGroupCount = newGroups.size
+                                        isRecomputingConfusion = false
+                                        ConfusionSetWidgetProvider.updateAllWidgets(context)
+                                        Toast.makeText(context, "Calculated ${newGroups.size} confusion groups for widget!", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            },
+                            enabled = !isRecomputingConfusion,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, palette.border),
+                            contentPadding = PaddingValues(vertical = 8.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                if (isRecomputingConfusion) "Analyzing..." else "Recompute ($cachedConfusionGroupCount)",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // ====================================================
+        // SECTION 2: DAILY VOCABULARY WIDGET
+        // ====================================================
+        item {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = palette.surface),
+                border = BorderStroke(1.dp, palette.border),
+                modifier = Modifier.fillMaxWidth().testTag("daily_vocab_widget_card")
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(15.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Widgets,
+                                contentDescription = "Daily Vocab",
+                                tint = IndigoPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Column {
+                            Text(
+                                text = "Daily Vocabulary Widget",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = palette.textPrimary
+                            )
+                            Text(
+                                text = "Appearance & Automatic Place 2 Reveal",
+                                fontSize = 11.sp,
+                                color = palette.textMuted
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = palette.border.copy(alpha = 0.5f))
+
+                    // Font Size
+                    val fontSizes = listOf("small", "medium", "large")
+                    val currentIdx = fontSizes.indexOf(selectedFontSize).coerceAtLeast(0)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Font Size", fontSize = 12.sp, color = palette.textPrimary)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    if (currentIdx > 0) {
+                                        val newKey = fontSizes[currentIdx - 1]
+                                        selectedFontSize = newKey
+                                        persistDailyVocabSettings(newFontSize = newKey)
+                                    }
+                                },
+                                enabled = currentIdx > 0,
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9))
+                            ) {
+                                Text("-", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = palette.textPrimary)
+                            }
+
+                            Text(
+                                text = when (selectedFontSize) {
+                                    "small" -> "Small"
+                                    "large" -> "Large"
+                                    else -> "Medium"
+                                },
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = IndigoPrimary,
+                                modifier = Modifier.widthIn(min = 52.dp),
+                                textAlign = TextAlign.Center
+                            )
+
+                            IconButton(
+                                onClick = {
+                                    if (currentIdx < fontSizes.size - 1) {
+                                        val newKey = fontSizes[currentIdx + 1]
+                                        selectedFontSize = newKey
+                                        persistDailyVocabSettings(newFontSize = newKey)
+                                    }
+                                },
+                                enabled = currentIdx < fontSizes.size - 1,
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .background(if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9))
+                            ) {
+                                Text("+", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = palette.textPrimary)
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = palette.border.copy(alpha = 0.5f))
+
+                    // Widget Layout Size
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Widget Layout", fontSize = 12.sp, color = palette.textPrimary)
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            listOf("compact" to "Compact", "standard" to "Standard", "large" to "Large").forEach { (key, label) ->
+                                FilterChip(
+                                    selected = selectedWidgetSize == key,
+                                    onClick = {
+                                        selectedWidgetSize = key
+                                        persistDailyVocabSettings(newWidgetSize = key)
+                                    },
+                                    label = { Text(label, fontSize = 10.sp) }
+                                )
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = palette.border.copy(alpha = 0.5f))
+
+                    SettingSwitchRow(
+                        icon = Icons.Default.RotateRight,
+                        title = "Rotate Every 10 Seconds",
+                        subtitle = "Shuffles through target vocabulary words automatically",
+                        checked = rotate10s,
+                        onCheckedChange = {
+                            rotate10s = it
+                            persistDailyVocabSettings(newRotate10s = it)
+                        }
+                    )
+
+                    HorizontalDivider(color = palette.border.copy(alpha = 0.5f))
+
+                    // Place 2 Reveal Delay
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "Place 2 (Meaning) Display Delay",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = palette.textPrimary
+                        )
+                        Text(
+                            text = "Shows Place 1 (Word) first, then reveals Place 2 (Meaning) after delay.",
+                            fontSize = 10.5.sp,
+                            color = palette.textMuted
+                        )
+
+                        val delayOptions = listOf(
+                            0f to "Instant",
+                            0.5f to "0.5s",
+                            1.0f to "1.0s",
+                            1.5f to "1.5s",
+                            2.0f to "2.0s",
+                            3.0f to "3.0s",
+                            5.0f to "5.0s"
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            delayOptions.forEach { (sec, label) ->
+                                FilterChip(
+                                    selected = selectedPlace2Delay == sec,
+                                    onClick = {
+                                        selectedPlace2Delay = sec
+                                        persistDailyVocabSettings(newPlace2Delay = sec)
+                                    },
+                                    label = { Text(label, fontSize = 10.5.sp) }
+                                )
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = palette.border.copy(alpha = 0.5f))
+
+                    Button(
+                        onClick = {
+                            persistDailyVocabSettings()
+                            DailyVocabWidgetProvider.updateAllWidgets(context)
+                            onRefreshWidget()
+                            Toast.makeText(context, "Daily Vocab Widget refreshed!", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Refresh Daily Vocab Widget Now", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+
+        // ====================================================
+        // SECTION 3: WORD STATUS FILTER FOR WIDGETS
+        // ====================================================
+        item {
+            Card(
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = palette.surface),
+                border = BorderStroke(1.dp, palette.border),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "Word Status Filter",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.5.sp,
+                        color = palette.textPrimary
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        wordFilterOptions.forEach { (key, label, icon) ->
+                            val isSelected = if (key == "all") selectedStatusFilters.isEmpty() else key in selectedStatusFilters
+                            val chipColor = when (key) {
+                                "know" -> EmeraldSuccess
+                                "confusion" -> AmberWarning
+                                "dont_know" -> Color(0xFFE11D48)
+                                "unrated" -> Color(0xFF64748B)
+                                "flagged" -> Color(0xFFE11D48)
+                                else -> IndigoPrimary
+                            }
+                            Surface(
+                                onClick = {
+                                    val newFilters = if (key == "all") {
+                                        emptySet()
+                                    } else {
+                                        if (key in selectedStatusFilters) selectedStatusFilters - key else selectedStatusFilters + key
+                                    }
+                                    selectedStatusFilters = newFilters
+                                    persistDailyVocabSettings(newStatusFilters = newFilters)
+                                },
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isSelected) chipColor else if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9),
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (isSelected) chipColor else palette.border
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(38.dp)
+                            ) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+                                    Icon(
+                                        imageVector = icon,
+                                        contentDescription = label,
+                                        modifier = Modifier.size(19.dp),
+                                        tint = if (isSelected) Color.White else chipColor
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ====================================================
+        // SECTION 4: TARGET COURSES SELECTION
+        // ====================================================
+        item {
+            var isTargetCoursesExpanded by remember { mutableStateOf(false) }
+
+            Card(
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = palette.surface),
+                border = BorderStroke(1.dp, palette.border),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { isTargetCoursesExpanded = !isTargetCoursesExpanded },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Target Courses",
+                                fontFamily = PoppinsFontFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.5.sp,
+                                color = palette.textPrimary
+                            )
+                            val selectedCount = selectedCourseIds.size
+                            val summaryText = when {
+                                courses.isEmpty() -> "No courses available"
+                                selectedCount == 0 -> "All courses included"
+                                selectedCount >= courses.size -> "All ${courses.size} courses selected"
+                                else -> "$selectedCount of ${courses.size} courses selected"
+                            }
+                            Text(
+                                text = summaryText,
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 11.sp,
+                                color = if (selectedCount > 0) EmeraldSuccess else palette.textMuted
+                            )
+                        }
+
+                        IconButton(
+                            onClick = { isTargetCoursesExpanded = !isTargetCoursesExpanded },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isTargetCoursesExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                contentDescription = if (isTargetCoursesExpanded) "Collapse" else "Expand",
+                                tint = palette.textMuted
+                            )
+                        }
+                    }
+
+                    AnimatedVisibility(
+                        visible = isTargetCoursesExpanded,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            HorizontalDivider(color = palette.border.copy(alpha = 0.6f))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Select courses for widgets:",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = palette.textMuted
+                                )
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    TextButton(
+                                        onClick = {
+                                            onSelectAllCourses()
+                                            val allIds = courses.map { it.id }.toSet()
+                                            DailyVocabWidgetProvider.saveSelectedCourseIds(context, allIds)
+                                            DailyVocabWidgetProvider.updateAllWidgets(context)
+                                            onRefreshWidget()
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                        modifier = Modifier.height(28.dp)
+                                    ) {
+                                        Text("Select All", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = IndigoPrimary)
+                                    }
+                                    Text("•", fontSize = 10.sp, color = palette.textMuted)
+                                    TextButton(
+                                        onClick = {
+                                            onDeselectAllCourses()
+                                            DailyVocabWidgetProvider.saveSelectedCourseIds(context, emptySet())
+                                            DailyVocabWidgetProvider.updateAllWidgets(context)
+                                            onRefreshWidget()
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                        modifier = Modifier.height(28.dp)
+                                    ) {
+                                        Text("Clear", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = palette.textMuted)
+                                    }
+                                }
+                            }
+
+                            if (courses.isEmpty()) {
+                                Text(
+                                    text = "No courses available in Library",
+                                    fontSize = 11.sp,
+                                    color = palette.textMuted,
+                                    modifier = Modifier.padding(vertical = 6.dp)
+                                )
+                            } else {
+                                val coursePairs = courses.chunked(2)
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    coursePairs.forEach { rowCourses ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            rowCourses.forEach { course ->
+                                                val isSelected = course.id in selectedCourseIds
+                                                val courseWordsCount = words.count { it.courseId == course.id }
+
+                                                Surface(
+                                                    onClick = {
+                                                        onToggleCourseSelection(course.id)
+                                                        val newSet = if (isSelected) selectedCourseIds - course.id else selectedCourseIds + course.id
+                                                        DailyVocabWidgetProvider.saveSelectedCourseIds(context, newSet)
+                                                        DailyVocabWidgetProvider.updateAllWidgets(context)
+                                                        onRefreshWidget()
+                                                    },
+                                                    shape = RoundedCornerShape(12.dp),
+                                                    color = if (isSelected) {
+                                                        if (palette.isDark) Color(0xFF064E3B) else Color(0xFFDCFCE7)
+                                                    } else {
+                                                        if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF8FAFC)
+                                                    },
+                                                    border = BorderStroke(
+                                                        if (isSelected) 1.5.dp else 1.dp,
+                                                        if (isSelected) EmeraldSuccess else palette.border
+                                                    ),
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .height(68.dp)
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier
+                                                            .fillMaxSize()
+                                                            .padding(10.dp),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.SpaceBetween
+                                                    ) {
+                                                        Column(
+                                                            modifier = Modifier.weight(1f),
+                                                            verticalArrangement = Arrangement.Center
+                                                        ) {
+                                                            Text(
+                                                                text = course.title,
+                                                                fontFamily = PoppinsFontFamily,
+                                                                fontWeight = FontWeight.SemiBold,
+                                                                fontSize = 11.5.sp,
+                                                                maxLines = 2,
+                                                                overflow = TextOverflow.Ellipsis,
+                                                                color = if (isSelected) {
+                                                                    if (palette.isDark) Color(0xFFA7F3D0) else Color(0xFF065F46)
+                                                                } else {
+                                                                    palette.textPrimary
+                                                                }
+                                                            )
+                                                            Text(
+                                                                text = "$courseWordsCount words",
+                                                                fontSize = 10.sp,
+                                                                color = if (isSelected) {
+                                                                    if (palette.isDark) Color(0xFF6EE7B7) else Color(0xFF047857)
+                                                                } else {
+                                                                    palette.textMuted
+                                                                }
+                                                            )
+                                                        }
+
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(18.dp)
+                                                                .clip(CircleShape)
+                                                                .background(
+                                                                    if (isSelected) EmeraldSuccess else palette.cardBorder
+                                                                ),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            if (isSelected) {
+                                                                Icon(
+                                                                    imageVector = Icons.Default.Check,
+                                                                    contentDescription = "Selected",
+                                                                    tint = Color.White,
+                                                                    modifier = Modifier.size(12.dp)
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            if (rowCourses.size == 1) {
+                                                Spacer(modifier = Modifier.weight(1f))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ----------------------------------------------------
+// TAB 3: Study Reminders & Notifications
+// ----------------------------------------------------
+@Composable
+private fun NotificationSettingsTab(
+    words: List<VocabularyWordEntity>,
+    courses: List<CourseEntity>,
+    selectedCourseIds: Set<String>
+) {
+    val context = LocalContext.current
+    val palette = LocalAppPalette.current
+
     val initialNotifSettings = remember { NotificationHelper.getNotificationSettings(context) }
     var isNotifEnabled by remember { mutableStateOf(initialNotifSettings.enabled) }
     var notifFrequency by remember { mutableStateOf(initialNotifSettings.frequency) }
@@ -2239,7 +3163,6 @@ private fun WidgetAndRemindersTab(
     var notifHour by remember { mutableStateOf(initialNotifSettings.hour) }
     var notifMinute by remember { mutableStateOf(initialNotifSettings.minute) }
 
-    // Permission launcher for Android 13+ (POST_NOTIFICATIONS)
     val notifPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
@@ -2285,62 +3208,9 @@ private fun WidgetAndRemindersTab(
         )
     }
 
-    // --- Target Courses Selection State (Fully Synced with App & Widget) ---
-    val isAllCourses = courses.isNotEmpty() && selectedCourseIds.size >= courses.size
-
-    // --- Shared Multi-Select Status Filter State ---
-    var selectedStatusFilters by remember {
-        mutableStateOf(DailyVocabWidgetProvider.getSelectedTagFilters(context))
-    }
-
-    // --- Widget Appearance State ---
-    var selectedFontSize by remember {
-        mutableStateOf(widgetPrefs.getString(DailyVocabWidgetProvider.KEY_WIDGET_FONT_SIZE, "medium") ?: "medium")
-    }
-    var selectedWidgetSize by remember {
-        mutableStateOf(widgetPrefs.getString(DailyVocabWidgetProvider.KEY_WIDGET_SIZE, "standard") ?: "standard")
-    }
-    var rotate10s by remember {
-        mutableStateOf(widgetPrefs.getBoolean(DailyVocabWidgetProvider.KEY_ROTATE_10S, true))
-    }
-    var selectedPlace2Delay by remember {
-        mutableFloatStateOf(widgetPrefs.getFloat(DailyVocabWidgetProvider.KEY_PLACE2_DELAY_SECONDS, 1.0f))
-    }
-
-    fun persistAllSettings(
-        newStatusFilters: Set<String> = selectedStatusFilters,
-        newFontSize: String = selectedFontSize,
-        newWidgetSize: String = selectedWidgetSize,
-        newRotate10s: Boolean = rotate10s,
-        newPlace2Delay: Float = selectedPlace2Delay
-    ) {
-        DailyVocabWidgetProvider.saveSelectedTagFilters(context, newStatusFilters)
-        widgetPrefs.edit()
-            .putString(DailyVocabWidgetProvider.KEY_WIDGET_FONT_SIZE, newFontSize)
-            .putString(DailyVocabWidgetProvider.KEY_WIDGET_SIZE, newWidgetSize)
-            .putBoolean(DailyVocabWidgetProvider.KEY_ROTATE_10S, newRotate10s)
-            .putFloat(DailyVocabWidgetProvider.KEY_PLACE2_DELAY_SECONDS, newPlace2Delay)
-            .apply()
-        DailyVocabWidgetProvider.updateAllWidgets(context)
-        onRefreshWidget()
-    }
-
-    val eligibleWords = remember(words, selectedCourseIds, isAllCourses, selectedStatusFilters) {
-        val courseFiltered = if (selectedCourseIds.isEmpty() || isAllCourses) {
-            words
-        } else {
-            words.filter { it.courseId in selectedCourseIds }
-        }
-        if (selectedStatusFilters.isEmpty()) {
-            courseFiltered
-        } else {
-            courseFiltered.filter { word ->
-                selectedStatusFilters.any { filter ->
-                    if (filter == "flagged") word.isReported
-                    else word.status.equals(filter, ignoreCase = true)
-                }
-            }
-        }
+    val eligibleWordsCount = remember(words, selectedCourseIds) {
+        if (selectedCourseIds.isEmpty()) words.size
+        else words.count { it.courseId in selectedCourseIds }
     }
 
     val frequencies = listOf(
@@ -2359,39 +3229,74 @@ private fun WidgetAndRemindersTab(
         Pair("daily", "Daily")
     )
 
-    val wordFilterOptions = listOf(
-        Triple("all", "All", Icons.Default.DoneAll),
-        Triple("know", "Know", Icons.Default.CheckCircle),
-        Triple("confusion", "Confusion", Icons.Default.Psychology),
-        Triple("dont_know", "Don't Know", Icons.Default.Cancel),
-        Triple("unrated", "Unrated", Icons.Default.HelpOutline),
-        Triple("flagged", "Flagged", Icons.Default.Flag)
-    )
-
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Study Reminders Notification Switch Card
+        item {
+            Column(modifier = Modifier.padding(horizontal = 2.dp, vertical = 2.dp)) {
+                Text(
+                    text = "Study Notifications",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = palette.textPrimary
+                )
+                Text(
+                    text = "Spaced repetition reminders delivered right to your device",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 11.5.sp,
+                    color = palette.textMuted
+                )
+            }
+        }
+
         item {
             Card(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = palette.surface),
-                border = BorderStroke(1.dp, palette.border)
+                border = BorderStroke(1.2.dp, if (isNotifEnabled) EmeraldSuccess.copy(alpha = 0.4f) else palette.border)
             ) {
-                Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(15.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Column {
-                            Text("Study Reminders", fontWeight = FontWeight.Bold, fontSize = 13.5.sp, color = palette.textPrimary)
-                            Text(
-                                if (isNotifEnabled) "Active • ${eligibleWords.size} words in pool" else "Disabled",
-                                fontSize = 11.sp,
-                                color = if (isNotifEnabled) EmeraldSuccess else palette.textMuted
-                            )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isNotifEnabled) EmeraldSuccess.copy(alpha = 0.15f) else palette.border.copy(alpha = 0.2f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.NotificationsActive,
+                                    contentDescription = null,
+                                    tint = if (isNotifEnabled) EmeraldSuccess else palette.textMuted,
+                                    modifier = Modifier.size(19.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "Study Reminders",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    color = palette.textPrimary
+                                )
+                                Text(
+                                    text = if (isNotifEnabled) "Active • $eligibleWordsCount words in study pool" else "Notifications disabled",
+                                    fontSize = 11.sp,
+                                    color = if (isNotifEnabled) EmeraldSuccess else palette.textMuted
+                                )
+                            }
                         }
 
                         Switch(
@@ -2424,8 +3329,7 @@ private fun WidgetAndRemindersTab(
                     if (isNotifEnabled) {
                         HorizontalDivider(color = palette.border.copy(alpha = 0.5f))
 
-                        // Frequency chips
-                        Text("Frequency", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = palette.textPrimary)
+                        Text("Notification Interval", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = palette.textPrimary)
                         Row(
                             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -2505,496 +3409,12 @@ private fun WidgetAndRemindersTab(
                             colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
                             contentPadding = PaddingValues(vertical = 8.dp)
                         ) {
+                            Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text("Send Test Notification Now", fontWeight = FontWeight.SemiBold, fontSize = 11.5.sp)
                         }
                     }
                 }
-            }
-        }
-
-        // Word Status Filter Card
-        item {
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = palette.surface),
-                border = BorderStroke(1.dp, palette.border),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Text(
-                        text = "Word Status Filter",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.5.sp,
-                        color = palette.textPrimary
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        wordFilterOptions.forEach { (key, label, icon) ->
-                            val isSelected = if (key == "all") selectedStatusFilters.isEmpty() else key in selectedStatusFilters
-                            val chipColor = when (key) {
-                                "know" -> EmeraldSuccess
-                                "confusion" -> AmberWarning
-                                "dont_know" -> Color(0xFFE11D48)
-                                "unrated" -> Color(0xFF64748B)
-                                "flagged" -> Color(0xFFE11D48)
-                                else -> IndigoPrimary
-                            }
-                            Surface(
-                                onClick = {
-                                    val newFilters = if (key == "all") {
-                                        emptySet()
-                                    } else {
-                                        if (key in selectedStatusFilters) selectedStatusFilters - key else selectedStatusFilters + key
-                                    }
-                                    selectedStatusFilters = newFilters
-                                    persistAllSettings(newStatusFilters = newFilters)
-                                },
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (isSelected) chipColor else if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9),
-                                border = BorderStroke(
-                                    1.dp,
-                                    if (isSelected) chipColor else palette.border
-                                ),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(38.dp)
-                            ) {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier.fillMaxSize()
-                                ) {
-                                    Icon(
-                                        imageVector = icon,
-                                        contentDescription = label,
-                                        modifier = Modifier.size(19.dp),
-                                        tint = if (isSelected) Color.White else chipColor
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Target Courses Dropdown Option with Equal Size Grid
-        item {
-            var isTargetCoursesExpanded by remember { mutableStateOf(true) }
-
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = palette.surface),
-                border = BorderStroke(1.dp, palette.border),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    // Dropdown Header Row
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { isTargetCoursesExpanded = !isTargetCoursesExpanded },
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Target Courses",
-                                fontFamily = PoppinsFontFamily,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.5.sp,
-                                color = palette.textPrimary
-                            )
-                            val selectedCount = selectedCourseIds.size
-                            val summaryText = when {
-                                courses.isEmpty() -> "No courses available"
-                                selectedCount == 0 -> "None selected (All courses included)"
-                                selectedCount >= courses.size -> "All ${courses.size} courses selected"
-                                else -> "$selectedCount of ${courses.size} courses selected"
-                            }
-                            Text(
-                                text = summaryText,
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 11.sp,
-                                color = if (selectedCount > 0) EmeraldSuccess else palette.textMuted
-                            )
-                        }
-
-                        IconButton(
-                            onClick = { isTargetCoursesExpanded = !isTargetCoursesExpanded },
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (isTargetCoursesExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                                contentDescription = if (isTargetCoursesExpanded) "Collapse" else "Expand",
-                                tint = palette.textMuted
-                            )
-                        }
-                    }
-
-                    Text(
-                        text = "Widget and study notifications will function only for the selected courses.",
-                        fontSize = 11.sp,
-                        color = palette.textMuted,
-                        lineHeight = 15.sp
-                    )
-
-                    // Expandable Dropdown Grid
-                    AnimatedVisibility(
-                        visible = isTargetCoursesExpanded,
-                        enter = expandVertically() + fadeIn(),
-                        exit = shrinkVertically() + fadeOut()
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 4.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            HorizontalDivider(color = palette.border.copy(alpha = 0.6f))
-
-                            // Multi-Select Action Controls
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "Select multiple courses:",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = palette.textMuted
-                                )
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    TextButton(
-                                        onClick = {
-                                            onSelectAllCourses()
-                                            val allIds = courses.map { it.id }.toSet()
-                                            DailyVocabWidgetProvider.saveSelectedCourseIds(context, allIds)
-                                            DailyVocabWidgetProvider.updateAllWidgets(context)
-                                            onRefreshWidget()
-                                        },
-                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-                                        modifier = Modifier.height(28.dp)
-                                    ) {
-                                        Text("Select All", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = IndigoPrimary)
-                                    }
-                                    Text("•", fontSize = 10.sp, color = palette.textMuted)
-                                    TextButton(
-                                        onClick = {
-                                            onDeselectAllCourses()
-                                            DailyVocabWidgetProvider.saveSelectedCourseIds(context, emptySet())
-                                            DailyVocabWidgetProvider.updateAllWidgets(context)
-                                            onRefreshWidget()
-                                        },
-                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-                                        modifier = Modifier.height(28.dp)
-                                    ) {
-                                        Text("Clear", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = palette.textMuted)
-                                    }
-                                }
-                            }
-
-                            // Equal Size Grid for Multi-Selecting Courses
-                            if (courses.isEmpty()) {
-                                Text(
-                                    text = "No courses available in Library",
-                                    fontSize = 11.sp,
-                                    color = palette.textMuted,
-                                    modifier = Modifier.padding(vertical = 6.dp)
-                                )
-                            } else {
-                                val coursePairs = courses.chunked(2)
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    coursePairs.forEach { rowCourses ->
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            rowCourses.forEach { course ->
-                                                val isSelected = course.id in selectedCourseIds
-                                                val courseWordsCount = words.count { it.courseId == course.id }
-
-                                                Surface(
-                                                    onClick = {
-                                                        onToggleCourseSelection(course.id)
-                                                        val newSet = if (isSelected) selectedCourseIds - course.id else selectedCourseIds + course.id
-                                                        DailyVocabWidgetProvider.saveSelectedCourseIds(context, newSet)
-                                                        DailyVocabWidgetProvider.updateAllWidgets(context)
-                                                        onRefreshWidget()
-                                                    },
-                                                    shape = RoundedCornerShape(12.dp),
-                                                    color = if (isSelected) {
-                                                        if (palette.isDark) Color(0xFF064E3B) else Color(0xFFDCFCE7)
-                                                    } else {
-                                                        if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF8FAFC)
-                                                    },
-                                                    border = BorderStroke(
-                                                        if (isSelected) 1.5.dp else 1.dp,
-                                                        if (isSelected) EmeraldSuccess else palette.border
-                                                    ),
-                                                    modifier = Modifier
-                                                        .weight(1f)
-                                                        .height(72.dp)
-                                                ) {
-                                                    Row(
-                                                        modifier = Modifier
-                                                            .fillMaxSize()
-                                                            .padding(10.dp),
-                                                        verticalAlignment = Alignment.CenterVertically,
-                                                        horizontalArrangement = Arrangement.SpaceBetween
-                                                    ) {
-                                                        Column(
-                                                            modifier = Modifier.weight(1f),
-                                                            verticalArrangement = Arrangement.Center
-                                                        ) {
-                                                            Text(
-                                                                text = course.title,
-                                                                fontFamily = PoppinsFontFamily,
-                                                                fontWeight = FontWeight.SemiBold,
-                                                                fontSize = 12.sp,
-                                                                maxLines = 2,
-                                                                overflow = TextOverflow.Ellipsis,
-                                                                color = if (isSelected) {
-                                                                    if (palette.isDark) Color(0xFFA7F3D0) else Color(0xFF065F46)
-                                                                } else {
-                                                                    palette.textPrimary
-                                                                }
-                                                            )
-                                                            Spacer(modifier = Modifier.height(2.dp))
-                                                            Text(
-                                                                text = "$courseWordsCount words",
-                                                                fontSize = 10.sp,
-                                                                color = if (isSelected) {
-                                                                    if (palette.isDark) Color(0xFF6EE7B7) else Color(0xFF047857)
-                                                                } else {
-                                                                    palette.textMuted
-                                                                }
-                                                            )
-                                                        }
-
-                                                        Box(
-                                                            modifier = Modifier
-                                                                .size(20.dp)
-                                                                .clip(CircleShape)
-                                                                .background(
-                                                                    if (isSelected) EmeraldSuccess else palette.cardBorder
-                                                                ),
-                                                            contentAlignment = Alignment.Center
-                                                        ) {
-                                                            if (isSelected) {
-                                                                Icon(
-                                                                    imageVector = Icons.Default.Check,
-                                                                    contentDescription = "Selected",
-                                                                    tint = Color.White,
-                                                                    modifier = Modifier.size(13.dp)
-                                                                )
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-
-                                            // Maintain equal column width if row has 1 item
-                                            if (rowCourses.size == 1) {
-                                                Spacer(modifier = Modifier.weight(1f))
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Widget Appearance & Rotation Settings Card
-        item {
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = palette.surface),
-                border = BorderStroke(1.dp, palette.border)
-            ) {
-                Column(modifier = Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Widget Appearance", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = palette.textPrimary)
-
-                    // Font Size: Only +/- icons on the side
-                    val fontSizes = listOf("small", "medium", "large")
-                    val currentIdx = fontSizes.indexOf(selectedFontSize).coerceAtLeast(0)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Font Size", fontSize = 12.sp, color = palette.textPrimary)
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            IconButton(
-                                onClick = {
-                                    if (currentIdx > 0) {
-                                        val newKey = fontSizes[currentIdx - 1]
-                                        selectedFontSize = newKey
-                                        persistAllSettings(newFontSize = newKey)
-                                    }
-                                },
-                                enabled = currentIdx > 0,
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .clip(CircleShape)
-                                    .background(if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9))
-                            ) {
-                                Text("-", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = palette.textPrimary)
-                            }
-
-                            Text(
-                                text = when (selectedFontSize) {
-                                    "small" -> "Small"
-                                    "large" -> "Large"
-                                    else -> "Medium"
-                                },
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = IndigoPrimary,
-                                modifier = Modifier.widthIn(min = 52.dp),
-                                textAlign = TextAlign.Center
-                            )
-
-                            IconButton(
-                                onClick = {
-                                    if (currentIdx < fontSizes.size - 1) {
-                                        val newKey = fontSizes[currentIdx + 1]
-                                        selectedFontSize = newKey
-                                        persistAllSettings(newFontSize = newKey)
-                                    }
-                                },
-                                enabled = currentIdx < fontSizes.size - 1,
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .clip(CircleShape)
-                                    .background(if (palette.isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9))
-                            ) {
-                                Text("+", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = palette.textPrimary)
-                            }
-                        }
-                    }
-
-                    HorizontalDivider(color = palette.border.copy(alpha = 0.5f))
-
-                    // Widget Size Options
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Widget Layout", fontSize = 12.sp, color = palette.textPrimary)
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            listOf("compact" to "Compact", "standard" to "Standard", "large" to "Large").forEach { (key, label) ->
-                                FilterChip(
-                                    selected = selectedWidgetSize == key,
-                                    onClick = {
-                                        selectedWidgetSize = key
-                                        persistAllSettings(newWidgetSize = key)
-                                    },
-                                    label = { Text(label, fontSize = 10.sp) }
-                                )
-                            }
-                        }
-                    }
-
-                    HorizontalDivider(color = palette.border.copy(alpha = 0.5f))
-
-                    SettingSwitchRow(
-                        icon = Icons.Default.RotateRight,
-                        title = "Rotate Every 10 Seconds",
-                        checked = rotate10s,
-                        onCheckedChange = {
-                            rotate10s = it
-                            persistAllSettings(newRotate10s = it)
-                        }
-                    )
-
-                    HorizontalDivider(color = palette.border.copy(alpha = 0.5f))
-
-                    // Place 2 Reveal Delay (Instant Guess) Option
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(
-                            text = "Place 2 (Meaning) Display Delay",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = palette.textPrimary
-                        )
-                        Text(
-                            text = "Shows Place 1 (Word) first, then automatically displays Place 2 (Meaning) after selected seconds.",
-                            fontSize = 10.5.sp,
-                            color = palette.textMuted,
-                            lineHeight = 14.sp
-                        )
-
-                        val delayOptions = listOf(
-                            0f to "Instant",
-                            0.5f to "0.5s",
-                            1.0f to "1.0s",
-                            1.5f to "1.5s",
-                            2.0f to "2.0s",
-                            3.0f to "3.0s",
-                            5.0f to "5.0s"
-                        )
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            delayOptions.forEach { (sec, label) ->
-                                FilterChip(
-                                    selected = selectedPlace2Delay == sec,
-                                    onClick = {
-                                        selectedPlace2Delay = sec
-                                        persistAllSettings(newPlace2Delay = sec)
-                                    },
-                                    label = { Text(label, fontSize = 10.5.sp) }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Refresh Widget Button
-        item {
-            Button(
-                onClick = {
-                    persistAllSettings()
-                    DailyVocabWidgetProvider.updateAllWidgets(context)
-                    onRefreshWidget()
-                    Toast.makeText(context, "Homescreen widget refreshed!", Toast.LENGTH_SHORT).show()
-                },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
-            ) {
-                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Refresh Homescreen Widget Now", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
             }
         }
     }
@@ -3909,7 +4329,8 @@ private fun SettingSwitchRow(
     icon: ImageVector,
     title: String,
     checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
+    onCheckedChange: (Boolean) -> Unit,
+    subtitle: String? = null
 ) {
     val palette = LocalAppPalette.current
     Row(
@@ -3921,12 +4342,19 @@ private fun SettingSwitchRow(
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Row(
+            modifier = Modifier.weight(1f, fill = false),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Icon(icon, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(18.dp))
-            Text(title, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = palette.textPrimary)
+            Column {
+                Text(title, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = palette.textPrimary)
+                if (!subtitle.isNullOrBlank()) {
+                    Text(subtitle, fontSize = 10.5.sp, color = palette.textMuted)
+                }
+            }
         }
+        Spacer(modifier = Modifier.width(8.dp))
         Switch(
             checked = checked,
             onCheckedChange = null,

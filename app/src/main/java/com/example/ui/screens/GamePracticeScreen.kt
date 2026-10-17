@@ -43,6 +43,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.data.model.*
 import com.example.data.sync.DiscoveredDriveFile
+import com.example.ui.util.LatexMathParser
+import com.example.ui.util.LatexMathText
 import com.example.ui.theme.*
 import com.example.ui.util.HapticHelper
 import com.example.ui.util.TtsManager
@@ -1230,7 +1232,7 @@ fun GamePracticeScreen(
                     border = BorderStroke(1.dp, SlateBorder),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
+                    LatexMathText(
                         text = stemText,
                         fontFamily = resolveQbFontFamily(qbQuestionFont, stemText),
                         fontSize = qbQuestionFontSize.sp,

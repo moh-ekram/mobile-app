@@ -28,6 +28,7 @@ object ConfusionSimilarityEngine {
     }
 
     enum class SortOption(val id: String, val label: String) {
+        RANDOM("random", "Random Shuffle"),
         SIMILARITY_DESC("sim_desc", "Highest Similarity"),
         SIZE_DESC("size_desc", "Largest Group"),
         ALPHABETICAL("alpha", "Alphabetical (A-Z)")
@@ -41,7 +42,7 @@ object ConfusionSimilarityEngine {
         val spellingWeight: Double = 0.70,
         val pronunciationWeight: Double = 0.30,
         val maxClusterSize: Int = 5,
-        val sortBy: SortOption = SortOption.SIMILARITY_DESC
+        val sortBy: SortOption = SortOption.RANDOM
     )
 
     data class ConfusionWordItem(
@@ -741,6 +742,7 @@ object ConfusionSimilarityEngine {
 
         // 4. Sort groups according to config
         return when (config.sortBy) {
+            SortOption.RANDOM -> groups.shuffled()
             SortOption.SIMILARITY_DESC -> groups.sortedByDescending { it.maxSimilarity }
             SortOption.SIZE_DESC -> groups.sortedWith(compareByDescending<ConfusionGroup> { it.words.size }.thenByDescending { it.maxSimilarity })
             SortOption.ALPHABETICAL -> groups.sortedBy { it.words.firstOrNull()?.place1?.lowercase(Locale.ROOT) ?: "" }

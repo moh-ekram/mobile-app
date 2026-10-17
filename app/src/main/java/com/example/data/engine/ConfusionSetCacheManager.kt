@@ -88,7 +88,7 @@ object ConfusionSetCacheManager {
             val spellingWeight = obj.optDouble("spellingWeight", 0.70)
             val pronunciationWeight = obj.optDouble("pronunciationWeight", 0.30)
             val maxClusterSize = obj.optInt("maxClusterSize", 5)
-            val sortBy = SortOption.entries.find { it.id == obj.optString("sortBy") } ?: SortOption.SIMILARITY_DESC
+            val sortBy = SortOption.entries.find { it.id == obj.optString("sortBy") } ?: SortOption.RANDOM
 
             ConfusionConfig(
                 field = field,
@@ -138,6 +138,19 @@ object ConfusionSetCacheManager {
     private fun getCacheFile(context: Context, courseId: String): File {
         val safeId = courseId.replace(Regex("""[^a-zA-Z0-9_-]"""), "_")
         return File(getCacheDir(context), "cache_$safeId.json")
+    }
+
+    /**
+     * Saves computed confusion groups for widget directly.
+     */
+    fun saveWidgetConfusionGroups(
+        context: Context,
+        words: List<VocabularyWordEntity>,
+        config: ConfusionConfig,
+        groups: List<ConfusionGroup>
+    ) {
+        val courseId = getLastCourseId(context) ?: "default"
+        saveConfusionGroups(context, courseId, words, config, groups)
     }
 
     /**
@@ -371,5 +384,73 @@ object ConfusionSetCacheManager {
         } catch (e: Exception) {
             Log.e(TAG, "Error clearing all cache: ${e.message}")
         }
+    }
+
+    /**
+     * Quick synchronous loader for widget display.
+     * Loads the active or latest cached groups from local storage.
+     */
+    fun getCachedGroupsForWidget(context: Context): List<ConfusionGroup> {
+        try {
+            val dir = getCacheDir(context)
+            val files = dir.listFiles { f -> f.name.startsWith("cache_") && f.name.endsWith(".json") }
+            if (files != null && files.isNotEmpty()) {
+                val lastCourseId = getLastCourseId(context)
+                val safeLast = lastCourseId?.replace(Regex("""[^a-zA-Z0-9_-]"""), "_")
+                val preferredFile = files.find { safeLast != null && it.name == "cache_$safeLast.json" } ?: files.first()
+                val text = preferredFile.readText()
+                if (text.isNotBlank()) {
+                    val root = JSONObject(text)
+                    val groupsArray = root.getJSONArray("groups")
+                    val groups = mutableListOf<ConfusionGroup>()
+                    for (i in 0 until groupsArray.length()) {
+                        val groupObj = groupsArray.getJSONObject(i)
+                        val groupId = groupObj.getString("id")
+                        val avgSim = groupObj.getDouble("avgSimilarity")
+                        val maxSim = groupObj.getDouble("maxSimilarity")
+                        val reason = groupObj.optString("representativeReason", "")
+                        val wordsArray = groupObj.getJSONArray("words")
+                        val wordItemsList = mutableListOf<ConfusionWordItem>()
+                        for (j in 0 until wordsArray.length()) {
+                            val wObj = wordsArray.getJSONObject(j)
+                            val entity = VocabularyWordEntity(
+                                id = wObj.getString("wordId"),
+                                word = wObj.optString("word", ""),
+                                meaning = wObj.optString("meaning", ""),
+                                synonyms = wObj.optString("synonyms", ""),
+                                courseId = wObj.optString("courseId", ""),
+                                status = wObj.optString("status", "unrated")
+                            )
+                            wordItemsList.add(
+                                ConfusionWordItem(
+                                    wordEntity = entity,
+                                    place1 = wObj.optString("place1", entity.word),
+                                    place2 = wObj.optString("place2", entity.meaning),
+                                    place3 = wObj.optString("place3").takeIf { it.isNotBlank() },
+                                    comparedRawValue = wObj.optString("comparedRawValue", ""),
+                                    comparedNormalized = wObj.optString("comparedNormalized", "")
+                                )
+                            )
+                        }
+                        if (wordItemsList.size >= 2) {
+                            groups.add(
+                                ConfusionGroup(
+                                    id = groupId,
+                                    words = wordItemsList,
+                                    avgSimilarity = avgSim,
+                                    maxSimilarity = maxSim,
+                                    representativeReason = reason,
+                                    pairs = emptyList()
+                                )
+                            )
+                        }
+                    }
+                    if (groups.isNotEmpty()) return groups
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in getCachedGroupsForWidget: ${e.message}")
+        }
+        return emptyList()
     }
 }

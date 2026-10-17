@@ -56,7 +56,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.VocabularyWordEntity
 import com.example.ui.theme.*
+import com.example.ui.util.FlashcardDesignConfig
+import com.example.ui.util.FlashcardDesignManager
 import com.example.ui.util.HapticHelper
+import com.example.ui.util.LatexMathText
 
 @Composable
 fun Flashcard(
@@ -67,6 +70,7 @@ fun Flashcard(
     isFocusMode: Boolean = false,
     isHapticEnabled: Boolean = true,
     isAutoAdvanceEnabled: Boolean = false,
+    designConfig: FlashcardDesignConfig? = null,
     onRate: (String) -> Unit,
     onNext: () -> Unit,
     onSpeak: (String) -> Unit,
@@ -76,6 +80,8 @@ fun Flashcard(
     val context = LocalContext.current
     val palette = LocalAppPalette.current
     val hapticHelper = remember { HapticHelper(context) }
+    val effectiveConfig = designConfig ?: remember { FlashcardDesignManager.loadConfig(context) }
+
     var isFlipped by remember(word.id) { mutableStateOf(false) }
     var hasFlippedCurrentCard by remember(word.id) { mutableStateOf(false) }
 
@@ -126,6 +132,42 @@ fun Flashcard(
         } catch (_: Exception) {}
     }
 
+    val cardBg = effectiveConfig.resolveCardBackgroundColor(palette.cardBackground)
+    val cardRadius = effectiveConfig.cornerRadiusDp.dp
+    val cardElevation = effectiveConfig.cardElevationDp.dp
+    val cardBorderWidth = effectiveConfig.borderWidthDp.dp
+
+    val flipGraphicsMod = if (isFlipAnimationEnabled) {
+        when (effectiveConfig.flipAnimationStyle) {
+            "flip_3d_v" -> Modifier.graphicsLayer {
+                rotationX = rotation
+                cameraDistance = 16f * density
+            }
+            "fade" -> Modifier.graphicsLayer {
+                alpha = if (rotation <= 90f) (1f - (rotation / 90f)).coerceIn(0f, 1f) else ((rotation - 90f) / 90f).coerceIn(0f, 1f)
+            }
+            "zoom" -> Modifier.graphicsLayer {
+                rotationY = rotation
+                cameraDistance = 16f * density
+                val factor = if (rotation <= 90f) 1f - (0.12f * (rotation / 90f)) else 0.88f + (0.12f * ((rotation - 90f) / 90f))
+                scaleX = factor
+                scaleY = factor
+            }
+            else -> Modifier.graphicsLayer {
+                rotationY = rotation
+                cameraDistance = 16f * density
+            }
+        }
+    } else Modifier
+
+    val backRotationMod = if (isFlipAnimationEnabled) {
+        when (effectiveConfig.flipAnimationStyle) {
+            "flip_3d_v" -> Modifier.graphicsLayer { rotationX = 180f }
+            "fade" -> Modifier
+            else -> Modifier.graphicsLayer { rotationY = 180f }
+        }
+    } else Modifier
+
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -142,18 +184,11 @@ fun Flashcard(
 
         Box(
             modifier = cardHeightMod
-                .then(
-                    if (isFlipAnimationEnabled) {
-                        Modifier.graphicsLayer {
-                            rotationY = rotation
-                            cameraDistance = 16f * density
-                        }
-                    } else Modifier
-                )
-                .shadow(elevation = if (palette.isDark) 4.dp else 12.dp, shape = RoundedCornerShape(28.dp), spotColor = Color(0x264F46E5))
-                .clip(RoundedCornerShape(28.dp))
-                .background(palette.cardBackground)
-                .border(1.dp, palette.cardBorder, RoundedCornerShape(28.dp))
+                .then(flipGraphicsMod)
+                .shadow(elevation = if (palette.isDark) 4.dp else cardElevation, shape = RoundedCornerShape(cardRadius), spotColor = Color(0x264F46E5))
+                .clip(RoundedCornerShape(cardRadius))
+                .background(cardBg)
+                .border(cardBorderWidth, if (effectiveConfig.cardStyle == "minimal") IndigoPrimary.copy(alpha = 0.5f) else palette.cardBorder, RoundedCornerShape(cardRadius))
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
@@ -182,6 +217,7 @@ fun Flashcard(
                     flipCount = flipCount,
                     bounceY = bounceY,
                     isFocusMode = isFocusMode,
+                    designConfig = effectiveConfig,
                     onSearch = { openGoogleSearch(word.word) },
                     onSpeak = {
                         if (isHapticEnabled) hapticHelper.subtleTick()
@@ -199,15 +235,14 @@ fun Flashcard(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .then(
-                            if (isFlipAnimationEnabled) Modifier.graphicsLayer { rotationY = 180f } else Modifier
-                        )
+                        .then(backRotationMod)
                 ) {
                     BackFaceContent(
                         word = word,
                         status = status,
                         courseName = courseName,
                         isFocusMode = isFocusMode,
+                        designConfig = effectiveConfig,
                         onSearch = { openGoogleSearch(word.word) },
                         onSpeak = {
                             if (isHapticEnabled) hapticHelper.subtleTick()
@@ -289,6 +324,7 @@ private fun FrontFaceContent(
     flipCount: Int = 0,
     bounceY: Float,
     isFocusMode: Boolean = false,
+    designConfig: FlashcardDesignConfig = FlashcardDesignConfig(),
     onSearch: () -> Unit,
     onSpeak: () -> Unit,
     onReportClick: () -> Unit = {},
@@ -376,7 +412,8 @@ private fun FrontFaceContent(
             val wordColor = getWordStatusColor(status, palette.isDark)
 
             val wordLen = frontWord.length
-            val dynamicFontSize = when {
+            val scale = designConfig.place1MaxFontSize.toFloat() / 30f
+            val baseSize = when {
                 wordLen <= 6 -> if (isFocusMode) 38.sp else 34.sp
                 wordLen <= 10 -> if (isFocusMode) 32.sp else 28.sp
                 wordLen <= 14 -> if (isFocusMode) 26.sp else 23.sp
@@ -384,21 +421,28 @@ private fun FrontFaceContent(
                 wordLen <= 24 -> if (isFocusMode) 19.sp else 17.sp
                 else -> if (isFocusMode) 16.sp else 15.sp
             }
-            val dynamicLineHeight = (dynamicFontSize.value * 1.22f).sp
+            val dynamicFontSize = (baseSize.value * scale).coerceIn(14f, 44f).sp
+            val dynamicLineHeight = (dynamicFontSize.value * 1.25f).sp
 
-            // Place 1 Word (Only place1 is shown on front side)
-            Text(
+            val cardFontFamily = when (designConfig.fontFamilyType) {
+                "serif" -> FontFamily.Serif
+                "monospace" -> FontFamily.Monospace
+                "sans" -> FontFamily.SansSerif
+                else -> selectFontForText(frontWord)
+            }
+            val cardTextAlign = if (designConfig.textAlignment == "start") TextAlign.Start else TextAlign.Center
+
+            // Place 1 Word (Rendered with LatexMathText to support math and formulas)
+            LatexMathText(
                 text = frontWord,
-                fontFamily = selectFontForText(frontWord),
+                fontFamily = cardFontFamily,
                 fontSize = dynamicFontSize,
                 fontWeight = FontWeight.ExtraBold,
                 color = wordColor,
-                letterSpacing = (-0.5).sp,
-                textAlign = TextAlign.Center,
+                textAlign = cardTextAlign,
                 lineHeight = dynamicLineHeight,
                 maxLines = 4,
                 softWrap = true,
-                overflow = androidx.compose.ui.text.style.TextOverflow.Clip,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 4.dp)
@@ -515,6 +559,7 @@ private fun BackFaceContent(
     status: String,
     courseName: String = "",
     isFocusMode: Boolean = false,
+    designConfig: FlashcardDesignConfig = FlashcardDesignConfig(),
     onSearch: () -> Unit,
     onSpeak: () -> Unit,
     onReportClick: () -> Unit = {},
@@ -702,18 +747,34 @@ private fun BackFaceContent(
                             letterSpacing = 1.sp
                         )
                         Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = if (isMeaning) {
-                                AnnotatedString(detail.value)
-                            } else {
-                                formatLineWithRedWord(detail.value, word.word)
-                            },
-                            fontFamily = font,
-                            fontSize = if (isMeaning) 21.sp else if (isBengali) 16.sp else 14.sp,
+                        val detailFontSize = if (isMeaning) {
+                            designConfig.place2MaxFontSize.sp
+                        } else if (detail.placeNum == 3) {
+                            designConfig.place3MaxFontSize.sp
+                        } else if (isBengali) {
+                            (designConfig.place3MaxFontSize * 0.95f).sp
+                        } else {
+                            (designConfig.place3MaxFontSize * 0.90f).sp
+                        }
+
+                        val cardFontFamily = when (designConfig.fontFamilyType) {
+                            "serif" -> FontFamily.Serif
+                            "monospace" -> FontFamily.Monospace
+                            "sans" -> FontFamily.SansSerif
+                            else -> font
+                        }
+                        val cardTextAlign = if (designConfig.textAlignment == "start") TextAlign.Start else TextAlign.Center
+
+                        LatexMathText(
+                            text = detail.value,
+                            fontFamily = cardFontFamily,
+                            fontSize = detailFontSize,
                             fontWeight = if (isMeaning) FontWeight.ExtraBold else FontWeight.Medium,
                             color = if (isMeaning) EmeraldSuccess else SlateText,
-                            textAlign = TextAlign.Center,
-                            lineHeight = if (isMeaning) 26.sp else 20.sp
+                            textAlign = cardTextAlign,
+                            lineHeight = (detailFontSize.value * 1.35f).sp,
+                            highlightWord = if (!isMeaning) word.word else null,
+                            highlightColor = if (!isMeaning) Color(0xFFDC2626) else null
                         )
                     }
                 }

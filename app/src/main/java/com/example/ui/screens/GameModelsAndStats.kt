@@ -43,6 +43,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.data.model.*
 import com.example.ui.theme.*
+import com.example.ui.util.LatexMathParser
+import com.example.ui.util.LatexMathText
 import com.example.ui.util.HapticHelper
 import com.example.ui.util.TtsManager
 import kotlinx.coroutines.delay
@@ -362,53 +364,66 @@ fun ColorizedQuestionText(
     modifier: Modifier = Modifier
 ) {
     val highlightColor = Color(0xFFDC2626) // Fixed red
+    val effectiveFont = fontFamily ?: (if (isBengaliText(question)) KalpurushFontFamily else PoppinsFontFamily)
 
-    val annotated = remember(question, highlightColor, fontFamily) {
-        buildAnnotatedString {
-            val regex = Regex("\\[([^\\]]+)\\]")
-            var lastIndex = 0
-            val matches = regex.findAll(question).toList()
+    if (LatexMathParser.hasLatex(question)) {
+        LatexMathText(
+            text = question,
+            fontFamily = effectiveFont,
+            fontSize = fontSize,
+            fontWeight = FontWeight.Bold,
+            color = SlateText,
+            lineHeight = (fontSize.value * 1.35f).sp,
+            highlightColor = highlightColor,
+            modifier = modifier
+        )
+    } else {
+        val annotated = remember(question, highlightColor, fontFamily) {
+            buildAnnotatedString {
+                val regex = Regex("\\[([^\\]]+)\\]")
+                var lastIndex = 0
+                val matches = regex.findAll(question).toList()
 
-            if (matches.isEmpty()) {
-                append(question)
-            } else {
-                for (match in matches) {
-                    val range = match.range
-                    if (range.first > lastIndex) {
-                        append(question.substring(lastIndex, range.first))
-                    }
-                    val wordInside = match.groupValues[1]
-                    val isBengali = isBengaliText(wordInside)
-                    val effectiveWordFont = fontFamily ?: (if (isBengali) KalpurushFontFamily else PoppinsFontFamily)
-                    pushStyle(
-                        SpanStyle(
-                            color = highlightColor,
-                            fontWeight = FontWeight.ExtraBold,
-                            fontFamily = effectiveWordFont,
-                            fontSynthesis = androidx.compose.ui.text.font.FontSynthesis.All
+                if (matches.isEmpty()) {
+                    append(question)
+                } else {
+                    for (match in matches) {
+                        val range = match.range
+                        if (range.first > lastIndex) {
+                            append(question.substring(lastIndex, range.first))
+                        }
+                        val wordInside = match.groupValues[1]
+                        val isBengali = isBengaliText(wordInside)
+                        val effectiveWordFont = fontFamily ?: (if (isBengali) KalpurushFontFamily else PoppinsFontFamily)
+                        pushStyle(
+                            SpanStyle(
+                                color = highlightColor,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontFamily = effectiveWordFont,
+                                fontSynthesis = androidx.compose.ui.text.font.FontSynthesis.All
+                            )
                         )
-                    )
-                    append(wordInside)
-                    pop()
-                    lastIndex = range.last + 1
-                }
-                if (lastIndex < question.length) {
-                    append(question.substring(lastIndex))
+                        append(wordInside)
+                        pop()
+                        lastIndex = range.last + 1
+                    }
+                    if (lastIndex < question.length) {
+                        append(question.substring(lastIndex))
+                    }
                 }
             }
         }
-    }
 
-    val effectiveFont = fontFamily ?: (if (isBengaliText(question)) KalpurushFontFamily else PoppinsFontFamily)
-    Text(
-        text = annotated,
-        fontFamily = effectiveFont,
-        fontSize = fontSize,
-        fontWeight = FontWeight.Bold,
-        color = SlateText,
-        lineHeight = (fontSize.value * 1.35f).sp,
-        modifier = modifier
-    )
+        Text(
+            text = annotated,
+            fontFamily = effectiveFont,
+            fontSize = fontSize,
+            fontWeight = FontWeight.Bold,
+            color = SlateText,
+            lineHeight = (fontSize.value * 1.35f).sp,
+            modifier = modifier
+        )
+    }
 }
 
 internal fun resolveQbFontFamily(fontKey: String, sampleText: String): FontFamily {

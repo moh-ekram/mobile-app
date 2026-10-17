@@ -168,10 +168,13 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
                         saveSelectedCoursesToPrefs(allIds)
                         com.example.widget.DailyVocabWidgetProvider.saveSelectedCourseIds(getApplication(), allIds)
                     } else {
-                        // Restore previously saved user selection
+                        // Restore previously saved user selection, ensuring at least one course is always selected
                         val saved = loadSavedSelectedCourseIds()
-                        if (saved != null) {
-                            _selectedCourseIds.value = saved
+                        val validSaved = saved?.filter { sId -> courses.any { it.id == sId } }?.toSet()
+                        if (!validSaved.isNullOrEmpty()) {
+                            _selectedCourseIds.value = validSaved
+                        } else {
+                            _selectedCourseIds.value = setOf(courses.first().id)
                         }
                     }
 
@@ -202,7 +205,10 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
     fun toggleCourseSelection(courseId: String) {
         val current = _selectedCourseIds.value.toMutableSet()
         if (current.contains(courseId)) {
-            current.remove(courseId)
+            // Keep at least one course selected
+            if (current.size > 1) {
+                current.remove(courseId)
+            }
         } else {
             current.add(courseId)
         }
@@ -236,14 +242,17 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun deselectAllCourses() {
-        _selectedCourseIds.value = emptySet()
-        saveSelectedCoursesToPrefs(emptySet())
+        // Keep at least one course selected
+        val firstId = allCourses.value.firstOrNull()?.id
+        val newSelection = if (firstId != null) setOf(firstId) else emptySet()
+        _selectedCourseIds.value = newSelection
+        saveSelectedCoursesToPrefs(newSelection)
 
-        com.example.widget.DailyVocabWidgetProvider.saveSelectedCourseIds(getApplication(), emptySet())
+        com.example.widget.DailyVocabWidgetProvider.saveSelectedCourseIds(getApplication(), newSelection)
         com.example.widget.DailyVocabWidgetProvider.updateAllWidgets(getApplication())
 
-        activeCourseId.value = ""
-        coursePrefs.edit().putString("saved_active_course_id", "").apply()
+        activeCourseId.value = firstId ?: ""
+        coursePrefs.edit().putString("saved_active_course_id", firstId ?: "").apply()
     }
 
     fun setCourseSelected(courseId: String, selected: Boolean) {
@@ -251,7 +260,9 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         if (selected) {
             current.add(courseId)
         } else {
-            current.remove(courseId)
+            if (current.size > 1) {
+                current.remove(courseId)
+            }
         }
         _selectedCourseIds.value = current
         saveSelectedCoursesToPrefs(current)

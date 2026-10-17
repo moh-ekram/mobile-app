@@ -125,6 +125,10 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIncomingSendIntent(incomingIntent: Intent?, vm: MemorizerViewModel? = memorizerViewModel) {
         try {
+            val targetRoute = incomingIntent?.getStringExtra("target_route")
+            if (!targetRoute.isNullOrBlank()) {
+                vm?.setRoute(targetRoute)
+            }
             if (incomingIntent?.action == Intent.ACTION_SEND) {
                 val clipText = try {
                     val clip = incomingIntent.clipData
@@ -146,6 +150,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         try {
             DailyVocabWidgetProvider.startFrequentTicker(this)
+            com.example.widget.ConfusionSetWidgetProvider.startFrequentTicker(this)
         } catch (e: Exception) {
             android.util.Log.e("MainActivity", "Error starting ticker in onResume", e)
         }
@@ -344,7 +349,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                                     // On all other screens, the [m] Memorizer icon is EXPLICITLY HIDDEN
                                     val screenTitle = when (currentRoute) {
                                         "flashcard" -> "Flashcards"
-                                        "games" -> "Practice Games"
+                                        "games" -> "Features"
                                         "confusion_set" -> "Confusion Set"
                                         "courses" -> "Course Library"
                                         "settings", "admin", "profile" -> "Settings"
@@ -440,7 +445,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                         val navItems = listOf(
                             NavigationItem("home", "Home", Icons.Default.Home),
                             NavigationItem("flashcard", "Flashcard", Icons.Default.Style),
-                            NavigationItem("games", "Games", Icons.Default.SportsEsports),
+                            NavigationItem("games", "Features", Icons.Default.Category),
                             NavigationItem("courses", "Courses", Icons.Default.School),
                             NavigationItem("settings", "Settings", Icons.Default.Settings)
                         )
@@ -685,7 +690,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             downloadingCourseFileIds = downloadingCourseFileIds,
                             onRefreshDriveCourses = { viewModel.refreshDriveCoursesList() },
                             onDownloadDriveCourse = { item -> viewModel.downloadAndAddDriveCourse(item) },
-                            initialTab = if (currentRoute == "admin") 3 else 0,
+                            initialTab = if (currentRoute == "admin") 4 else 0,
                             onToggleDarkTheme = { enable -> viewModel.setDarkTheme(enable) },
                             onToggleFlipAnimation = { enable -> viewModel.setFlipAnimationEnabled(enable) },
                             onToggleFocusMode = { enable -> viewModel.setFocusMode(enable) },

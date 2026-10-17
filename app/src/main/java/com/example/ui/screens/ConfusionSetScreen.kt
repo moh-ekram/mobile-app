@@ -35,9 +35,11 @@ import com.example.data.engine.ConfusionSimilarityEngine.SortOption
 import com.example.data.model.CourseEntity
 import com.example.data.model.VocabularyWordEntity
 import com.example.ui.theme.*
+import com.example.ui.util.ConfusionExportHelper
 import com.example.ui.util.HapticHelper
 import com.example.ui.util.TtsManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
 
@@ -87,6 +89,7 @@ fun ConfusionSetScreen(
     var showAdvancedSettings by remember { mutableStateOf(false) }
     var showGlobalQuiz by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
+    var isSearchExpanded by remember { mutableStateOf(false) }
 
     // Configuration state initialized from persistent storage
     var config by remember { mutableStateOf(initialSavedConfig) }
@@ -109,7 +112,8 @@ fun ConfusionSetScreen(
     // State tracking groups, cache status, and rematching
     var isComputing by remember { mutableStateOf(false) }
     var confusionGroups by remember(selectedCourseId) {
-        mutableStateOf<List<ConfusionGroup>>(initialCache?.groups ?: emptyList())
+        val initial = initialCache?.groups ?: emptyList()
+        mutableStateOf<List<ConfusionGroup>>(if (config.sortBy == SortOption.RANDOM) initial.shuffled() else initial)
     }
     var isCachedMatch by remember(selectedCourseId) {
         mutableStateOf(initialCache?.isExactMatch == true)
@@ -138,7 +142,7 @@ fun ConfusionSetScreen(
 
         // If rematch was not explicitly triggered and cached groups match exact words + settings:
         if (rematchTrigger == 0 && cached != null && cached.isExactMatch) {
-            confusionGroups = cached.groups
+            confusionGroups = if (config.sortBy == SortOption.RANDOM) cached.groups.shuffled() else cached.groups
             isCachedMatch = true
             cacheTimestamp = cached.timestamp
             isComputing = false
@@ -162,7 +166,7 @@ fun ConfusionSetScreen(
                 groups = groups
             )
             withContext(Dispatchers.Main) {
-                confusionGroups = groups
+                confusionGroups = if (config.sortBy == SortOption.RANDOM) groups.shuffled() else groups
                 isCachedMatch = true
                 cacheTimestamp = System.currentTimeMillis()
                 isComputing = false
@@ -269,57 +273,138 @@ fun ConfusionSetScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
-                // 2. Course Selector Bar
+                // 2. Course Selector Bar with Iconized Expandable Search (replaces search field)
                 val selectedCourse = courses.find { it.id == selectedCourseId }
-                Surface(
-                    onClick = { showCourseMenu = true },
-                    shape = RoundedCornerShape(10.dp),
-                    color = Color(0xFFF1F5F9),
-                    border = BorderStroke(1.dp, SlateBorder),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+
+                if (isSearchExpanded) {
+                    // Expanded Search Bar taking over the course selector row
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .height(42.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = {
+                                Text(
+                                    text = "Search in ${selectedCourse?.title ?: "course"}...",
+                                    fontSize = 12.sp,
+                                    color = SlateMuted
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Default.Search,
+                                    contentDescription = null,
+                                    tint = IndigoPrimary,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            },
+                            trailingIcon = {
+                                IconButton(
+                                    onClick = {
+                                        searchQuery = ""
+                                        isSearchExpanded = false
+                                    },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Collapse search",
+                                        tint = SlateMuted,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            },
+                            singleLine = true,
+                            shape = RoundedCornerShape(10.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = Color.White,
+                                unfocusedContainerColor = Color(0xFFF8FAFC),
+                                focusedBorderColor = IndigoPrimary,
+                                unfocusedBorderColor = SlateBorder
+                            ),
+                            modifier = Modifier.weight(1f).fillMaxHeight()
+                        )
+                    }
+                } else {
+                    // Normal state: Course Selector with compact Search Icon Button on the right
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Surface(
+                            onClick = { showCourseMenu = true },
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFFF1F5F9),
+                            border = BorderStroke(1.dp, SlateBorder),
                             modifier = Modifier.weight(1f)
                         ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Folder,
+                                        contentDescription = null,
+                                        tint = IndigoPrimary,
+                                        modifier = Modifier.size(17.dp)
+                                    )
+                                    Text(
+                                        text = selectedCourse?.title ?: "Select Course",
+                                        fontFamily = PoppinsFontFamily,
+                                        fontSize = 12.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = SlateText,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "(${courseWords.size})",
+                                        fontFamily = PoppinsFontFamily,
+                                        fontSize = 11.sp,
+                                        color = SlateMuted
+                                    )
+                                }
+                                Icon(
+                                    imageVector = Icons.Default.ArrowDropDown,
+                                    contentDescription = "Select Course",
+                                    tint = SlateMuted,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        // Iconized Search Button
+                        IconButton(
+                            onClick = { isSearchExpanded = true },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFFF1F5F9))
+                                .border(1.dp, SlateBorder, RoundedCornerShape(8.dp))
+                        ) {
                             Icon(
-                                imageVector = Icons.Default.Folder,
-                                contentDescription = null,
-                                tint = IndigoPrimary,
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "Search words",
+                                tint = if (searchQuery.isNotBlank()) IndigoPrimary else SlateText,
                                 modifier = Modifier.size(18.dp)
                             )
-                            Text(
-                                text = selectedCourse?.title ?: "Select Course",
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = SlateText,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "(${courseWords.size} words)",
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 11.5.sp,
-                                color = SlateMuted
-                            )
                         }
-                        Icon(
-                            imageVector = Icons.Default.ArrowDropDown,
-                            contentDescription = "Select Course",
-                            tint = SlateMuted,
-                            modifier = Modifier.size(20.dp)
-                        )
                     }
                 }
 
@@ -358,159 +443,51 @@ fun ConfusionSetScreen(
                         )
                     }
                 }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // 3. Comparison Field Selector (Using dynamic labels from course header/excel file)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    ComparisonField.entries.forEach { field ->
-                        val isSelected = config.field == field
-                        val dynamicLabel = getPlaceLabel(field.placeNumber, selectedCourseId)
-
-                        Surface(
-                            onClick = {
-                                val newConfig = config.copy(
-                                    field = field,
-                                    mode = if (field != ComparisonField.PLACE1 && config.mode == MatchingMode.SPELLING) {
-                                        MatchingMode.MEANING
-                                    } else if (field == ComparisonField.PLACE1 && config.mode == MatchingMode.MEANING) {
-                                        MatchingMode.SPELLING
-                                    } else config.mode
-                                )
-                                config = newConfig
-                                ConfusionSetCacheManager.saveConfig(context, newConfig)
-                            },
-                            shape = RoundedCornerShape(8.dp),
-                            color = if (isSelected) IndigoPrimary else Color.White,
-                            border = BorderStroke(1.dp, if (isSelected) IndigoPrimary else SlateBorder),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Box(
-                                modifier = Modifier.padding(vertical = 7.dp, horizontal = 4.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = dynamicLabel,
-                                    fontFamily = PoppinsFontFamily,
-                                    fontSize = 12.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (isSelected) Color.White else SlateText,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    textAlign = TextAlign.Center
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Instant Search Bar
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = {
-                        Text(
-                            text = "Filter confusion sets by word...",
-                            fontSize = 12.5.sp,
-                            color = SlateMuted
-                        )
-                    },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = null,
-                            tint = SlateMuted,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    },
-                    trailingIcon = {
-                        if (searchQuery.isNotEmpty()) {
-                            IconButton(
-                                onClick = { searchQuery = "" },
-                                modifier = Modifier.size(24.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Clear search",
-                                    tint = SlateMuted,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    shape = RoundedCornerShape(10.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = Color(0xFFF8FAFC),
-                        unfocusedContainerColor = Color(0xFFF8FAFC),
-                        focusedBorderColor = IndigoPrimary,
-                        unfocusedBorderColor = SlateBorder
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                )
             }
         }
 
-        // 4. Clean Summary Bar with Local Storage Cache status & Rematch action
+        // 4. Minimized Clean Summary Bar (Never overlaps!)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 14.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 Text(
-                    text = "${filteredGroups.size} Groups",
+                    text = "${filteredGroups.size} grps · $uniqueWordsCount wds",
                     fontFamily = PoppinsFontFamily,
-                    fontSize = 13.sp,
+                    fontSize = 11.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = SlateText
-                )
-                Text(
-                    text = "·",
-                    color = SlateMuted,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "$uniqueWordsCount Words",
-                    fontFamily = PoppinsFontFamily,
-                    fontSize = 12.5.sp,
-                    color = SlateMuted
                 )
 
                 // Cache indicator badge: Shows results are saved in local storage
                 if (isCachedMatch && confusionGroups.isNotEmpty()) {
                     Surface(
                         color = Color(0xFFF0FDF4),
-                        shape = RoundedCornerShape(6.dp),
+                        shape = RoundedCornerShape(4.dp),
                         border = BorderStroke(1.dp, Color(0xFFBBF7D0))
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.CheckCircle,
                                 contentDescription = "Saved in local storage",
                                 tint = EmeraldSuccess,
-                                modifier = Modifier.size(11.dp)
+                                modifier = Modifier.size(9.dp)
                             )
                             Text(
                                 text = "Saved",
                                 fontFamily = PoppinsFontFamily,
-                                fontSize = 10.sp,
+                                fontSize = 9.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = EmeraldSuccess
                             )
@@ -521,8 +498,28 @@ fun ConfusionSetScreen(
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
+                // Shuffle Groups Button
+                IconButton(
+                    onClick = {
+                        hapticHelper.subtleTick()
+                        confusionGroups = confusionGroups.shuffled()
+                    },
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFF1F5F9))
+                        .testTag("confusion_shuffle_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Shuffle,
+                        contentDescription = "Shuffle groups",
+                        tint = IndigoPrimary,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+
                 // Re-match / Refresh Button to allow manual recalculation anytime
                 IconButton(
                     onClick = {
@@ -530,7 +527,7 @@ fun ConfusionSetScreen(
                         rematchTrigger++
                     },
                     modifier = Modifier
-                        .size(32.dp)
+                        .size(28.dp)
                         .clip(CircleShape)
                         .background(Color(0xFFF1F5F9))
                         .testTag("confusion_rematch_button")
@@ -539,7 +536,7 @@ fun ConfusionSetScreen(
                         imageVector = Icons.Default.Refresh,
                         contentDescription = "Re-match words",
                         tint = if (isComputing) IndigoPrimary else SlateMuted,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(14.dp)
                     )
                 }
 
@@ -547,26 +544,26 @@ fun ConfusionSetScreen(
                 if (filteredGroups.isNotEmpty()) {
                     Surface(
                         onClick = { showGlobalQuiz = true },
-                        shape = RoundedCornerShape(10.dp),
+                        shape = RoundedCornerShape(8.dp),
                         color = IndigoLight,
                         border = BorderStroke(1.dp, IndigoPrimary.copy(alpha = 0.3f)),
                         modifier = Modifier.testTag("global_confusion_quiz_button")
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Quiz,
                                 contentDescription = "Quiz All Sets",
                                 tint = IndigoPrimary,
-                                modifier = Modifier.size(15.dp)
+                                modifier = Modifier.size(13.dp)
                             )
                             Text(
-                                text = "Quiz All (${filteredGroups.size})",
+                                text = "Quiz (${filteredGroups.size})",
                                 fontFamily = PoppinsFontFamily,
-                                fontSize = 11.5.sp,
+                                fontSize = 10.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = IndigoPrimary
                             )
@@ -716,8 +713,13 @@ fun ConfusionSetScreen(
 
     // Advanced Settings Dialog / Popover (Compact, side-by-side, toggle switches & icons)
     if (showAdvancedSettings) {
+        val selectedCourse = courses.find { it.id == selectedCourseId }
         AdvancedSettingsDialog(
             config = config,
+            selectedCourseId = selectedCourseId,
+            courseTitle = selectedCourse?.title ?: "Vocabulary",
+            groups = filteredGroups,
+            getPlaceLabel = { num, cId -> getPlaceLabel(num, cId ?: "") },
             onConfigChange = { newConfig ->
                 config = newConfig
                 ConfusionSetCacheManager.saveConfig(context, newConfig)
@@ -830,11 +832,12 @@ private fun ConfusionWordRow(
     config: ConfusionConfig,
     onSpeak: () -> Unit
 ) {
+    // Word colorized directly according to its study status (like Flashcards)
     val statusColor = when (item.wordEntity.status) {
         "know" -> EmeraldSuccess
         "dont_know" -> RoseError
         "confusion" -> AmberWarning
-        else -> Color(0xFFCBD5E1) // unrated neutral slate
+        else -> Color(0xFF1E293B) // unrated dark slate
     }
 
     Surface(
@@ -843,101 +846,82 @@ private fun ConfusionWordRow(
         border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.Top
+                .padding(horizontal = 12.dp, vertical = 9.dp)
         ) {
-            // Subtle vertical status color indicator on the left
-            Box(
-                modifier = Modifier
-                    .padding(top = 4.dp, end = 8.dp)
-                    .width(3.5.dp)
-                    .height(26.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(statusColor)
-            )
-
-            Column(modifier = Modifier.weight(1f)) {
+            // Word header with colorized word and audio button
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.weight(1f)
                 ) {
-                    // Word text with audio speaker icon
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    // Main word styled in status color directly!
+                    Text(
+                        text = item.place1,
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = 15.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = statusColor
+                    )
+
+                    IconButton(
+                        onClick = onSpeak,
+                        modifier = Modifier.size(22.dp)
                     ) {
-                        Text(
-                            text = item.place1,
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = SlateText
+                        Icon(
+                            imageVector = Icons.Default.VolumeUp,
+                            contentDescription = "Speak word",
+                            tint = IndigoPrimary,
+                            modifier = Modifier.size(15.dp)
                         )
-
-                        IconButton(
-                            onClick = onSpeak,
-                            modifier = Modifier.size(24.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.VolumeUp,
-                                contentDescription = "Speak word",
-                                tint = IndigoPrimary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-
-                        // Optional phonetic representation tag when in phonetic mode
-                        if (config.mode == MatchingMode.PRONUNCIATION && !item.phoneticPrimary.isNullOrBlank()) {
-                            Surface(
-                                color = Color(0xFFEDE9FE),
-                                shape = RoundedCornerShape(4.dp)
-                            ) {
-                                Text(
-                                    text = "[${item.phoneticPrimary}]",
-                                    fontSize = 10.sp,
-                                    fontFamily = PoppinsFontFamily,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color(0xFF6D28D9),
-                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                )
-                            }
-                        }
                     }
 
-                    // Minimal status color dot indicating word status (no bulky button)
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(statusColor)
-                    )
+                    // Optional phonetic representation tag when in phonetic mode
+                    if (config.mode == MatchingMode.PRONUNCIATION && !item.phoneticPrimary.isNullOrBlank()) {
+                        Surface(
+                            color = Color(0xFFEDE9FE),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = "[${item.phoneticPrimary}]",
+                                fontSize = 10.sp,
+                                fontFamily = PoppinsFontFamily,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF6D28D9),
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                            )
+                        }
+                    }
                 }
+            }
 
-                Spacer(modifier = Modifier.height(3.dp))
+            Spacer(modifier = Modifier.height(3.dp))
 
-                // Meaning / Place 2 display
+            // Meaning / Place 2 display
+            Text(
+                text = item.place2,
+                fontSize = 12.5.sp,
+                color = Color(0xFF334155),
+                lineHeight = 17.sp
+            )
+
+            // Place 3 display directly (without "Place 3:" label)
+            if (!item.place3.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = item.place2,
-                    fontSize = 13.sp,
-                    color = Color(0xFF334155),
-                    lineHeight = 18.sp
+                    text = item.place3,
+                    fontSize = 11.5.sp,
+                    color = SlateMuted,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
-
-                // Place 3 display directly (without "Place 3:" label)
-                if (!item.place3.isNullOrBlank()) {
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = item.place3,
-                        fontSize = 11.5.sp,
-                        color = SlateMuted,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
             }
         }
     }
@@ -952,10 +936,19 @@ private fun ConfusionWordRow(
 @Composable
 private fun AdvancedSettingsDialog(
     config: ConfusionConfig,
+    selectedCourseId: String?,
+    courseTitle: String,
+    groups: List<ConfusionGroup>,
+    getPlaceLabel: (Int, String?) -> String,
     onConfigChange: (ConfusionConfig) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var tempConfig by remember(config) { mutableStateOf(config) }
+
+    var isExporting by remember { mutableStateOf(false) }
+    var exportResult by remember { mutableStateOf<ConfusionExportHelper.ExportResult?>(null) }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -997,9 +990,64 @@ private fun AdvancedSettingsDialog(
                     }
                 }
 
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // 1. Comparison Field Selector (Moved inside Settings per user request)
+                Text(
+                    text = "Comparison Field",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = SlateText
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    ComparisonField.entries.forEach { field ->
+                        val isSelected = tempConfig.field == field
+                        val dynamicLabel = getPlaceLabel(field.placeNumber, selectedCourseId)
+
+                        Surface(
+                            onClick = {
+                                tempConfig = tempConfig.copy(
+                                    field = field,
+                                    mode = if (field != ComparisonField.PLACE1 && tempConfig.mode == MatchingMode.SPELLING) {
+                                        MatchingMode.MEANING
+                                    } else if (field == ComparisonField.PLACE1 && tempConfig.mode == MatchingMode.MEANING) {
+                                        MatchingMode.SPELLING
+                                    } else tempConfig.mode
+                                )
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isSelected) IndigoLight else Color(0xFFF8FAFC),
+                            border = BorderStroke(1.dp, if (isSelected) IndigoPrimary else SlateBorder),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier.padding(vertical = 7.dp, horizontal = 4.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = dynamicLabel,
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSelected) IndigoPrimary else SlateText,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // 1. Matching Mode (Compact 2x2 Grid with Short Labels)
+                // 2. Matching Mode (Compact 2x2 Grid with Short Labels)
                 Text(
                     text = "Matching Mode",
                     fontFamily = PoppinsFontFamily,
@@ -1094,7 +1142,7 @@ private fun AdvancedSettingsDialog(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // 2. Similarity Threshold Slider
+                // 3. Similarity Threshold Slider
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1129,7 +1177,7 @@ private fun AdvancedSettingsDialog(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // 3. Algorithm: Single-line Segmented Switch
+                // 4. Algorithm: Single-line Segmented Switch
                 Text(
                     text = "Algorithm",
                     fontFamily = PoppinsFontFamily,
@@ -1177,7 +1225,7 @@ private fun AdvancedSettingsDialog(
                     }
                 }
 
-                // 4. Combined Mode Weights (if applicable)
+                // Combined Mode Weights (if applicable)
                 if (tempConfig.mode == MatchingMode.COMBINED) {
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
@@ -1220,6 +1268,7 @@ private fun AdvancedSettingsDialog(
                 Spacer(modifier = Modifier.height(6.dp))
 
                 val sortOptions = listOf(
+                    Triple(SortOption.RANDOM, "Random", Icons.Default.Shuffle),
                     Triple(SortOption.SIMILARITY_DESC, "Score", Icons.Default.TrendingUp),
                     Triple(SortOption.SIZE_DESC, "Size", Icons.Default.Groups),
                     Triple(SortOption.ALPHABETICAL, "A–Z", Icons.Default.SortByAlpha)
@@ -1259,6 +1308,122 @@ private fun AdvancedSettingsDialog(
                                 )
                             }
                         }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+                HorizontalDivider(color = Color(0xFFF1F5F9))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // 6. Export & Download (Images .jpg and Combined PDF)
+                Text(
+                    text = "Export Confusion Sets",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = SlateText
+                )
+                Text(
+                    text = "Automatically saves each group as a JPG and combines all images into a PDF document.",
+                    fontSize = 11.sp,
+                    color = SlateMuted
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                if (isExporting) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = IndigoPrimary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Exporting & downloading JPGs + PDF...",
+                            fontSize = 11.5.sp,
+                            color = IndigoPrimary,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                } else if (exportResult?.isSuccess == true) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFFF0FDF4),
+                        border = BorderStroke(1.dp, Color(0xFFBBF7D0)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = EmeraldSuccess,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "Downloaded ${exportResult?.jpgCount} JPGs & PDF!",
+                                    fontSize = 11.sp,
+                                    color = EmeraldSuccess,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            exportResult?.pdfFile?.let { pdfFile ->
+                                TextButton(
+                                    onClick = { ConfusionExportHelper.openExportedPdf(context, pdfFile) },
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = "Open PDF",
+                                        fontSize = 11.5.sp,
+                                        color = IndigoPrimary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                isExporting = true
+                                val res = ConfusionExportHelper.exportAllGroups(context, courseTitle, groups)
+                                isExporting = false
+                                exportResult = res
+                            }
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4338CA)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(38.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Download Images (.jpg) & PDF",
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                 }
 

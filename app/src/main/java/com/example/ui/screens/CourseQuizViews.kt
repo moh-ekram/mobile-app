@@ -43,6 +43,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.data.model.*
 import com.example.ui.theme.*
+import com.example.ui.util.LatexMathParser
+import com.example.ui.util.LatexMathText
 import com.example.ui.util.HapticHelper
 import com.example.ui.util.TtsManager
 import kotlinx.coroutines.delay
@@ -246,7 +248,7 @@ internal fun QuizQuestionCardView(
                             }
                             .padding(horizontal = 14.dp, vertical = 12.dp)
                     ) {
-                        Text(
+                        LatexMathText(
                             text = "${('A' + optIdx)}.  $opt",
                             fontFamily = resolveQbFontFamily(qbAnswerFont, opt),
                             fontSize = qbAnswerFontSize.sp,
@@ -259,7 +261,7 @@ internal fun QuizQuestionCardView(
                 }
             }
 
-            // Explanation Card with Customizable Font + Font Size
+            // Explanation Card with Customizable Font + Font Size & LaTeX Equation Support
             if (isAnswered && !currentQ.explanation.isNullOrBlank()) {
                 Card(
                     modifier = Modifier
@@ -279,7 +281,7 @@ internal fun QuizQuestionCardView(
                             letterSpacing = 0.8.sp
                         )
                         Spacer(modifier = Modifier.height(3.dp))
-                        Text(
+                        LatexMathText(
                             text = currentQ.explanation ?: "",
                             fontFamily = resolveQbFontFamily(qbExplanationFont, currentQ.explanation ?: ""),
                             fontSize = qbExplanationFontSize.sp,

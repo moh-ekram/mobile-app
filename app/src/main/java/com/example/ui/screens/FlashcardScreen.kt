@@ -1,15 +1,11 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.*
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
+import com.example.ui.util.FlashcardDesignConfig
+import com.example.ui.util.FlashcardDesignManager
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -98,7 +94,7 @@ fun FlashcardScreen(
     var internalShowFilterDialog by remember { mutableStateOf(false) }
     val isFilterDialogVisible = showFilterDialog || internalShowFilterDialog
     var wordToReport by remember { mutableStateOf<VocabularyWordEntity?>(null) }
-    var isAutoAdvanceEnabled by remember { mutableStateOf(true) }
+    var isAutoAdvanceEnabled by remember { mutableStateOf(false) }
 
     // Auto-advance to next word every 10 seconds (with safe cancellation on manual swipe / rating / pause)
     LaunchedEffect(isAutoAdvanceEnabled, currentIndex, words.size) {
@@ -120,6 +116,8 @@ fun FlashcardScreen(
             availableGroups = availableGroups,
             showOnlyFlagged = showOnlyFlagged,
             totalFlaggedCount = totalFlaggedCount,
+            isAutoAdvanceEnabled = isAutoAdvanceEnabled,
+            onToggleAutoAdvance = { isAutoAdvanceEnabled = !isAutoAdvanceEnabled },
             onToggleGroup = onToggleGroup,
             onClearGroups = onClearGroups,
             onToggleStatus = onToggleStatus,
@@ -195,7 +193,7 @@ fun FlashcardScreen(
                 }
             }
 
-            // Card Counter & Auto 10s Advance Controller
+            // Card Counter
             if (words.isNotEmpty()) {
                 val safeIndex = currentIndex.coerceIn(0, words.size - 1)
                 Row(
@@ -213,34 +211,32 @@ fun FlashcardScreen(
                         color = SlateMuted
                     )
 
-                    // Auto 10s indicator & toggle button
-                    Surface(
-                        onClick = { isAutoAdvanceEnabled = !isAutoAdvanceEnabled },
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (isAutoAdvanceEnabled) IndigoPrimary.copy(alpha = 0.12f) else palette.cardBorder.copy(alpha = 0.4f),
-                        border = BorderStroke(
-                            1.dp,
-                            if (isAutoAdvanceEnabled) IndigoPrimary.copy(alpha = 0.4f) else palette.cardBorder
-                        )
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    // Small indicator badge ONLY if Auto 10s is turned ON in filter dialog
+                    if (isAutoAdvanceEnabled) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = IndigoPrimary.copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, IndigoPrimary.copy(alpha = 0.3f))
                         ) {
-                            Icon(
-                                imageVector = if (isAutoAdvanceEnabled) Icons.Default.Timer else Icons.Default.TimerOff,
-                                contentDescription = "Auto 10s Advance",
-                                tint = if (isAutoAdvanceEnabled) IndigoPrimary else palette.textMuted,
-                                modifier = Modifier.size(13.dp)
-                            )
-                            Text(
-                                text = if (isAutoAdvanceEnabled) "Auto 10s: ON" else "Auto 10s: OFF",
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (isAutoAdvanceEnabled) IndigoPrimary else palette.textMuted
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Timer,
+                                    contentDescription = "Auto Advance Active",
+                                    tint = IndigoPrimary,
+                                    modifier = Modifier.size(11.dp)
+                                )
+                                Text(
+                                    text = "Auto 10s",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 9.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = IndigoPrimary
+                                )
+                            }
                         }
                     }
                 }
@@ -252,6 +248,7 @@ fun FlashcardScreen(
             val safeIndex = currentIndex.coerceIn(0, words.size - 1)
             val currentWord = words[safeIndex]
             var dragAccumulator by remember { mutableFloatStateOf(0f) }
+            val designConfig = remember { FlashcardDesignManager.loadConfig(context) }
 
             Box(
                 modifier = Modifier
@@ -278,15 +275,31 @@ fun FlashcardScreen(
                 AnimatedContent(
                     targetState = currentWord,
                     transitionSpec = {
-                        (slideInHorizontally(
-                            initialOffsetX = { fullWidth -> (fullWidth * 0.4f).toInt() },
-                            animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing)
-                        ) + fadeIn(animationSpec = tween(280))).togetherWith(
-                            slideOutHorizontally(
-                                targetOffsetX = { fullWidth -> (-fullWidth * 0.4f).toInt() },
-                                animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing)
-                            ) + fadeOut(animationSpec = tween(220))
-                        )
+                        when (designConfig.swipeAnimationStyle) {
+                            "stack_rotate" -> {
+                                (slideInHorizontally(initialOffsetX = { (it * 0.35f).toInt() }) + scaleIn(initialScale = 0.88f) + fadeIn())
+                                    .togetherWith(slideOutHorizontally(targetOffsetX = { (-it * 0.35f).toInt() }) + scaleOut(targetScale = 0.88f) + fadeOut())
+                            }
+                            "zoom_fade" -> {
+                                (scaleIn(initialScale = 0.80f, animationSpec = tween(280)) + fadeIn(animationSpec = tween(280)))
+                                    .togetherWith(scaleOut(targetScale = 1.15f, animationSpec = tween(220)) + fadeOut(animationSpec = tween(220)))
+                            }
+                            "flip" -> {
+                                (slideInHorizontally(initialOffsetX = { it / 2 }) + fadeIn())
+                                    .togetherWith(slideOutHorizontally(targetOffsetX = { -it / 2 }) + fadeOut())
+                            }
+                            else -> { // "slide"
+                                (slideInHorizontally(
+                                    initialOffsetX = { fullWidth -> (fullWidth * 0.4f).toInt() },
+                                    animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing)
+                                ) + fadeIn(animationSpec = tween(280))).togetherWith(
+                                    slideOutHorizontally(
+                                        targetOffsetX = { fullWidth -> (-fullWidth * 0.4f).toInt() },
+                                        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing)
+                                    ) + fadeOut(animationSpec = tween(220))
+                                )
+                            }
+                        }
                     },
                     label = "flashcard_slide_transition",
                     modifier = Modifier.fillMaxSize()
@@ -300,6 +313,7 @@ fun FlashcardScreen(
                         isFocusMode = isFocusMode,
                         isHapticEnabled = isHapticEnabled,
                         isAutoAdvanceEnabled = isAutoAdvanceEnabled,
+                        designConfig = designConfig,
                         onRate = { newStatus ->
                             if (isHapticEnabled) hapticHelper.ratingSelected()
                             onRate(resolvedWord.id, newStatus)
@@ -422,6 +436,8 @@ private fun FlashcardFilterDialog(
     availableGroups: List<String>,
     showOnlyFlagged: Boolean = false,
     totalFlaggedCount: Int = 0,
+    isAutoAdvanceEnabled: Boolean = false,
+    onToggleAutoAdvance: () -> Unit = {},
     onToggleGroup: (String) -> Unit,
     onClearGroups: () -> Unit,
     onToggleStatus: (String) -> Unit,
@@ -727,6 +743,74 @@ private fun FlashcardFilterDialog(
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Reshuffle Cards Now", fontSize = 12.sp)
                         }
+                    }
+                }
+
+                HorizontalDivider(color = palette.cardBorder)
+
+                // 4. Auto Rotate / Advance (Every 10s) - Default OFF
+                Surface(
+                    onClick = { onToggleAutoAdvance() },
+                    shape = RoundedCornerShape(14.dp),
+                    color = if (isAutoAdvanceEnabled) (if (palette.isDark) Color(0xFF312E81).copy(alpha = 0.5f) else IndigoLight) else palette.surface,
+                    border = BorderStroke(
+                        if (isAutoAdvanceEnabled) 1.5.dp else 1.dp,
+                        if (isAutoAdvanceEnabled) IndigoPrimary else palette.cardBorder
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isAutoAdvanceEnabled) IndigoPrimary else palette.cardBorder.copy(alpha = 0.4f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Timer,
+                                    contentDescription = null,
+                                    tint = if (isAutoAdvanceEnabled) Color.White else palette.textMuted,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "Auto Advance (10s)",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = palette.textPrimary
+                                )
+                                Text(
+                                    text = if (isAutoAdvanceEnabled) "Advances every 10s (Active)" else "Off by default • Tap to enable",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 11.sp,
+                                    color = if (isAutoAdvanceEnabled) IndigoPrimary else palette.textMuted
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = isAutoAdvanceEnabled,
+                            onCheckedChange = { onToggleAutoAdvance() },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = IndigoPrimary,
+                                uncheckedThumbColor = palette.textMuted,
+                                uncheckedTrackColor = palette.cardBorder
+                            )
+                        )
                     }
                 }
             }

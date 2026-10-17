@@ -53,6 +53,19 @@
         </receiver>
 
         <receiver
+            android:name=".widget.ConfusionSetWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.example.widget.ACTION_NEXT_CONFUSION_GROUP" />
+                <action android:name="com.example.widget.ACTION_PREV_CONFUSION_GROUP" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/confusion_widget_info" />
+        </receiver>
+
+        <receiver
             android:name=".notification.DailyReminderReceiver"
             android:exported="false" />
 

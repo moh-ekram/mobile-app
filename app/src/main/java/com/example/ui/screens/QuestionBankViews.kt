@@ -200,7 +200,7 @@ internal fun QuestionBankDashboardView(
                             textAlign = TextAlign.Center
                         )
                         Text(
-                            text = "Choose any question bank from the catalog below and click 'Add' to install, or load sample banks.",
+                            text = "Browse the question bank catalog to install question sets, or load sample banks.",
                             fontFamily = PoppinsFontFamily,
                             fontSize = 12.5.sp,
                             color = SlateMuted,
@@ -411,80 +411,8 @@ internal fun QuestionBankDashboardView(
             }
         }
 
-        // Question Bank Catalog (Backend-processed files ready to add)
         item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 10.dp, bottom = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Question Bank Catalog",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
-                    color = SlateText,
-                    fontFamily = PoppinsFontFamily
-                )
-
-                IconButton(
-                    onClick = onRefreshDriveQB,
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFFF1F5F9))
-                        .testTag("refresh_drive_qb_button")
-                ) {
-                    if (isRefreshingDriveQB) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(14.dp),
-                            strokeWidth = 2.dp,
-                            color = IndigoPrimary
-                        )
-                    } else {
-                        Icon(
-                            Icons.Default.Refresh,
-                            contentDescription = "Refresh Catalog",
-                            tint = IndigoPrimary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        items(driveQBFiles.distinctBy { it.fileId }, key = { "drive_qb_${it.fileId}" }) { item ->
-            val cleanTitle = item.title
-                .substringBeforeLast(".")
-                .replace("_", " ")
-                .replace("-", " ")
-                .trim()
-            val isDownloading = item.fileId in downloadingCourseFileIds
-            val isAlreadyAdded = banksMap.keys.any { installedBank ->
-                installedBank.equals(cleanTitle, ignoreCase = true) ||
-                installedBank.equals(item.title.substringBeforeLast("."), ignoreCase = true) ||
-                installedBank.contains(cleanTitle, ignoreCase = true)
-            }
-            val bankQuestionCount = if (isAlreadyAdded) {
-                banksMap.entries.firstOrNull {
-                    it.key.equals(cleanTitle, ignoreCase = true) ||
-                    it.key.contains(cleanTitle, ignoreCase = true)
-                }?.value?.size
-            } else null
-
-            DriveQBCatalogCard(
-                item = item,
-                cleanTitle = cleanTitle,
-                isAlreadyAdded = isAlreadyAdded,
-                isDownloading = isDownloading,
-                questionCount = bankQuestionCount,
-                onAddToList = { onDownloadDriveQB(item) }
-            )
-        }
-
-        item {
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
         }
     }
 

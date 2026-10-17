@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_c_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_background"
+    android:paddingLeft="10dp"
+    android:paddingRight="10dp"
+    android:paddingTop="7dp"
+    android:paddingBottom="7dp">
+
+    <!-- Top Header: Badge, Group Number, Prev & Next / Shuffle Buttons -->
+    <LinearLayout
+        android:id="@+id/widget_c_header"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <!-- Confusion Set Badge -->
+        <TextView
+            android:id="@+id/widget_c_badge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="CONFUSION SET"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:textColor="#4F46E5"
+            android:includeFontPadding="false" />
+
+        <TextView
+            android:id="@+id/widget_c_match_score"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=" • 90% Match"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:textColor="#059669"
+            android:includeFontPadding="false" />
+
+        <TextView
+            android:id="@+id/widget_c_spacer"
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1"
+            android:text="" />
+
+        <!-- Previous Button -->
+        <TextView
+            android:id="@+id/widget_c_prev_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="◀"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:textColor="#6366F1"
+            android:paddingLeft="6dp"
+            android:paddingRight="6dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:includeFontPadding="false" />
+
+        <!-- Next / Shuffle Button -->
+        <TextView
+            android:id="@+id/widget_c_next_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Next ▶"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:textColor="#4F46E5"
+            android:paddingLeft="4dp"
+            android:paddingRight="2dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:includeFontPadding="false" />
+    </LinearLayout>
+
+    <!-- Center Content: Group Words Stacked Cleanly -->
+    <LinearLayout
+        android:id="@+id/widget_c_words_container"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:gravity="center_vertical"
+        android:layout_marginTop="3dp"
+        android:layout_marginBottom="2dp">
+
+        <!-- Word 1 -->
+        <LinearLayout
+            android:id="@+id/widget_c_word1_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginBottom="3dp">
+
+            <TextView
+                android:id="@+id/widget_c_word1_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Principal"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:textColor="#1E293B"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:includeFontPadding="false" />
+
+            <TextView
+                android:id="@+id/widget_c_word1_meaning"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Most important, primary; head of a school"
+                android:textSize="11sp"
+                android:textColor="#475569"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:includeFontPadding="false" />
+        </LinearLayout>
+
+        <!-- Word 2 -->
+        <LinearLayout
+            android:id="@+id/widget_c_word2_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginBottom="3dp">
+
+            <TextView
+                android:id="@+id/widget_c_word2_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Principle"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:textColor="#1E293B"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:includeFontPadding="false" />
+
+            <TextView
+                android:id="@+id/widget_c_word2_meaning"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Fundamental truth, moral rule or law"
+                android:textSize="11sp"
+                android:textColor="#475569"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:includeFontPadding="false" />
+        </LinearLayout>
+
+        <!-- Word 3 (Optional / 3-word clusters) -->
+        <LinearLayout
+            android:id="@+id/widget_c_word3_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/widget_c_word3_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Principality"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:textColor="#1E293B"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:includeFontPadding="false" />
+
+            <TextView
+                android:id="@+id/widget_c_word3_meaning"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="State or territory ruled by a prince"
+                android:textSize="11sp"
+                android:textColor="#475569"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:includeFontPadding="false" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Bottom Footer -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/widget_c_footer"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Shuffles every 10s • Tap to open"
+            android:textSize="9sp"
+            android:textColor="#94A3B8"
+            android:includeFontPadding="false" />
+
+        <TextView
+            android:id="@+id/widget_c_group_info"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Group 1 of 5"
+            android:textSize="9sp"
+            android:textStyle="bold"
+            android:textColor="#64748B"
+            android:includeFontPadding="false" />
+    </LinearLayout>
+</LinearLayout>

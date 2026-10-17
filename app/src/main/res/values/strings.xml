@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">Memorizer</string>
     <string name="widget_description">Daily vocabulary word and meaning widget</string>
+    <string name="confusion_widget_description">Confusion Set groups widget that shuffles similar words</string>
 </resources>
