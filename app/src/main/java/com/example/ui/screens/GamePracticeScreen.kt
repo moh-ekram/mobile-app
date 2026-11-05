@@ -17,6 +17,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.pager.VerticalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
@@ -115,10 +117,10 @@ fun GamePracticeScreen(
 
     // Question Bank Active Bank & Filter Selection
     var activeBankName by remember { mutableStateOf<String?>(null) }
-    var qbStatusFilter by remember { mutableStateOf<Set<String>>(emptySet()) }
-
     // QB Typography & Appearance Settings (Font and Font Size for Question, Answer, and Explanation)
     val qbPrefs = remember(context) { context.getSharedPreferences("qb_typography_settings", Context.MODE_PRIVATE) }
+    val quizTestPrefs = remember(context) { context.getSharedPreferences("quiz_test_filter_prefs", Context.MODE_PRIVATE) }
+
     var qbQuestionFontSize by remember { mutableFloatStateOf(qbPrefs.getFloat("qb_q_font_size", 16f)) }
     var qbAnswerFontSize by remember { mutableFloatStateOf(qbPrefs.getFloat("qb_a_font_size", 14f)) }
     var qbExplanationFontSize by remember { mutableFloatStateOf(qbPrefs.getFloat("qb_e_font_size", 12f)) }
@@ -127,13 +129,17 @@ fun GamePracticeScreen(
     var qbAnswerFont by remember { mutableStateOf(qbPrefs.getString("qb_a_font", "auto") ?: "auto") }
     var qbExplanationFont by remember { mutableStateOf(qbPrefs.getString("qb_e_font", "auto") ?: "auto") }
     var qbQuestionOrder by remember { mutableStateOf(qbPrefs.getString("qb_question_order", "serial") ?: "serial") } // "serial" or "random"
+    var qbStatusFilter by remember { mutableStateOf<Set<String>>(qbPrefs.getStringSet("qb_status_filter", emptySet()) ?: emptySet()) }
 
     var showQbTypographyDialog by remember { mutableStateOf(false) }
 
-    // Quiz test (Course Vocabulary Quiz) Config - Multi-Selection Grid Style
+    // Quiz test (Course Vocabulary Quiz) Config - Multi-Selection Grid Style with Memory
     var courseQuizCourseIds by remember(activeCourseId, courses) {
+        val saved = quizTestPrefs.getStringSet("quiz_course_ids", null)
         mutableStateOf(
-            if (activeCourseId.isNotBlank() && activeCourseId != "all") {
+            if (!saved.isNullOrEmpty()) {
+                saved
+            } else if (activeCourseId.isNotBlank() && activeCourseId != "all") {
                 setOf(activeCourseId)
             } else if (courses.isNotEmpty()) {
                 setOf(courses.first().id)
@@ -142,19 +148,31 @@ fun GamePracticeScreen(
             }
         )
     }
-    var courseQuizStatusFilters by remember { mutableStateOf(setOf("all")) }
-    var courseQuizGroupFilters by remember { mutableStateOf(setOf("all")) }
-    var courseQuizCount by remember { mutableIntStateOf(0) } // 0 means All / Infinite / No limit
+    var courseQuizStatusFilters by remember {
+        mutableStateOf(quizTestPrefs.getStringSet("quiz_status_filters", null) ?: setOf("all"))
+    }
+    var courseQuizGroupFilters by remember {
+        mutableStateOf(quizTestPrefs.getStringSet("quiz_group_filters", null) ?: setOf("all"))
+    }
+    var courseQuizCount by remember {
+        mutableIntStateOf(quizTestPrefs.getInt("quiz_question_count", 0)) // 0 means All / Infinite / No limit
+    }
+    var courseQuizOrder by remember {
+        mutableStateOf(quizTestPrefs.getString("quiz_order", "serial") ?: "serial")
+    }
+    var courseQuizViewMode by remember {
+        mutableStateOf(quizTestPrefs.getString("quiz_view_mode", "continuous") ?: "continuous")
+    }
 
     // Game Mode Filtering & Count Config
     var gameStatusFilter by remember { mutableStateOf("all") } // "all", "correct", "incorrect", "not_studied"
     var gameQuestionCount by remember { mutableIntStateOf(10) }
 
-    // Question Bank Config - Multi-Selection Grid Style
+    // Question Bank Config - Multi-Selection Grid Style with Memory
     var qbFilters1 by remember { mutableStateOf<Set<String>>(emptySet()) }
     var qbFilters2 by remember { mutableStateOf<Set<String>>(emptySet()) }
     var qbFilters3 by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var qbQuestionCount by remember { mutableIntStateOf(5) }
+    var qbQuestionCount by remember { mutableIntStateOf(qbPrefs.getInt("qb_question_count", 5)) }
 
     fun getPlaceValueAndLabel(w: VocabularyWordEntity, placeNumber: Int): Pair<String, String> {
         // First check customPlacesJson
@@ -367,10 +385,11 @@ fun GamePracticeScreen(
                     .filter { getPlace1(it).isNotBlank() && getPlace2(it).isNotBlank() }
 
                 val count = if (courseQuizCount > 0) courseQuizCount else eligibleWords.size
-                val selectedWords = if (count > 0 && count < eligibleWords.size) {
-                    eligibleWords.shuffled().take(count)
+                val orderedWords = if (courseQuizOrder == "random") eligibleWords.shuffled() else eligibleWords
+                val selectedWords = if (count > 0 && count < orderedWords.size) {
+                    orderedWords.take(count)
                 } else {
-                    eligibleWords.shuffled() // infinite / all words in course
+                    orderedWords
                 }
 
                 selectedWords.map { word ->
@@ -403,7 +422,8 @@ fun GamePracticeScreen(
                         opt4 = opt4,
                         answer = p2,
                         explanation = getExplanationForWord(word),
-                        lastAttemptStatus = word.lastQuizStatus
+                        lastAttemptStatus = word.lastQuizStatus,
+                        wordStatus = word.status ?: "unrated"
                     )
                 }
             }
@@ -436,6 +456,9 @@ fun GamePracticeScreen(
         userAnswers = emptyMap()
         currentScore = 0
         isQuizCompleted = false
+        if (section == "course_quiz") {
+            quizViewMode = courseQuizViewMode
+        }
     }
 
     val isReadingActiveArticle = selectedSection == "read_article" && activeArticle != null
@@ -558,20 +581,6 @@ fun GamePracticeScreen(
                             color = SlateText
                         )
                     }
-
-                    // In QB question sheet, filter button same as flashcard filter button
-                    if (activeQuestions.isNotEmpty()) {
-                        IconButton(
-                            onClick = { showQbTypographyDialog = true },
-                            modifier = Modifier.testTag("qb_topbar_filter_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Tune,
-                                contentDescription = "Question Sheet Filter & Settings",
-                                tint = IndigoPrimary
-                            )
-                        }
-                    }
                 }
             }
 
@@ -621,17 +630,42 @@ fun GamePracticeScreen(
                     courses = courses,
                     words = words,
                     selectedCourseIds = courseQuizCourseIds,
-                    onCoursesChange = { courseQuizCourseIds = it },
+                    onCoursesChange = {
+                        courseQuizCourseIds = it
+                        quizTestPrefs.edit().putStringSet("quiz_course_ids", it).apply()
+                    },
                     selectedStatuses = courseQuizStatusFilters,
-                    onStatusesChange = { courseQuizStatusFilters = it },
+                    onStatusesChange = {
+                        courseQuizStatusFilters = it
+                        quizTestPrefs.edit().putStringSet("quiz_status_filters", it).apply()
+                    },
                     selectedGroups = courseQuizGroupFilters,
-                    onGroupsChange = { courseQuizGroupFilters = it },
+                    onGroupsChange = {
+                        courseQuizGroupFilters = it
+                        quizTestPrefs.edit().putStringSet("quiz_group_filters", it).apply()
+                    },
                     questionCount = courseQuizCount,
-                    onCountChange = { courseQuizCount = it },
+                    onCountChange = {
+                        courseQuizCount = it
+                        quizTestPrefs.edit().putInt("quiz_question_count", it).apply()
+                    },
+                    questionOrder = courseQuizOrder,
+                    onOrderChange = {
+                        courseQuizOrder = it
+                        quizTestPrefs.edit().putString("quiz_order", it).apply()
+                    },
+                    quizViewMode = courseQuizViewMode,
+                    onViewModeChange = {
+                        courseQuizViewMode = it
+                        quizTestPrefs.edit().putString("quiz_view_mode", it).apply()
+                    },
                     pooledStats = quizStats,
                     getPlace1 = ::getPlace1,
                     getPlace2 = ::getPlace2,
-                    onStart = { startQuizForCategory("course_quiz") }
+                    onStart = {
+                        quizViewMode = courseQuizViewMode
+                        startQuizForCategory("course_quiz")
+                    }
                 )
             } else if (selectedSection == "question_bank" && activeQuestions.isEmpty() && !isQuizCompleted) {
                 QuestionBankDashboardView(
@@ -650,6 +684,18 @@ fun GamePracticeScreen(
                         qbQuestionCount = count
                         qbQuestionOrder = order
                         quizViewMode = viewMode
+
+                        qbPrefs.edit()
+                            .putString("qb_status_str", status)
+                            .putStringSet("qb_status_filter", qbStatusFilter)
+                            .putStringSet("qb_filters_1", f1)
+                            .putStringSet("qb_filters_2", f2)
+                            .putStringSet("qb_filters_3", f3)
+                            .putInt("qb_question_count", count)
+                            .putString("qb_question_order", order)
+                            .putString("qb_view_mode", viewMode)
+                            .apply()
+
                         startQuizForCategory("question_bank")
                     },
                     onImportQBBytes = onImportQBBytes,
@@ -724,16 +770,23 @@ fun GamePracticeScreen(
                                     currentQ = currentQ,
                                     selectedOpt = userAnswers[qIdx],
                                     isAnswered = userAnswers[qIdx] != null,
+                                    onResetAnswer = {
+                                        val prevOpt = userAnswers[qIdx]
+                                        if (prevOpt != null) {
+                                            val optList = listOf(currentQ.opt1, currentQ.opt2, currentQ.opt3, currentQ.opt4, currentQ.opt5).filter { it.isNotBlank() }
+                                            val optIdx = optList.indexOf(prevOpt)
+                                            val wasCorrect = optIdx >= 0 && isOptionTheAnswer(prevOpt, optIdx, currentQ.answer)
+                                            if (wasCorrect && currentScore > 0) currentScore -= 1
+                                            userAnswers = userAnswers - qIdx
+                                        }
+                                    },
                                     onOptionSelect = { opt, isCorrect ->
                                         userAnswers = userAnswers + (qIdx to opt)
                                         if (isCorrect) currentScore += 1
                                         if (currentQ.id.isNotBlank()) {
                                             if (currentQ.sheetType == "course_quiz" || words.any { it.id == currentQ.id }) {
                                                 onRecordWordQuizAnswer(currentQ.id, isCorrect)
-                                            }
-                                            if (currentQ.sheetType == "qb" || selectedSection == "question_bank") {
-                                                onUpdateQuestionStatus(currentQ.id, if (isCorrect) "know" else "dont_know")
-                                            } else if (currentQ.sheetType != "course_quiz") {
+                                            } else if (currentQ.sheetType != "qb" && selectedSection != "question_bank") {
                                                 onRecordGameAnswer(currentQ.id, isCorrect)
                                             }
                                         }
@@ -753,6 +806,81 @@ fun GamePracticeScreen(
                                         activeStemBottomSheet = Pair(stemText, stemId)
                                     }
                                 )
+                            }
+                        }
+                    } else if (quizViewMode == "reels") {
+                        // Reels Style Mode: Vertical Pager snapping through question cards
+                        val pagerState = rememberPagerState(initialPage = clampedOneByOneIdx) { activeQuestions.size }
+                        LaunchedEffect(pagerState.currentPage) {
+                            oneByOneIndex = pagerState.currentPage
+                        }
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(bottom = 75.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            QuizProgressHeaderCard(
+                                answeredCount = userAnswers.size,
+                                totalCount = activeQuestions.size
+                            )
+                            VerticalPager(
+                                state = pagerState,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f)
+                            ) { page ->
+                                val pageQ = activeQuestions.getOrNull(page)
+                                if (pageQ != null) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .verticalScroll(rememberScrollState()),
+                                        contentAlignment = Alignment.TopCenter
+                                    ) {
+                                        QuizQuestionCardView(
+                                            qIdx = page,
+                                            currentQ = pageQ,
+                                            selectedOpt = userAnswers[page],
+                                            isAnswered = userAnswers[page] != null,
+                                            onResetAnswer = {
+                                                val prevOpt = userAnswers[page]
+                                                if (prevOpt != null) {
+                                                    val optList = listOf(pageQ.opt1, pageQ.opt2, pageQ.opt3, pageQ.opt4, pageQ.opt5).filter { it.isNotBlank() }
+                                                    val optIdx = optList.indexOf(prevOpt)
+                                                    val wasCorrect = optIdx >= 0 && isOptionTheAnswer(prevOpt, optIdx, pageQ.answer)
+                                                    if (wasCorrect && currentScore > 0) currentScore -= 1
+                                                    userAnswers = userAnswers - page
+                                                }
+                                            },
+                                            onOptionSelect = { opt, isCorrect ->
+                                                userAnswers = userAnswers + (page to opt)
+                                                if (isCorrect) currentScore += 1
+                                                if (pageQ.id.isNotBlank()) {
+                                                    if (pageQ.sheetType == "course_quiz" || words.any { it.id == pageQ.id }) {
+                                                        onRecordWordQuizAnswer(pageQ.id, isCorrect)
+                                                    } else if (pageQ.sheetType != "qb" && selectedSection != "question_bank") {
+                                                        onRecordGameAnswer(pageQ.id, isCorrect)
+                                                    }
+                                                }
+                                            },
+                                            onStatusUpdate = { status ->
+                                                onUpdateQuestionStatus(pageQ.id, status)
+                                            },
+                                            wordHighlightColor = wordHighlightColor,
+                                            qbQuestionFontSize = qbQuestionFontSize,
+                                            qbQuestionFont = qbQuestionFont,
+                                            qbAnswerFontSize = qbAnswerFontSize,
+                                            qbAnswerFont = qbAnswerFont,
+                                            qbExplanationFontSize = qbExplanationFontSize,
+                                            qbExplanationFont = qbExplanationFont,
+                                            selectedSection = selectedSection,
+                                            onOpenStem = { stemText, stemId ->
+                                                activeStemBottomSheet = Pair(stemText, stemId)
+                                            }
+                                        )
+                                    }
+                                }
                             }
                         }
                     } else {
@@ -824,16 +952,23 @@ fun GamePracticeScreen(
                                     currentQ = currentOneByOneQ,
                                     selectedOpt = userAnswers[clampedOneByOneIdx],
                                     isAnswered = userAnswers[clampedOneByOneIdx] != null,
+                                    onResetAnswer = {
+                                        val prevOpt = userAnswers[clampedOneByOneIdx]
+                                        if (prevOpt != null) {
+                                            val optList = listOf(currentOneByOneQ.opt1, currentOneByOneQ.opt2, currentOneByOneQ.opt3, currentOneByOneQ.opt4, currentOneByOneQ.opt5).filter { it.isNotBlank() }
+                                            val optIdx = optList.indexOf(prevOpt)
+                                            val wasCorrect = optIdx >= 0 && isOptionTheAnswer(prevOpt, optIdx, currentOneByOneQ.answer)
+                                            if (wasCorrect && currentScore > 0) currentScore -= 1
+                                            userAnswers = userAnswers - clampedOneByOneIdx
+                                        }
+                                    },
                                     onOptionSelect = { opt, isCorrect ->
                                         userAnswers = userAnswers + (clampedOneByOneIdx to opt)
                                         if (isCorrect) currentScore += 1
                                         if (currentOneByOneQ.id.isNotBlank()) {
                                             if (currentOneByOneQ.sheetType == "course_quiz" || words.any { it.id == currentOneByOneQ.id }) {
                                                 onRecordWordQuizAnswer(currentOneByOneQ.id, isCorrect)
-                                            }
-                                            if (currentOneByOneQ.sheetType == "qb" || selectedSection == "question_bank") {
-                                                onUpdateQuestionStatus(currentOneByOneQ.id, if (isCorrect) "know" else "dont_know")
-                                            } else if (currentOneByOneQ.sheetType != "course_quiz") {
+                                            } else if (currentOneByOneQ.sheetType != "qb" && selectedSection != "question_bank") {
                                                 onRecordGameAnswer(currentOneByOneQ.id, isCorrect)
                                             }
                                         }
@@ -910,6 +1045,28 @@ fun GamePracticeScreen(
                     Surface(
                         onClick = {
                             isQuizCompleted = true
+                            // Question Bank Submit Status Logic per user specification:
+                            // 1. Unclicked / unanswered questions remain unrated.
+                            // 2. Answered questions: if correct -> "know", if incorrect -> "dont_know".
+                            // 3. If question was previously "dont_know" and now correct -> goes to "review".
+                            if (selectedSection == "question_bank") {
+                                activeQuestions.forEachIndexed { qIdx, q ->
+                                    val chosenOpt = userAnswers[qIdx]
+                                    if (chosenOpt != null) {
+                                        val optList = listOf(q.opt1, q.opt2, q.opt3, q.opt4, q.opt5).filter { it.isNotBlank() }
+                                        val optIdx = optList.indexOf(chosenOpt)
+                                        val isCorrect = optIdx >= 0 && isOptionTheAnswer(chosenOpt, optIdx, q.answer)
+
+                                        val prevStatus = (q.wordStatus ?: "unrated").trim().lowercase()
+                                        val newStatus = if (isCorrect) {
+                                            if (prevStatus == "dont_know") "review" else "know"
+                                        } else {
+                                            "dont_know"
+                                        }
+                                        onUpdateQuestionStatus(q.id, newStatus)
+                                    }
+                                }
+                            }
                             if (selectedSection == "course_quiz") {
                                 val primaryCourseId = if (courseQuizCourseIds.size == 1 && "all" !in courseQuizCourseIds) {
                                     courseQuizCourseIds.first()

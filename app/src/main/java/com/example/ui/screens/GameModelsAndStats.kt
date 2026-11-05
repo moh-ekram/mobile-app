@@ -361,10 +361,30 @@ fun ColorizedQuestionText(
     colorChoice: String = "red",
     fontSize: androidx.compose.ui.unit.TextUnit = 16.sp,
     fontFamily: FontFamily? = null,
+    status: String? = null,
+    isQuestionBank: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    val highlightColor = Color(0xFFDC2626) // Fixed red
+    val normStatus = status?.lowercase()?.trim() ?: "unrated"
+    val statusColor = when (normStatus) {
+        "know" -> EmeraldSuccess
+        "confusion", "confused", "review" -> AmberWarning
+        "dont_know" -> RoseError
+        else -> SlateText
+    }
+    val highlightColor = if (isQuestionBank) {
+        statusColor
+    } else {
+        when (normStatus) {
+            "know" -> EmeraldSuccess
+            "confusion", "confused", "review" -> AmberWarning
+            "dont_know" -> RoseError
+            "unrated" -> IndigoPrimary
+            else -> IndigoPrimary
+        }
+    }
     val effectiveFont = fontFamily ?: (if (isBengaliText(question)) KalpurushFontFamily else PoppinsFontFamily)
+    val baseTextColor = if (isQuestionBank) statusColor else SlateText
 
     if (LatexMathParser.hasLatex(question)) {
         LatexMathText(
@@ -372,19 +392,19 @@ fun ColorizedQuestionText(
             fontFamily = effectiveFont,
             fontSize = fontSize,
             fontWeight = FontWeight.Bold,
-            color = SlateText,
+            color = baseTextColor,
             lineHeight = (fontSize.value * 1.35f).sp,
             highlightColor = highlightColor,
             modifier = modifier
         )
     } else {
-        val annotated = remember(question, highlightColor, fontFamily) {
+        val annotated = remember(question, highlightColor, effectiveFont, isQuestionBank, baseTextColor) {
             buildAnnotatedString {
                 val regex = Regex("\\[([^\\]]+)\\]")
                 var lastIndex = 0
                 val matches = regex.findAll(question).toList()
 
-                if (matches.isEmpty()) {
+                if (matches.isEmpty() || isQuestionBank) {
                     append(question)
                 } else {
                     for (match in matches) {
@@ -394,7 +414,7 @@ fun ColorizedQuestionText(
                         }
                         val wordInside = match.groupValues[1]
                         val isBengali = isBengaliText(wordInside)
-                        val effectiveWordFont = fontFamily ?: (if (isBengali) KalpurushFontFamily else PoppinsFontFamily)
+                        val effectiveWordFont = if (isBengali) KalpurushFontFamily else PoppinsFontFamily
                         pushStyle(
                             SpanStyle(
                                 color = highlightColor,
@@ -419,7 +439,7 @@ fun ColorizedQuestionText(
             fontFamily = effectiveFont,
             fontSize = fontSize,
             fontWeight = FontWeight.Bold,
-            color = SlateText,
+            color = baseTextColor,
             lineHeight = (fontSize.value * 1.35f).sp,
             modifier = modifier
         )

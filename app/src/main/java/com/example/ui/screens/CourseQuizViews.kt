@@ -117,15 +117,16 @@ internal fun QuizQuestionCardView(
     isAnswered: Boolean,
     onOptionSelect: (String, Boolean) -> Unit,
     onStatusUpdate: (String) -> Unit,
-    wordHighlightColor: String,
-    qbQuestionFontSize: Float,
-    qbQuestionFont: String,
-    qbAnswerFontSize: Float,
-    qbAnswerFont: String,
-    qbExplanationFontSize: Float,
-    qbExplanationFont: String,
-    selectedSection: String?,
-    onOpenStem: (stemText: String, stemId: String?) -> Unit
+    onResetAnswer: () -> Unit = {},
+    wordHighlightColor: String = "red",
+    qbQuestionFontSize: Float = 16f,
+    qbQuestionFont: String = "auto",
+    qbAnswerFontSize: Float = 14f,
+    qbAnswerFont: String = "auto",
+    qbExplanationFontSize: Float = 12f,
+    qbExplanationFont: String = "auto",
+    selectedSection: String? = null,
+    onOpenStem: (stemText: String, stemId: String?) -> Unit = { _, _ -> }
 ) {
     val options = remember(currentQ) {
         listOf(currentQ.opt1, currentQ.opt2, currentQ.opt3, currentQ.opt4, currentQ.opt5)
@@ -148,7 +149,7 @@ internal fun QuizQuestionCardView(
                 .fillMaxWidth()
                 .padding(18.dp)
         ) {
-            // Top Row: Question ID badge + Stem chip (Answer eye button removed per user request)
+            // Top Row: Question ID badge (Clickable to reset answer when answered) + Stem chip
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -162,21 +163,37 @@ internal fun QuizQuestionCardView(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .background(IndigoLight)
+                            .background(if (isAnswered) Color(0xFFE0E7FF) else IndigoLight)
+                            .clickable(enabled = isAnswered) {
+                                onResetAnswer()
+                            }
                             .padding(horizontal = 9.dp, vertical = 3.5.dp)
                     ) {
-                        val displayId = when {
-                            currentQ.id.isNotBlank() && !currentQ.id.startsWith("qb_") -> currentQ.id
-                            currentQ.id.startsWith("qb_") && currentQ.id.contains("_") -> "ID: ${currentQ.id.substringAfterLast("_")}"
-                            else -> "ID: ${qIdx + 1}"
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            val displayId = when {
+                                currentQ.id.isNotBlank() && !currentQ.id.startsWith("qb_") -> currentQ.id
+                                currentQ.id.startsWith("qb_") && currentQ.id.contains("_") -> "ID: ${currentQ.id.substringAfterLast("_")}"
+                                else -> "ID: ${qIdx + 1}"
+                            }
+                            Text(
+                                text = displayId,
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = IndigoPrimary
+                            )
+                            if (isAnswered) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Reset Answer",
+                                    tint = IndigoPrimary,
+                                    modifier = Modifier.size(11.dp)
+                                )
+                            }
                         }
-                        Text(
-                            text = displayId,
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = IndigoPrimary
-                        )
                     }
 
                     // Stem button: ONLY shown if this question has a stem!
@@ -214,12 +231,14 @@ internal fun QuizQuestionCardView(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Question Title with Colorized [Word] & Customizable Font + Font Size
+            // Question Title with Colorized [Word] / Status Color & Customizable Font + Font Size
             ColorizedQuestionText(
                 question = currentQ.question,
                 colorChoice = wordHighlightColor,
                 fontSize = qbQuestionFontSize.sp,
-                fontFamily = resolveQbFontFamily(qbQuestionFont, currentQ.question)
+                fontFamily = resolveQbFontFamily(qbQuestionFont, currentQ.question),
+                status = currentQ.wordStatus,
+                isQuestionBank = (currentQ.sheetType == "qb" || selectedSection == "question_bank")
             )
 
             Spacer(modifier = Modifier.height(14.dp))
@@ -323,7 +342,7 @@ internal fun QuizSummaryView(
                 .fillMaxWidth()
                 .padding(28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Box(
                 modifier = Modifier
@@ -356,46 +375,6 @@ internal fun QuizSummaryView(
                 color = if (percent >= 70) EmeraldSuccess else RoseError
             )
 
-            // Recalculated Pooled Correctness Ratio Card
-            if (isQuizTest && pooledTotal != null && pooledTotal > 0) {
-                val pooledPercent = (pooledScore ?: 0) * 100 / pooledTotal
-                Card(
-                    shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = IndigoLight),
-                    border = BorderStroke(1.dp, Color(0xFFC7D2FE)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            text = "Recalculated Pooled Correctness",
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = IndigoPrimary
-                        )
-                        Text(
-                            text = "$pooledPercent% Mean Ratio",
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = SlateText
-                        )
-                        Text(
-                            text = "Based on $pooledScore correct of $pooledTotal total questions",
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 11.sp,
-                            color = SlateMuted
-                        )
-                    }
-                }
-            }
-
             Text(
                 text = if (percent >= 70) "Great score, keep it up!" else "Keep practicing to improve scores",
                 fontFamily = PoppinsFontFamily,
@@ -420,26 +399,6 @@ internal fun QuizSummaryView(
                 ) {
                     Icon(Icons.Default.Refresh, contentDescription = null)
                     Text("Try Another Round", fontWeight = FontWeight.Bold)
-                }
-            }
-
-            if (onPracticeMissed != null && score < total) {
-                OutlinedButton(
-                    onClick = onPracticeMissed,
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = RoseError),
-                    border = BorderStroke(1.dp, RoseBorder),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(Icons.Default.Refresh, contentDescription = null, tint = RoseError)
-                        Text("Practice Missed (${total - score})", fontWeight = FontWeight.Bold)
-                    }
                 }
             }
 
@@ -480,12 +439,17 @@ internal fun CourseQuizConfigView(
     onGroupsChange: (Set<String>) -> Unit,
     questionCount: Int,
     onCountChange: (Int) -> Unit,
-    pooledStats: Triple<Int, Int, Int>,
+    pooledStats: Triple<Int, Int, Int> = Triple(0, 0, 0),
+    questionOrder: String = "serial",
+    onOrderChange: (String) -> Unit = {},
+    quizViewMode: String = "continuous",
+    onViewModeChange: (String) -> Unit = {},
     getPlace1: (VocabularyWordEntity) -> String,
     getPlace2: (VocabularyWordEntity) -> String,
     onStart: () -> Unit
 ) {
-    var isFilterGridOpen by remember { mutableStateOf(false) }
+    var isCourseExpanded by remember { mutableStateOf(true) }
+    var isGroupExpanded by remember { mutableStateOf(false) }
 
     val currentCourseWords = remember(words, selectedCourseIds) {
         if (selectedCourseIds.isEmpty() || "all" in selectedCourseIds) words
@@ -501,19 +465,6 @@ internal fun CourseQuizConfigView(
         else currentCourseWords.filter { it.group in selectedGroups }
     }
 
-    val correctCount = remember(groupFilteredWords) {
-        groupFilteredWords.count { it.lastQuizStatus == "correct" }
-    }
-    val incorrectCount = remember(groupFilteredWords) {
-        groupFilteredWords.count { it.lastQuizStatus == "incorrect" }
-    }
-    val notStudiedCount = remember(groupFilteredWords) {
-        groupFilteredWords.count { it.lastQuizStatus == null || it.lastQuizStatus == "not_studied" || it.lastQuizStatus.isBlank() }
-    }
-
-    val (pooledCorrect, pooledTotal, attempts) = pooledStats
-    val pooledAccuracy = if (pooledTotal > 0) (pooledCorrect * 100 / pooledTotal) else 0
-
     val matchingWords = remember(groupFilteredWords, selectedStatuses) {
         val base = groupFilteredWords.filter { word ->
             isWordMatchingFlashcardStatus(word, selectedStatuses)
@@ -523,39 +474,26 @@ internal fun CourseQuizConfigView(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-        contentPadding = PaddingValues(bottom = 28.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(top = 4.dp, bottom = 28.dp)
     ) {
-        // 1. Statistics Header Card with Graphical Rate and Ratio Visualizers
-        item {
-            val pooledIncorrect = (pooledTotal - pooledCorrect).coerceAtLeast(0)
-            GameStatisticsCard(
-                title = "Statistics",
-                correctCount = pooledCorrect,
-                incorrectCount = pooledIncorrect,
-                totalCount = pooledTotal
-            )
-        }
-
-        // 2. Filter Options Toggle Button (Filters are hidden always under this button until clicked)
+        // Filter Options Card - Always Open per user requirement
         item {
             Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (isFilterGridOpen) IndigoLight.copy(alpha = 0.6f) else Color.White
-                ),
-                border = BorderStroke(1.5.dp, if (isFilterGridOpen) IndigoPrimary else SlateBorder),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.White),
+                border = BorderStroke(1.dp, SlateBorder),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { isFilterGridOpen = !isFilterGridOpen }
-                    .testTag("quiz_test_filter_toggle_button")
+                    .testTag("quiz_test_filter_grid")
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                        .padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
+                    // Header
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -563,20 +501,20 @@ internal fun CourseQuizConfigView(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(38.dp)
+                                    .size(32.dp)
                                     .clip(CircleShape)
-                                    .background(if (isFilterGridOpen) IndigoPrimary else IndigoLight),
+                                    .background(IndigoLight),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.FilterList,
+                                    imageVector = Icons.Default.Tune,
                                     contentDescription = null,
-                                    tint = if (isFilterGridOpen) Color.White else IndigoPrimary,
-                                    modifier = Modifier.size(20.dp)
+                                    tint = IndigoPrimary,
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                             Text(
@@ -588,90 +526,33 @@ internal fun CourseQuizConfigView(
                             )
                         }
 
-                        Icon(
-                            imageVector = if (isFilterGridOpen) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                            contentDescription = if (isFilterGridOpen) "Collapse Filter Grid" else "Expand Filter Grid",
-                            tint = SlateMuted,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-
-                    // Active Filters Summary Badges
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        val courseSummary = if (selectedCourseIds.isEmpty() || "all" in selectedCourseIds) {
-                            "All Courses"
-                        } else if (selectedCourseIds.size == 1) {
-                            courses.find { it.id == selectedCourseIds.first() }?.title ?: "1 Course"
-                        } else {
-                            "${selectedCourseIds.size} Courses"
-                        }
-                        val groupSummary = if (selectedGroups.isEmpty() || "all" in selectedGroups) "All Groups" else "${selectedGroups.size} Groups"
-                        val statusSummary = if (selectedStatuses.isEmpty() || "all" in selectedStatuses) {
-                            "All Words"
-                        } else {
-                            selectedStatuses.joinToString(", ") {
-                                when (it) {
-                                    "know" -> "Know"
-                                    "confusion", "confused" -> "Confused"
-                                    "dont_know" -> "Don't Know"
-                                    "unrated", "unread" -> "Unrated"
-                                    else -> it
-                                }
-                            }
-                        }
-
-                        listOf(
-                            Icons.Default.School to courseSummary,
-                            Icons.Default.Group to groupSummary,
-                            Icons.Default.History to statusSummary
-                        ).forEach { (icon, text) ->
-                            Row(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color(0xFFF8FAFC))
-                                    .border(1.dp, SlateBorder.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
-                                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(icon, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(12.dp))
-                                Text(
-                                    text = text,
-                                    fontFamily = PoppinsFontFamily,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = SlateText,
-                                    maxLines = 1
-                                )
-                            }
+                        // Eligible count badge
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = IndigoLight,
+                            border = BorderStroke(1.dp, Color(0xFFC7D2FE))
+                        ) {
+                            Text(
+                                text = "${matchingWords.size} Words",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = IndigoPrimary,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.5.dp)
+                            )
                         }
                     }
-                }
-            }
-        }
 
-        // 3. Filter Grid (Shown ONLY when filter button is clicked / isFilterGridOpen == true)
-        if (isFilterGridOpen) {
-            item {
-                Card(
-                    shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    border = BorderStroke(1.5.dp, IndigoPrimary.copy(alpha = 0.5f)),
-                    modifier = Modifier.fillMaxWidth().testTag("quiz_test_filter_grid")
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(18.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        // Header
+                    HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+
+                    // 1. SELECT QUIZ / COURSE (Collapsible / Foldable per user request)
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { isCourseExpanded = !isCourseExpanded }
+                                .padding(vertical = 4.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -679,170 +560,202 @@ internal fun CourseQuizConfigView(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Icon(Icons.Default.Tune, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(18.dp))
                                 Text(
-                                    text = "Filter Options",
+                                    text = "Quiz / Course",
                                     fontFamily = PoppinsFontFamily,
-                                    fontSize = 14.sp,
+                                    fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = SlateText
                                 )
+                                Text(
+                                    text = if (selectedCourseIds.isEmpty() || "all" in selectedCourseIds) "(All)" else "(${selectedCourseIds.size})",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 11.sp,
+                                    color = SlateMuted
+                                )
                             }
-                            Text(
-                                text = "Multi-Select",
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = IndigoPrimary
+                            Icon(
+                                imageVector = if (isCourseExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                contentDescription = if (isCourseExpanded) "Collapse Courses" else "Expand Courses",
+                                tint = SlateMuted,
+                                modifier = Modifier.size(20.dp)
                             )
                         }
 
-                        HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
-
-                        // 1. SELECT QUIZ / COURSE (Equal Size Grid for all, minimum text, no dropdown)
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(
-                                text = "Quiz / Course",
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = SlateText
-                            )
-
+                        AnimatedVisibility(visible = isCourseExpanded) {
                             val isAllCoursesSelected = selectedCourseIds.isEmpty() || "all" in selectedCourseIds
                             val courseItems = listOf("all" to "All") + courses.map { it.id to it.title }
 
-                            courseItems.chunked(2).forEach { rowCourses ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    rowCourses.forEach { (cId, cTitle) ->
-                                        val isSelected = if (cId == "all") {
-                                            isAllCoursesSelected
-                                        } else {
-                                            !isAllCoursesSelected && cId in selectedCourseIds
-                                        }
-                                        Surface(
-                                            onClick = {
-                                                if (cId == "all") {
-                                                    onCoursesChange(setOf("all"))
-                                                } else {
-                                                    val newSet = if (isAllCoursesSelected) {
-                                                        mutableSetOf(cId)
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                courseItems.chunked(2).forEach { rowCourses ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        rowCourses.forEach { (cId, cTitle) ->
+                                            val isSelected = if (cId == "all") {
+                                                isAllCoursesSelected
+                                            } else {
+                                                !isAllCoursesSelected && cId in selectedCourseIds
+                                            }
+                                            Surface(
+                                                onClick = {
+                                                    if (cId == "all") {
+                                                        onCoursesChange(setOf("all"))
                                                     } else {
-                                                        val s = selectedCourseIds.toMutableSet()
-                                                        if (s.contains(cId)) s.remove(cId) else s.add(cId)
-                                                        if (s.isEmpty()) mutableSetOf("all") else s
+                                                        val newSet = if (isAllCoursesSelected) {
+                                                            mutableSetOf(cId)
+                                                        } else {
+                                                            val s = selectedCourseIds.toMutableSet()
+                                                            if (s.contains(cId)) s.remove(cId) else s.add(cId)
+                                                            if (s.isEmpty()) mutableSetOf("all") else s
+                                                        }
+                                                        onCoursesChange(newSet)
                                                     }
-                                                    onCoursesChange(newSet)
+                                                },
+                                                shape = RoundedCornerShape(12.dp),
+                                                color = if (isSelected) IndigoLight else Color(0xFFF8FAFC),
+                                                border = BorderStroke(
+                                                    if (isSelected) 1.5.dp else 1.dp,
+                                                    if (isSelected) IndigoPrimary else SlateBorder
+                                                ),
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .height(40.dp)
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 8.dp)) {
+                                                    Text(
+                                                        text = cTitle,
+                                                        fontFamily = PoppinsFontFamily,
+                                                        fontSize = 12.sp,
+                                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                        color = if (isSelected) IndigoPrimary else SlateText,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
                                                 }
-                                            },
-                                            shape = RoundedCornerShape(12.dp),
-                                            color = if (isSelected) IndigoLight else Color(0xFFF8FAFC),
-                                            border = BorderStroke(
-                                                if (isSelected) 1.5.dp else 1.dp,
-                                                if (isSelected) IndigoPrimary else SlateBorder
-                                            ),
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .height(40.dp)
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 8.dp)) {
-                                                Text(
-                                                    text = cTitle,
-                                                    fontFamily = PoppinsFontFamily,
-                                                    fontSize = 12.sp,
-                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                                    color = if (isSelected) IndigoPrimary else SlateText,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
                                             }
                                         }
-                                    }
-                                    repeat(2 - rowCourses.size) {
-                                        Spacer(modifier = Modifier.weight(1f))
+                                        repeat(2 - rowCourses.size) {
+                                            Spacer(modifier = Modifier.weight(1f))
+                                        }
                                     }
                                 }
                             }
                         }
+                    }
 
-                        HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                    HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
 
-                        // 2. GROUPS (Equal Size Grid for all, minimum text, ONLY group name, no 'Group' prefix, no dropdown)
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(
-                                text = "Group",
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = SlateText
+                    // 2. GROUPS (Collapsible / Foldable per user request)
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { isGroupExpanded = !isGroupExpanded }
+                                .padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = "Group",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = SlateText
+                                )
+                                Text(
+                                    text = if (selectedGroups.isEmpty() || "all" in selectedGroups) "(All)" else "(${selectedGroups.size})",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 11.sp,
+                                    color = SlateMuted
+                                )
+                            }
+                            Icon(
+                                imageVector = if (isGroupExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                contentDescription = if (isGroupExpanded) "Collapse Groups" else "Expand Groups",
+                                tint = SlateMuted,
+                                modifier = Modifier.size(20.dp)
                             )
+                        }
 
+                        AnimatedVisibility(visible = isGroupExpanded) {
                             val isAllGroupsSelected = selectedGroups.isEmpty() || "all" in selectedGroups
                             val groupItems = listOf("all") + availableGroups
 
-                            groupItems.chunked(4).forEach { rowGrps ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    rowGrps.forEach { grp ->
-                                        val isChecked = if (grp == "all") {
-                                            isAllGroupsSelected
-                                        } else {
-                                            !isAllGroupsSelected && grp in selectedGroups
-                                        }
-                                        Surface(
-                                            onClick = {
-                                                if (grp == "all") {
-                                                    onGroupsChange(setOf("all"))
-                                                } else {
-                                                    val newSet = if (isAllGroupsSelected) {
-                                                        mutableSetOf(grp)
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                groupItems.chunked(4).forEach { rowGrps ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        rowGrps.forEach { grp ->
+                                            val isChecked = if (grp == "all") {
+                                                isAllGroupsSelected
+                                            } else {
+                                                !isAllGroupsSelected && grp in selectedGroups
+                                            }
+                                            Surface(
+                                                onClick = {
+                                                    if (grp == "all") {
+                                                        onGroupsChange(setOf("all"))
                                                     } else {
-                                                        val s = selectedGroups.toMutableSet()
-                                                        if (s.contains(grp)) s.remove(grp) else s.add(grp)
-                                                        if (s.isEmpty()) mutableSetOf("all") else s
+                                                        val newSet = if (isAllGroupsSelected) {
+                                                            mutableSetOf(grp)
+                                                        } else {
+                                                            val s = selectedGroups.toMutableSet()
+                                                            if (s.contains(grp)) s.remove(grp) else s.add(grp)
+                                                            if (s.isEmpty()) mutableSetOf("all") else s
+                                                        }
+                                                        onGroupsChange(newSet)
                                                     }
-                                                    onGroupsChange(newSet)
+                                                },
+                                                shape = RoundedCornerShape(12.dp),
+                                                color = if (isChecked) IndigoPrimary else Color(0xFFF8FAFC),
+                                                border = BorderStroke(
+                                                    if (isChecked) 1.5.dp else 1.dp,
+                                                    if (isChecked) IndigoPrimary else SlateBorder
+                                                ),
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .height(38.dp)
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Text(
+                                                        text = if (grp == "all") "All" else grp,
+                                                        fontFamily = PoppinsFontFamily,
+                                                        fontSize = 12.sp,
+                                                        fontWeight = if (isChecked) FontWeight.Bold else FontWeight.Medium,
+                                                        color = if (isChecked) Color.White else SlateText,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
                                                 }
-                                            },
-                                            shape = RoundedCornerShape(12.dp),
-                                            color = if (isChecked) IndigoPrimary else Color(0xFFF8FAFC),
-                                            border = BorderStroke(
-                                                if (isChecked) 1.5.dp else 1.dp,
-                                                if (isChecked) IndigoPrimary else SlateBorder
-                                            ),
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .height(38.dp)
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                Text(
-                                                    text = if (grp == "all") "All" else grp,
-                                                    fontFamily = PoppinsFontFamily,
-                                                    fontSize = 12.sp,
-                                                    fontWeight = if (isChecked) FontWeight.Bold else FontWeight.Medium,
-                                                    color = if (isChecked) Color.White else SlateText,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
                                             }
                                         }
-                                    }
-                                    repeat(4 - rowGrps.size) {
-                                        Spacer(modifier = Modifier.weight(1f))
+                                        repeat(4 - rowGrps.size) {
+                                            Spacer(modifier = Modifier.weight(1f))
+                                        }
                                     }
                                 }
                             }
                         }
+                    }
 
-                        HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+                    HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
 
-                        // 3. STATUS FILTER (Flashcard Status Tag Design, minimal equal-size 2x2 grid, no dropdown)
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // 3. STATUS FILTER (Small Icon Buttons matching Flashcard / other pages per user request)
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Text(
                                 text = "Status",
                                 fontFamily = PoppinsFontFamily,
@@ -850,132 +763,183 @@ internal fun CourseQuizConfigView(
                                 fontWeight = FontWeight.Bold,
                                 color = SlateText
                             )
-
                             val isAllStatusesSelected = selectedStatuses.isEmpty() || "all" in selectedStatuses
-                            val statusList = listOf(
-                                Triple("all", "All Words", IndigoPrimary to IndigoLight),
-                                Triple("unrated", "Unrated", SlateMuted to Color(0xFFF1F5F9)),
-                                Triple("know", "Know", EmeraldSuccess to EmeraldLight),
-                                Triple("confusion", "Confused", AmberWarning to AmberLight),
-                                Triple("dont_know", "Don't Know", RoseError to RoseLight)
+                            Text(
+                                text = if (isAllStatusesSelected) "All Words" else "${selectedStatuses.size} selected",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 11.sp,
+                                color = SlateMuted
                             )
+                        }
 
-                            statusList.chunked(2).forEach { rowPair ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    rowPair.forEach { (stKey, label, colorPair) ->
-                                        val (brandColor, bgTint) = colorPair
-                                        val isSelected = if (stKey == "all") {
-                                            isAllStatusesSelected
+                        val isAllStatusesSelected = selectedStatuses.isEmpty() || "all" in selectedStatuses
+                        val statusList = listOf(
+                            Triple("all", Icons.Default.DoneAll, IndigoPrimary to IndigoLight),
+                            Triple("unrated", Icons.Default.HelpOutline, SlateMuted to Color(0xFFF1F5F9)),
+                            Triple("know", Icons.Default.CheckCircle, EmeraldSuccess to EmeraldLight),
+                            Triple("confusion", Icons.Default.Psychology, AmberWarning to AmberLight),
+                            Triple("dont_know", Icons.Default.Cancel, RoseError to RoseLight)
+                        )
+
+                        // 5 small icon buttons in a single row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            statusList.forEach { (stKey, icon, colorPair) ->
+                                val (brandColor, bgTint) = colorPair
+                                val isSelected = if (stKey == "all") {
+                                    isAllStatusesSelected
+                                } else {
+                                    !isAllStatusesSelected && stKey in selectedStatuses
+                                }
+                                Surface(
+                                    onClick = {
+                                        if (stKey == "all") {
+                                            onStatusesChange(setOf("all"))
                                         } else {
-                                            !isAllStatusesSelected && stKey in selectedStatuses
-                                        }
-                                        Surface(
-                                            onClick = {
-                                                if (stKey == "all") {
-                                                    onStatusesChange(setOf("all"))
-                                                } else {
-                                                    val newSet = if (isAllStatusesSelected) {
-                                                        mutableSetOf(stKey)
-                                                    } else {
-                                                        val s = selectedStatuses.toMutableSet()
-                                                        if (s.contains(stKey)) s.remove(stKey) else s.add(stKey)
-                                                        if (s.isEmpty()) mutableSetOf("all") else s
-                                                    }
-                                                    onStatusesChange(newSet)
-                                                }
-                                            },
-                                            shape = RoundedCornerShape(12.dp),
-                                            color = if (isSelected) bgTint else Color(0xFFF8FAFC),
-                                            border = BorderStroke(
-                                                if (isSelected) 1.5.dp else 1.dp,
-                                                if (isSelected) brandColor else SlateBorder
-                                            ),
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .height(42.dp)
-                                        ) {
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .padding(horizontal = 10.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.Center
-                                            ) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(8.dp)
-                                                        .clip(CircleShape)
-                                                        .background(brandColor)
-                                                )
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Text(
-                                                    text = label,
-                                                    fontFamily = PoppinsFontFamily,
-                                                    fontSize = 12.sp,
-                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                                    color = if (isSelected) brandColor else SlateText
-                                                )
-                                                if (isSelected) {
-                                                    Spacer(modifier = Modifier.width(4.dp))
-                                                    Icon(
-                                                        imageVector = Icons.Default.Check,
-                                                        contentDescription = null,
-                                                        tint = brandColor,
-                                                        modifier = Modifier.size(14.dp)
-                                                    )
-                                                }
+                                            val newSet = if (isAllStatusesSelected) {
+                                                mutableSetOf(stKey)
+                                            } else {
+                                                val s = selectedStatuses.toMutableSet()
+                                                if (s.contains(stKey)) s.remove(stKey) else s.add(stKey)
+                                                if (s.isEmpty()) mutableSetOf("all") else s
                                             }
+                                            onStatusesChange(newSet)
                                         }
+                                    },
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (isSelected) bgTint else Color(0xFFF8FAFC),
+                                    border = BorderStroke(
+                                        if (isSelected) 1.5.dp else 1.dp,
+                                        if (isSelected) brandColor else SlateBorder
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(44.dp)
+                                        .testTag("quiz_test_status_$stKey")
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = icon,
+                                            contentDescription = stKey,
+                                            tint = if (isSelected) brandColor else SlateMuted,
+                                            modifier = Modifier.size(20.dp)
+                                        )
                                     }
-                                    repeat(2 - rowPair.size) {
-                                        Spacer(modifier = Modifier.weight(1f))
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = Color(0xFFF1F5F9), thickness = 1.dp)
+
+                    // 4. ORDER & VIEW MODE (Serial/Random and Scroll/1-by-1/Reels per user request)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        // Order selection
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = "Order",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = SlateText
+                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFFF8FAFC))
+                                    .border(1.dp, SlateBorder, RoundedCornerShape(10.dp))
+                                    .padding(3.dp)
+                            ) {
+                                listOf("serial" to "Serial", "random" to "Random").forEach { (ordKey, ordLabel) ->
+                                    val isSel = questionOrder == ordKey
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(32.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (isSel) IndigoPrimary else Color.Transparent)
+                                            .clickable { onOrderChange(ordKey) },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = ordLabel,
+                                            fontFamily = PoppinsFontFamily,
+                                            fontSize = 11.5.sp,
+                                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isSel) Color.White else SlateText
+                                        )
                                     }
                                 }
                             }
                         }
 
-                        // Done Button
-                        OutlinedButton(
-                            onClick = { isFilterGridOpen = false },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = IndigoPrimary),
-                            border = BorderStroke(1.dp, IndigoPrimary),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(42.dp)
-                        ) {
-                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
+                        // View Mode selection
+                        Column(modifier = Modifier.weight(1.3f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(
-                                text = "Done",
+                                text = "View Style",
                                 fontFamily = PoppinsFontFamily,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = SlateText
                             )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFFF8FAFC))
+                                    .border(1.dp, SlateBorder, RoundedCornerShape(10.dp))
+                                    .padding(3.dp)
+                            ) {
+                                listOf(
+                                    "continuous" to "Scroll",
+                                    "one_by_one" to "1-by-1",
+                                    "reels" to "Reels"
+                                ).forEach { (vmKey, vmLabel) ->
+                                    val isSel = quizViewMode == vmKey
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(32.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (isSel) IndigoPrimary else Color.Transparent)
+                                            .clickable { onViewModeChange(vmKey) },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = vmLabel,
+                                            fontFamily = PoppinsFontFamily,
+                                            fontSize = 11.sp,
+                                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isSel) Color.White else SlateText
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
         }
 
-
-        // 4. Question Limit & [Word] Color Settings Card
+        // Question Limit Card
         item {
             Card(
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = Color.White),
-                border = CardDefaults.outlinedCardBorder().copy(brush = androidx.compose.ui.graphics.SolidColor(SlateBorder))
+                border = BorderStroke(1.dp, SlateBorder)
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Minimal Question Range / Limit (Icon or Number)
                     Text(
                         text = "Question Limit",
                         fontFamily = PoppinsFontFamily,
@@ -986,7 +950,7 @@ internal fun CourseQuizConfigView(
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         // All / Infinite Icon Button
@@ -1007,7 +971,7 @@ internal fun CourseQuizConfigView(
                             }
                         }
 
-                        // Minimal Numbers
+                        // Numbers
                         listOf(5, 10, 20, 50, 100).forEach { cnt ->
                             val isSel = questionCount == cnt
                             Surface(

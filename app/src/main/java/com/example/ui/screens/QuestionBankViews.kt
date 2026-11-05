@@ -547,11 +547,11 @@ internal fun QuestionBankDashboardView(
         val qbPrefs = remember(context) { context.getSharedPreferences("qb_typography_settings", Context.MODE_PRIVATE) }
         var questionOrder by remember(target) { mutableStateOf(qbPrefs.getString("qb_question_order", "serial") ?: "serial") }
         var quizViewMode by remember(target) { mutableStateOf(qbPrefs.getString("qb_view_mode", "continuous") ?: "continuous") }
-        var selectedStatus by remember(target) { mutableStateOf("all") }
-        var selectedF1 by remember(target) { mutableStateOf<Set<String>>(emptySet()) }
-        var selectedF2 by remember(target) { mutableStateOf<Set<String>>(emptySet()) }
-        var selectedF3 by remember(target) { mutableStateOf<Set<String>>(emptySet()) }
-        var questionCount by remember(target, bankQuestions) { mutableIntStateOf(qbPrefs.getInt("qb_question_count", 0)) }
+        var selectedStatus by remember(target) { mutableStateOf(qbPrefs.getString("qb_status_$target", qbPrefs.getString("qb_selected_status", "all") ?: "all") ?: "all") }
+        var selectedF1 by remember(target) { mutableStateOf<Set<String>>(qbPrefs.getStringSet("qb_f1_$target", emptySet()) ?: emptySet()) }
+        var selectedF2 by remember(target) { mutableStateOf<Set<String>>(qbPrefs.getStringSet("qb_f2_$target", emptySet()) ?: emptySet()) }
+        var selectedF3 by remember(target) { mutableStateOf<Set<String>>(qbPrefs.getStringSet("qb_f3_$target", emptySet()) ?: emptySet()) }
+        var questionCount by remember(target, bankQuestions) { mutableIntStateOf(qbPrefs.getInt("qb_count_$target", qbPrefs.getInt("qb_question_count", 0))) }
         var qSize by remember(target) { mutableFloatStateOf(qbPrefs.getFloat("qb_q_font_size", 16f)) }
 
         Dialog(onDismissRequest = { configuringBank = null }) {
@@ -639,6 +639,12 @@ internal fun QuestionBankDashboardView(
                                 .putString("qb_view_mode", quizViewMode)
                                 .putInt("qb_question_count", questionCount)
                                 .putFloat("qb_q_font_size", qSize)
+                                .putString("qb_selected_status", selectedStatus)
+                                .putString("qb_status_$target", selectedStatus)
+                                .putStringSet("qb_f1_$target", selectedF1)
+                                .putStringSet("qb_f2_$target", selectedF2)
+                                .putStringSet("qb_f3_$target", selectedF3)
+                                .putInt("qb_count_$target", questionCount)
                                 .apply()
                             onStartQuiz(target, selectedStatus, selectedF1, selectedF2, selectedF3, questionCount, questionOrder, quizViewMode)
                             configuringBank = null
@@ -1249,7 +1255,11 @@ internal fun QuestionBankConfigView(
                                 color = SlateMuted
                             )
                             Text(
-                                text = if (quizViewMode == "one_by_one") "1-by-1" else "Scroll",
+                                text = when (quizViewMode) {
+                                    "one_by_one" -> "1-by-1"
+                                    "reels" -> "Reels"
+                                    else -> "Scroll"
+                                },
                                 fontFamily = PoppinsFontFamily,
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.SemiBold,
@@ -1279,6 +1289,13 @@ internal fun QuestionBankConfigView(
                         text = { Text("1-by-1 View", fontFamily = PoppinsFontFamily, fontSize = 12.sp) },
                         onClick = {
                             onViewModeChange("one_by_one")
+                            viewMenuExpanded = false
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Reels Style", fontFamily = PoppinsFontFamily, fontSize = 12.sp) },
+                        onClick = {
+                            onViewModeChange("reels")
                             viewMenuExpanded = false
                         }
                     )
