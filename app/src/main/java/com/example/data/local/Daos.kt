@@ -65,6 +65,24 @@ interface ArticleDao {
 }
 
 @Dao
+interface ArticleBookGroupDao {
+    @Query("SELECT * FROM article_book_groups ORDER BY updatedAt DESC")
+    fun getAllBookGroups(): Flow<List<ArticleBookGroupEntity>>
+
+    @Query("SELECT * FROM article_book_groups WHERE id = :id LIMIT 1")
+    suspend fun getBookGroupById(id: String): ArticleBookGroupEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertBookGroup(group: ArticleBookGroupEntity)
+
+    @Query("DELETE FROM article_book_groups WHERE id = :id")
+    suspend fun deleteBookGroupById(id: String)
+
+    @Query("DELETE FROM article_book_groups")
+    suspend fun clearAll()
+}
+
+@Dao
 interface DeletedArticleDao {
     @Query("SELECT normalizedTitle FROM deleted_article_titles")
     suspend fun getAllDeletedNormalizedTitles(): List<String>

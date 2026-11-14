@@ -24,9 +24,14 @@ val AikyaFontFamily = FontFamily(
     Font(R.font.aikya_bold, FontWeight.Bold)
 )
 
+val TinosFontFamily = FontFamily(
+    Font(R.font.tinos, FontWeight.Normal)
+)
+
 // Global font aliases
 val KalpurushFont = KalpurushFontFamily
 val AikyaFont = AikyaFontFamily
+val TimesNewRomanFont = TinosFontFamily
 
 fun isBengaliText(text: String?): Boolean {
     if (text.isNullOrBlank()) return false

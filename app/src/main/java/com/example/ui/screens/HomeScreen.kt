@@ -479,18 +479,22 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 QuickPracticeTile(
-                    title = "Flashcard",
-                    icon = Icons.Default.Style,
+                    title = "Quiz test",
+                    icon = Icons.Default.Checklist,
                     accent = IndigoPrimary,
-                    modifier = Modifier.weight(1f),
-                    onClick = { onNavigate("flashcard") }
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("quick_practice_quiz_test"),
+                    onClick = { onNavigate("course_quiz") }
                 )
                 QuickPracticeTile(
-                    title = "Games",
-                    icon = Icons.Default.SportsEsports,
-                    accent = EmeraldSuccess,
-                    modifier = Modifier.weight(1f),
-                    onClick = { onNavigate("games") }
+                    title = "Question Bank",
+                    icon = Icons.Default.Quiz,
+                    accent = AmberWarning,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("quick_practice_question_bank"),
+                    onClick = { onNavigate("question_bank") }
                 )
             }
         }
@@ -501,20 +505,34 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 QuickPracticeTile(
-                    title = "Question Bank",
-                    icon = Icons.Default.Quiz,
-                    accent = AmberWarning,
-                    modifier = Modifier.weight(1f),
-                    onClick = { onNavigate("question_bank") }
-                )
-                QuickPracticeTile(
                     title = "Read Article",
                     icon = Icons.Default.MenuBook,
-                    accent = Color(0xFF7C3AED),
-                    modifier = Modifier.weight(1f),
+                    accent = RoseError,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("quick_practice_read_article"),
                     onClick = { onNavigate("article_reader") }
                 )
+                QuickPracticeTile(
+                    title = "Confusion Set",
+                    icon = Icons.Default.CompareArrows,
+                    accent = Color(0xFF8B5CF6),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("quick_practice_confusion_set"),
+                    onClick = { onNavigate("confusion_set") }
+                )
             }
+        }
+
+        item {
+            QuickPracticeTile(
+                title = "Courses (${courses.size})",
+                icon = Icons.Default.School,
+                accent = EmeraldSuccess,
+                modifier = Modifier.testTag("quick_practice_courses"),
+                onClick = { onNavigate("courses") }
+            )
         }
 
         // Word Groups Breakdown

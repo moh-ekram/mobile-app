@@ -8,6 +8,7 @@ import com.example.data.model.*
 import com.example.data.repository.*
 import com.example.data.sync.DiscoveredDriveFile
 import com.example.data.sync.GoogleDriveSyncService
+import com.example.ui.screens.QuizQuestionItem
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -16,6 +17,7 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
     private val prefs = application.getSharedPreferences("memorizer_prefs", android.content.Context.MODE_PRIVATE)
     private val profilePrefs = application.getSharedPreferences("memorizer_user_profile", android.content.Context.MODE_PRIVATE)
     val repository = MemorizerRepository(application)
+    val bookRepository = BookRepository(application)
 
     // Auth State
     private val _currentUser = MutableStateFlow<UserSession?>(loadSavedUserSession())
@@ -476,6 +478,9 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
     val allArticles: StateFlow<List<ArticleEntity>> = repository.allArticles
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val allArticleBookGroups: StateFlow<List<ArticleBookGroupEntity>> = repository.allArticleBookGroups
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val activeArticle = MutableStateFlow<ArticleEntity?>(null)
 
     fun selectArticle(article: ArticleEntity?) {
@@ -572,11 +577,56 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun saveArticle(title: String, content: String, author: String = "Unknown Author", id: String? = null) {
+    fun saveArticle(
+        title: String,
+        content: String,
+        author: String = "Unknown Author",
+        id: String? = null,
+        sourceUrl: String = "",
+        websiteName: String = "",
+        publishedDate: String = "",
+        faviconUrl: String = "",
+        coverImageUrl: String = ""
+    ) {
         viewModelScope.launch {
-            val saved = repository.saveArticle(title, content, author, activeCourseId.value, id)
+            val saved = repository.saveArticle(
+                title = title,
+                content = content,
+                author = author,
+                courseId = activeCourseId.value,
+                articleId = id,
+                sourceUrl = sourceUrl,
+                websiteName = websiteName,
+                publishedDate = publishedDate,
+                faviconUrl = faviconUrl,
+                coverImageUrl = coverImageUrl
+            )
             activeArticle.value = saved
             _statusMessage.value = "Article '${saved.title}' saved locally!"
+        }
+    }
+
+    fun saveParsedArticle(item: com.example.data.parser.ParsedArticleItem, existingId: String? = null) {
+        saveArticle(
+            title = item.title,
+            content = item.content,
+            author = item.author,
+            id = existingId,
+            sourceUrl = item.sourceUrl,
+            websiteName = item.websiteName,
+            publishedDate = item.publishedDate,
+            faviconUrl = item.faviconUrl,
+            coverImageUrl = item.coverImageUrl
+        )
+    }
+
+    fun saveParsedArticlesBatch(items: List<com.example.data.parser.ParsedArticleItem>) {
+        viewModelScope.launch {
+            val entities = repository.saveParsedArticlesBatch(items, activeCourseId.value)
+            if (entities.isNotEmpty()) {
+                activeArticle.value = entities.first()
+                _statusMessage.value = "${entities.size} articles imported successfully!"
+            }
         }
     }
 
@@ -600,6 +650,38 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
                 activeArticle.value = entities.first()
                 _statusMessage.value = "${entities.size} articles imported successfully!"
             }
+        }
+    }
+
+    fun saveArticleBookGroup(
+        title: String,
+        subtitle: String,
+        articleIds: List<String>,
+        id: String? = null
+    ) {
+        viewModelScope.launch {
+            val jsonArr = org.json.JSONArray()
+            articleIds.distinct().forEach { jsonArr.put(it) }
+            val now = System.currentTimeMillis()
+            val groupId = id ?: "bookgrp_$now"
+            val existing = allArticleBookGroups.value.firstOrNull { it.id == groupId }
+            val group = ArticleBookGroupEntity(
+                id = groupId,
+                title = title.trim().ifBlank { "Compiled Reading Book" },
+                subtitle = subtitle.trim(),
+                articleIdsJson = jsonArr.toString(),
+                createdAt = existing?.createdAt ?: now,
+                updatedAt = now
+            )
+            repository.saveArticleBookGroup(group)
+            _statusMessage.value = "Book group '${group.title}' saved"
+        }
+    }
+
+    fun deleteArticleBookGroup(id: String) {
+        viewModelScope.launch {
+            repository.deleteArticleBookGroup(id)
+            _statusMessage.value = "Book group deleted"
         }
     }
 
@@ -1692,5 +1774,236 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
             repository.recordQuizResult(score, total, uid)
             _statusMessage.value = "Practice completed! Score: $score / $total"
         }
+    }
+
+    // =========================================================================
+    // OFFLINE BOOK LIBRARY, HYBRID READER & SMART MCQ EXPLANATION SYSTEM
+    // =========================================================================
+
+    val allBooks: StateFlow<List<BookEntity>> = bookRepository.allBooks
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allBookBookmarks: StateFlow<List<BookBookmarkEntity>> = bookRepository.allBookmarks
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allBookHighlights: StateFlow<List<BookHighlightEntity>> = bookRepository.allHighlights
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allBookNotes: StateFlow<List<BookNoteEntity>> = bookRepository.allNotes
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val driveBooks = MutableStateFlow<List<DiscoveredDriveFile>>(emptyList())
+    val isRefreshingDriveBooks = MutableStateFlow(false)
+    val downloadingBookFileIds = MutableStateFlow<Set<String>>(emptySet())
+    val isImportingBooks = MutableStateFlow(false)
+    val bookImportStatusText = MutableStateFlow<String?>(null)
+
+    val activeBookTarget = MutableStateFlow<BookReaderTarget?>(null)
+    val ebookReaderPreferences = MutableStateFlow(bookRepository.loadEbookPreferences())
+
+    fun updateEbookPreferences(prefs: EbookReaderPreferences) {
+        ebookReaderPreferences.value = prefs
+        bookRepository.saveEbookPreferences(prefs)
+    }
+
+    fun openBookInReader(
+        bookId: String,
+        pageNumber: Int? = null,
+        highlightQuery: String? = null,
+        highlightParagraph: String? = null,
+        preferredMode: String? = null
+    ) {
+        val targetBook = allBooks.value.find { it.id == bookId }
+        val resolvedPage = (pageNumber ?: targetBook?.lastReadPage ?: 1).coerceAtLeast(1)
+        activeBookTarget.value = BookReaderTarget(
+            bookId = bookId,
+            pageNumber = resolvedPage,
+            highlightQuery = highlightQuery,
+            highlightParagraph = highlightParagraph,
+            preferredMode = "ebook"
+        )
+    }
+
+    fun clearActiveBookTarget() {
+        activeBookTarget.value = null
+    }
+
+    fun refreshDriveBooksList(folderUrlOrId: String = GoogleDriveSyncService.DEFAULT_BOOKS_DRIVE_FOLDER_ID) {
+        viewModelScope.launch {
+            isRefreshingDriveBooks.value = true
+            try {
+                val list = GoogleDriveSyncService.fetchBookFolderFileList(folderUrlOrId)
+                driveBooks.value = list
+            } catch (_: Exception) {}
+            isRefreshingDriveBooks.value = false
+        }
+    }
+
+    fun downloadAndAddDriveBook(item: DiscoveredDriveFile) {
+        val fid = item.fileId
+        if (fid in downloadingBookFileIds.value) return
+        downloadingBookFileIds.value = downloadingBookFileIds.value + fid
+        viewModelScope.launch {
+            _statusMessage.value = "Downloading '${item.title}' for offline reading..."
+            val res = bookRepository.downloadAndImportDriveBook(item)
+            downloadingBookFileIds.value = downloadingBookFileIds.value - fid
+            res.onSuccess { book ->
+                _statusMessage.value = "'${book.title}' (${book.totalPages} pages) saved offline!"
+            }.onFailure { err ->
+                _statusMessage.value = "Book download failed: ${err.message}"
+            }
+        }
+    }
+
+    fun downloadAllDriveBooks() {
+        val list = driveBooks.value
+        if (list.isEmpty()) {
+            _statusMessage.value = "No Drive books available to download."
+            return
+        }
+        viewModelScope.launch {
+            isImportingBooks.value = true
+            var successCount = 0
+            list.forEachIndexed { idx, item ->
+                if (item.fileId !in downloadingBookFileIds.value) {
+                    downloadingBookFileIds.value = downloadingBookFileIds.value + item.fileId
+                    bookImportStatusText.value = "Downloading ${idx + 1}/${list.size}: ${item.title}"
+                    val res = bookRepository.downloadAndImportDriveBook(item)
+                    if (res.isSuccess) successCount++
+                    downloadingBookFileIds.value = downloadingBookFileIds.value - item.fileId
+                }
+            }
+            isImportingBooks.value = false
+            bookImportStatusText.value = null
+            _statusMessage.value = "Downloaded & indexed $successCount of ${list.size} Drive book(s) offline!"
+        }
+    }
+
+    fun importBooksFromUris(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            isImportingBooks.value = true
+            var successCount = 0
+            var lastError: String? = null
+            uris.forEachIndexed { idx, uri ->
+                bookImportStatusText.value = "Importing book ${idx + 1} of ${uris.size}..."
+                val res = bookRepository.importBookFromUri(uri, sourceType = "device")
+                res.onSuccess { successCount++ }
+                    .onFailure { lastError = it.message }
+            }
+            isImportingBooks.value = false
+            bookImportStatusText.value = null
+            _statusMessage.value = if (successCount > 0) {
+                "Imported & indexed $successCount book(s) offline!"
+            } else {
+                "Import failed: ${lastError ?: "Unsupported file"}"
+            }
+        }
+    }
+
+    fun importBooksFromFolderUri(treeUri: Uri) {
+        viewModelScope.launch {
+            isImportingBooks.value = true
+            bookImportStatusText.value = "Scanning selected folder..."
+            val res = bookRepository.importBooksFromFolderUri(treeUri) { cur, tot, name ->
+                bookImportStatusText.value = "Indexing ($cur/$tot): $name"
+            }
+            isImportingBooks.value = false
+            bookImportStatusText.value = null
+            res.onSuccess { list ->
+                _statusMessage.value = "Imported & indexed ${list.size} book(s) from folder!"
+            }.onFailure { err ->
+                _statusMessage.value = err.message ?: "Folder import failed."
+            }
+        }
+    }
+
+    fun reindexBook(bookId: String) {
+        viewModelScope.launch {
+            isImportingBooks.value = true
+            bookImportStatusText.value = "Re-indexing book..."
+            val res = bookRepository.reindexBook(bookId)
+            isImportingBooks.value = false
+            bookImportStatusText.value = null
+            res.onSuccess {
+                _statusMessage.value = "Re-indexed '${it.title}' (${it.totalPages} pages)"
+            }.onFailure { err ->
+                _statusMessage.value = "Re-index failed: ${err.message}"
+            }
+        }
+    }
+
+    fun updateBookMetadata(bookId: String, title: String, author: String, subject: String, description: String) {
+        viewModelScope.launch {
+            bookRepository.updateBookMetadata(bookId, title, author, subject, description)
+            _statusMessage.value = "Book profile updated"
+        }
+    }
+
+    fun updateBookReadingProgress(bookId: String, page: Int, mode: String) {
+        viewModelScope.launch {
+            bookRepository.updateReadingProgress(bookId, page, mode)
+        }
+    }
+
+    fun toggleBookBookmark(bookId: String, pageNumber: Int, title: String, snippet: String) {
+        viewModelScope.launch {
+            val added = bookRepository.toggleBookmark(bookId, pageNumber, title, snippet)
+            _statusMessage.value = if (added) "Bookmarked Page $pageNumber" else "Bookmark removed"
+        }
+    }
+
+    fun deleteBookBookmark(id: String) {
+        viewModelScope.launch {
+            bookRepository.deleteBookmarkById(id)
+        }
+    }
+
+    fun addBookHighlight(bookId: String, pageNumber: Int, selectedText: String, colorHex: String) {
+        viewModelScope.launch {
+            bookRepository.addHighlight(bookId, pageNumber, selectedText, colorHex)
+            _statusMessage.value = "Highlight saved"
+        }
+    }
+
+    fun deleteBookHighlight(id: String) {
+        viewModelScope.launch {
+            bookRepository.deleteHighlightById(id)
+        }
+    }
+
+    fun saveBookNote(
+        bookId: String,
+        pageNumber: Int,
+        noteText: String,
+        selectedText: String = "",
+        highlightId: String? = null,
+        existingId: String? = null
+    ) {
+        viewModelScope.launch {
+            bookRepository.saveNote(bookId, pageNumber, noteText, selectedText, highlightId, existingId)
+            _statusMessage.value = "Note saved"
+        }
+    }
+
+    fun deleteBookNote(id: String) {
+        viewModelScope.launch {
+            bookRepository.deleteNoteById(id)
+        }
+    }
+
+    fun deleteBook(book: BookEntity) {
+        viewModelScope.launch {
+            bookRepository.deleteBook(book)
+            _statusMessage.value = "Removed '${book.title}' from offline library"
+        }
+    }
+
+    suspend fun searchInsideBook(bookId: String, query: String): List<BookPassageMatch> {
+        return bookRepository.searchInsideBook(bookId, query)
+    }
+
+    suspend fun findBookPassagesForQuestion(questionItem: QuizQuestionItem): List<BookPassageMatch> {
+        return bookRepository.searchForMcqPassages(questionItem, maxResults = 3)
     }
 }

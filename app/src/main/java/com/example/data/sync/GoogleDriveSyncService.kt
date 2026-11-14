@@ -35,6 +35,26 @@ data class DiscoveredDriveFile(
     val isGoogleSheet: Boolean = false
 )
 
+data class DownloadedBookFile(
+    val fileName: String,
+    val format: String, // "PDF" or "DOCX"
+    val bytes: ByteArray
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+        other as DownloadedBookFile
+        return fileName == other.fileName && format == other.format && bytes.contentEquals(other.bytes)
+    }
+
+    override fun hashCode(): Int {
+        var result = fileName.hashCode()
+        result = 31 * result + format.hashCode()
+        result = 31 * result + bytes.contentHashCode()
+        return result
+    }
+}
+
 object GoogleDriveSyncService {
 
     const val DEFAULT_DRIVE_FOLDER_ID = "1FTKJCe98AEK3VzIyNK8t1siQEXdTUcJ9"
@@ -42,6 +62,9 @@ object GoogleDriveSyncService {
 
     const val DEFAULT_QB_DRIVE_FOLDER_ID = "1DMmfgwslw7oEdZDm-moxDJRXQ3QGdd75"
     const val DEFAULT_QB_DRIVE_FOLDER_URL = "https://drive.google.com/drive/folders/1DMmfgwslw7oEdZDm-moxDJRXQ3QGdd75"
+
+    const val DEFAULT_BOOKS_DRIVE_FOLDER_ID = "1mUInz6xBqp6B4w7--k7nrbleiZaG8fW3"
+    const val DEFAULT_BOOKS_DRIVE_FOLDER_URL = "https://drive.google.com/drive/folders/1mUInz6xBqp6B4w7--k7nrbleiZaG8fW3"
 
     val DEFAULT_FALLBACK_DRIVE_QB_FILES = listOf(
         DiscoveredDriveFile("1QQy7FAcpG9UvDSS3Y4_bHsHuNBooVNAf", "BCS Q.Bank.xlsx"),
@@ -247,6 +270,157 @@ object GoogleDriveSyncService {
                 downloadDriveFile(item.fileId, item.title)
             }
         }
+    }
+
+    /**
+     * Crawls a public Google Drive folder HTML to discover PDF and DOCX book files.
+     */
+    suspend fun fetchBookFolderFileList(
+        folderIdOrUrl: String = DEFAULT_BOOKS_DRIVE_FOLDER_ID
+    ): List<DiscoveredDriveFile> = withContext(Dispatchers.IO) {
+        val folderId = extractDriveFolderId(folderIdOrUrl) ?: folderIdOrUrl.trim().ifBlank { DEFAULT_BOOKS_DRIVE_FOLDER_ID }
+        try {
+            val folderListUrl = "https://drive.google.com/embeddedfolderview?id=$folderId#list"
+            val request = Request.Builder()
+                .url(folderListUrl)
+                .header("User-Agent", USER_AGENT)
+                .build()
+
+            val html = client.newCall(request).execute().use { response ->
+                if (response.isSuccessful) response.body?.string() ?: "" else ""
+            }
+
+            val discoveredFiles = parseBookFolderHtml(html, folderId)
+            if (discoveredFiles.isNotEmpty()) {
+                return@withContext discoveredFiles
+            }
+
+            // Fallback: Try the main drive folder URL
+            val fallbackUrl = "https://drive.google.com/drive/folders/$folderId"
+            val fbRequest = Request.Builder()
+                .url(fallbackUrl)
+                .header("User-Agent", USER_AGENT)
+                .build()
+
+            val fbHtml = client.newCall(fbRequest).execute().use { response ->
+                if (response.isSuccessful) response.body?.string() ?: "" else ""
+            }
+            val fbDiscovered = parseBookFolderHtml(fbHtml, folderId)
+            if (fbDiscovered.isNotEmpty()) {
+                return@withContext fbDiscovered
+            }
+        } catch (_: Exception) {}
+        return@withContext emptyList()
+    }
+
+    private fun parseBookFolderHtml(html: String, folderId: String): List<DiscoveredDriveFile> {
+        val list = mutableListOf<DiscoveredDriveFile>()
+        val seenIds = mutableSetOf<String>()
+
+        fun addCandidate(id: String?, rawTitle: String?) {
+            val cleanId = id?.trim() ?: return
+            if (cleanId == folderId || cleanId.length < 15 || !seenIds.add(cleanId)) return
+            val title = (rawTitle ?: "")
+                .replace("&amp;", "&")
+                .replace("&quot;", "\"")
+                .replace("&#39;", "'")
+                .removePrefix("File: ")
+                .removePrefix("Document: ")
+                .removePrefix("PDF: ")
+                .trim()
+                .ifBlank { "Book_${cleanId.take(6)}" }
+            list.add(DiscoveredDriveFile(cleanId, title))
+        }
+
+        // Pattern 1: embeddedfolderview flip-entry
+        val p1 = Pattern.compile("""id=["']entry-([a-zA-Z0-9_-]{15,})["'][^>]*>[\s\S]*?<div[^>]*class=["'][^"']*flip-entry-title[^"']*["'][^>]*>([^<]+)</div>""", Pattern.CASE_INSENSITIVE)
+        val m1 = p1.matcher(html)
+        while (m1.find()) addCandidate(m1.group(1), m1.group(2))
+
+        // Pattern 2: JSON array entries in folder JS payload
+        val p3 = Pattern.compile("""\["([a-zA-Z0-9_-]{20,})"\s*,\s*"([^"]+\.(?:pdf|docx|doc))"""", Pattern.CASE_INSENSITIVE)
+        val m3 = p3.matcher(html)
+        while (m3.find()) addCandidate(m3.group(1), m3.group(2))
+
+        // Pattern 3: href=".../file/d/(ID)/..." with title or aria-label
+        val p2 = Pattern.compile("""(?:file/d/|document/d/|id=)([a-zA-Z0-9_-]{15,})[^"'>]*["'][^>]*>[\s\S]*?(?:class=["'][^"']*(?:doc-title|flip-entry-title)[^"']*["'][^>]*>|aria-label=["'])([^<"']+)""", Pattern.CASE_INSENSITIVE)
+        val m2 = p2.matcher(html)
+        while (m2.find()) addCandidate(m2.group(1), m2.group(2))
+
+        // Pattern 4: generic flip-entry link
+        val p4 = Pattern.compile("""href=["'][^"']*file/d/([a-zA-Z0-9_-]{15,})[^"']*["'][\s\S]*?class=["'][^"']*flip-entry-title[^"']*["'][^>]*>([^<]+)<""", Pattern.CASE_INSENSITIVE)
+        val m4 = p4.matcher(html)
+        while (m4.find()) addCandidate(m4.group(1), m4.group(2))
+
+        return list.filter {
+            val lower = it.title.lowercase()
+            lower.endsWith(".pdf") || lower.endsWith(".docx") || !lower.contains(".")
+        }
+    }
+
+    /**
+     * Downloads a single PDF or DOCX book from Google Drive (supports direct files,
+     * large-file usercontent bypass, and Google Docs export as DOCX).
+     */
+    suspend fun downloadSingleBookDriveFile(item: DiscoveredDriveFile): DownloadedBookFile = withContext(Dispatchers.IO) {
+        val candidateUrls = listOf(
+            "https://drive.usercontent.google.com/download?id=${item.fileId}&export=download&confirm=t",
+            "https://drive.google.com/uc?export=download&id=${item.fileId}&confirm=t",
+            "https://docs.google.com/document/d/${item.fileId}/export?format=docx"
+        )
+
+        for (url in candidateUrls) {
+            try {
+                val request = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", USER_AGENT)
+                    .build()
+
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@use
+                    val contentType = response.header("Content-Type")?.lowercase() ?: ""
+                    val bytes = response.body?.bytes() ?: return@use
+                    if (bytes.size < 32) return@use
+
+                    val isPdfMagic = bytes[0] == 0x25.toByte() && bytes[1] == 0x50.toByte() &&
+                        bytes[2] == 0x44.toByte() && bytes[3] == 0x46.toByte() // %PDF
+                    val isZipMagic = bytes[0] == 0x50.toByte() && bytes[1] == 0x4B.toByte() // PK.. (docx)
+
+                    if (!isPdfMagic && !isZipMagic) {
+                        if (contentType.contains("text/html")) return@use
+                    }
+
+                    val disposition = response.header("Content-Disposition")
+                    var fileName = item.title.trim()
+                    if (disposition != null && (fileName.isBlank() || !fileName.contains("."))) {
+                        val fnMatch = Regex("""filename\*?=['"]?(?:UTF-\d['"]*)?([^'";]+)""").find(disposition)
+                        if (fnMatch != null) {
+                            fileName = fnMatch.groupValues[1].trim()
+                        }
+                    }
+
+                    val format = when {
+                        isPdfMagic -> "PDF"
+                        isZipMagic -> "DOCX"
+                        fileName.endsWith(".pdf", true) -> "PDF"
+                        fileName.endsWith(".docx", true) -> "DOCX"
+                        else -> return@use
+                    }
+
+                    if (!fileName.endsWith(".pdf", true) && !fileName.endsWith(".docx", true)) {
+                        fileName = "$fileName.${format.lowercase()}"
+                    }
+
+                    return@withContext DownloadedBookFile(
+                        fileName = fileName,
+                        format = format,
+                        bytes = bytes
+                    )
+                }
+            } catch (_: Exception) {}
+        }
+
+        throw IOException("Could not download '${item.title}' as PDF or DOCX. Ensure sharing is 'Anyone with the link'.")
     }
 
     /**

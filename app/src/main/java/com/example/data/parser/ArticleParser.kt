@@ -15,7 +15,12 @@ import java.util.concurrent.TimeUnit
 data class ParsedArticleItem(
     val title: String,
     val author: String,
-    val content: String
+    val content: String,
+    val sourceUrl: String = "",
+    val websiteName: String = "",
+    val publishedDate: String = "",
+    val faviconUrl: String = "",
+    val coverImageUrl: String = ""
 )
 
 data class ScannedArticleLink(
@@ -252,6 +257,36 @@ object ArticleParser {
 
             val doc = Jsoup.parse(html, url)
 
+            val hostName = try {
+                URI(url).host?.removePrefix("www.") ?: "Web Source"
+            } catch (_: Exception) {
+                "Web Source"
+            }
+
+            // Extract Website Name, Published Date, Favicon & Cover Image BEFORE stripping head/chrome
+            val websiteName = doc.select("meta[property=og:site_name]").attr("content").trim()
+                .ifBlank { doc.select("meta[name=application-name]").attr("content").trim() }
+                .ifBlank { hostName }
+
+            val rawDate = doc.select("meta[property=article:published_time]").attr("content")
+                .ifBlank { doc.select("meta[name=pubdate], meta[name=publishdate], meta[name=date], meta[property=og:updated_time]").attr("content") }
+                .ifBlank { doc.select("time[datetime]").firstOrNull()?.attr("datetime") ?: "" }
+                .ifBlank { doc.select("time").firstOrNull()?.text() ?: "" }
+            val publishedDate = normalizeArticleDate(rawDate)
+
+            val rawFavicon = listOf(
+                doc.select("link[rel=apple-touch-icon]").firstOrNull()?.absUrl("href").orEmpty(),
+                doc.select("link[rel=icon]").firstOrNull()?.absUrl("href").orEmpty(),
+                doc.select("link[rel=\"shortcut icon\"]").firstOrNull()?.absUrl("href").orEmpty()
+            ).firstOrNull { it.startsWith("http", ignoreCase = true) }
+                ?: if (hostName.contains(".")) "https://www.google.com/s2/favicons?domain=$hostName&sz=64" else ""
+
+            val coverImageUrl = doc.select("meta[property=og:image]").firstOrNull()?.absUrl("content")
+                ?.takeIf { it.startsWith("http", ignoreCase = true) }
+                ?: doc.select("meta[name=twitter:image]").firstOrNull()?.absUrl("content")
+                    ?.takeIf { it.startsWith("http", ignoreCase = true) }
+                ?: ""
+
             // Strip out navigation, scripts, ads, footers, etc.
             doc.select("script, style, noscript, nav, header, footer, aside, form, svg, iframe, .ad, .ads, .advertisement, .cookie, .banner, .social-share, .comments, #comments, .menu, .sidebar, .author-bio, [role=navigation], [role=banner]").remove()
 
@@ -269,25 +304,83 @@ object ArticleParser {
                     }
                 }
             }
-            val hostName = try {
-                URI(url).host?.removePrefix("www.") ?: "Web Source"
-            } catch (_: Exception) {
-                "Web Source"
-            }
-            val cleanAuthor = rawAuthor?.trim()?.takeIf { it.isNotBlank() && it.length < 50 } ?: hostName
+            val cleanAuthor = rawAuthor?.trim()?.takeIf { it.isNotBlank() && it.length < 60 } ?: websiteName
 
-            // 3. Extract Main Content
+            // 3. Extract Rich Content (Headings, Paragraphs with Links, Lists, Blockquotes, Images)
             val wikiContent = doc.select(".mw-parser-output").firstOrNull()
             val container = wikiContent ?: doc.select("article, [role=main], main, .article-body, .post-content, .entry-content, .story-body, #content, .content").firstOrNull() ?: doc.body()
 
-            val paragraphs = container.select("p, h2, h3, blockquote")
-                .map { it.text().trim() }
-                .filter { it.length >= 25 }
+            val richBlocks = mutableListOf<String>()
+            val seenImages = HashSet<String>()
+            if (coverImageUrl.isNotBlank()) seenImages.add(coverImageUrl)
 
-            val content = if (paragraphs.isNotEmpty()) {
-                paragraphs.joinToString("\n\n")
+            val blockElements = container.select("h2, h3, h4, p, ul, ol, blockquote, figure")
+            for (el in blockElements) {
+                val tag = el.tagName().lowercase()
+                // Avoid duplicating children inside blockquote/list/figure
+                if (tag == "p" && el.parents().any { it.tagName().lowercase() in setOf("blockquote", "li", "figure") }) {
+                    continue
+                }
+                when (tag) {
+                    "h2" -> {
+                        val txt = el.text().trim()
+                        if (txt.length >= 3) richBlocks.add("## $txt")
+                    }
+                    "h3", "h4" -> {
+                        val txt = el.text().trim()
+                        if (txt.length >= 3) richBlocks.add("### $txt")
+                    }
+                    "blockquote" -> {
+                        val txt = formatInlineWithLinks(el).trim()
+                        if (txt.length >= 12) richBlocks.add("> $txt")
+                    }
+                    "ul" -> {
+                        val items = el.select("> li").mapNotNull { li ->
+                            val t = formatInlineWithLinks(li).trim()
+                            if (t.length >= 3) "• $t" else null
+                        }
+                        if (items.isNotEmpty()) richBlocks.add(items.joinToString("\n"))
+                    }
+                    "ol" -> {
+                        val items = el.select("> li").mapIndexedNotNull { idx, li ->
+                            val t = formatInlineWithLinks(li).trim()
+                            if (t.length >= 3) "${idx + 1}. $t" else null
+                        }
+                        if (items.isNotEmpty()) richBlocks.add(items.joinToString("\n"))
+                    }
+                    "figure" -> {
+                        val imgEl = el.select("img").firstOrNull()
+                        val imgSrc = extractValidImageUrl(imgEl)
+                        if (!imgSrc.isNullOrBlank() && seenImages.add(imgSrc) && seenImages.size <= 6) {
+                            val caption = el.select("figcaption").text().trim()
+                                .ifBlank { imgEl?.attr("alt")?.trim().orEmpty() }
+                            richBlocks.add("![${caption.replace("[", "").replace("]", "")}]($imgSrc)")
+                        }
+                    }
+                    "p" -> {
+                        // Also check inline image inside paragraph
+                        val imgEl = el.select("img").firstOrNull()
+                        val imgSrc = extractValidImageUrl(imgEl)
+                        if (!imgSrc.isNullOrBlank() && seenImages.add(imgSrc) && seenImages.size <= 6) {
+                            val caption = imgEl?.attr("alt")?.trim().orEmpty()
+                            richBlocks.add("![${caption.replace("[", "").replace("]", "")}]($imgSrc)")
+                        }
+                        val formatted = formatInlineWithLinks(el).trim()
+                        if (formatted.length >= 20) {
+                            richBlocks.add(formatted)
+                        }
+                    }
+                }
+            }
+
+            val content = if (richBlocks.isNotEmpty()) {
+                richBlocks.joinToString("\n\n")
             } else {
-                container.text().trim()
+                val fallbackParas = container.select("p, h2, h3, blockquote")
+                    .map { it.text().trim() }
+                    .filter { it.length >= 25 }
+                if (fallbackParas.isNotEmpty()) fallbackParas.joinToString("\n\n")
+                else container.text().trim()
             }
 
             if (content.length < 60) {
@@ -298,12 +391,82 @@ object ArticleParser {
                 ParsedArticleItem(
                     title = cleanTitle,
                     author = cleanAuthor,
-                    content = content
+                    content = content,
+                    sourceUrl = url,
+                    websiteName = websiteName,
+                    publishedDate = publishedDate,
+                    faviconUrl = rawFavicon,
+                    coverImageUrl = coverImageUrl
                 )
             )
         } catch (e: Exception) {
             Result.failure(Exception(e.message ?: "Failed to extract article from link."))
         }
+    }
+
+    private fun extractValidImageUrl(img: org.jsoup.nodes.Element?): String? {
+        if (img == null) return null
+        val candidates = listOf(
+            img.absUrl("src"),
+            img.absUrl("data-src"),
+            img.absUrl("data-lazy-src")
+        )
+        val url = candidates.firstOrNull {
+            it.startsWith("http", ignoreCase = true) &&
+                !it.contains("avatar", ignoreCase = true) &&
+                !it.contains("icon", ignoreCase = true) &&
+                !it.contains("logo", ignoreCase = true) &&
+                !it.contains("1x1", ignoreCase = true) &&
+                !it.endsWith(".svg", ignoreCase = true)
+        }
+        return url
+    }
+
+    private fun formatInlineWithLinks(el: org.jsoup.nodes.Element): String {
+        val sb = StringBuilder()
+        for (node in el.childNodes()) {
+            when (node) {
+                is org.jsoup.nodes.TextNode -> sb.append(node.text())
+                is org.jsoup.nodes.Element -> {
+                    val tag = node.tagName().lowercase()
+                    if (tag == "a") {
+                        val linkText = node.text().trim()
+                        val href = node.absUrl("href").trim()
+                        if (linkText.isNotBlank() &&
+                            href.startsWith("http", ignoreCase = true) &&
+                            !href.contains("javascript:", ignoreCase = true) &&
+                            linkText.length in 2..80
+                        ) {
+                            sb.append("[").append(linkText).append("](").append(href).append(")")
+                        } else {
+                            sb.append(node.text())
+                        }
+                    } else if (tag == "br") {
+                        sb.append("\n")
+                    } else {
+                        sb.append(formatInlineWithLinks(node))
+                    }
+                }
+            }
+        }
+        return sb.toString().replace(Regex("""[ \t]+"""), " ")
+    }
+
+    private fun normalizeArticleDate(raw: String): String {
+        val trimmed = raw.trim()
+        if (trimmed.isBlank()) return ""
+        val isoPrefix = Regex("""^(\d{4})-(\d{2})-(\d{2})""").find(trimmed)
+        if (isoPrefix != null) {
+            return try {
+                val sdfIn = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                val sdfOut = java.text.SimpleDateFormat("dd MMM yyyy", java.util.Locale.US)
+                val dt = sdfIn.parse(isoPrefix.value)
+                if (dt != null) sdfOut.format(dt) else isoPrefix.value
+            } catch (_: Exception) {
+                isoPrefix.value
+            }
+        }
+        return trimmed.take(32)
     }
 
     /**

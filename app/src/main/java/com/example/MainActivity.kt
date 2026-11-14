@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -221,6 +222,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
     val allGames by viewModel.allGames.collectAsState()
     val allQuestions by viewModel.allQuestions.collectAsState()
     val allArticles by viewModel.allArticles.collectAsState()
+    val allArticleBookGroups by viewModel.allArticleBookGroups.collectAsState()
     val activeArticle by viewModel.activeArticle.collectAsState()
     val isSyncingArticles by viewModel.isSyncingArticles.collectAsState()
     val articleSyncUrl by viewModel.articleSyncUrl.collectAsState()
@@ -245,6 +247,17 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
     val isSyncingQB by viewModel.isSyncingQB.collectAsState()
     val selectedCourseIds by viewModel.selectedCourseIds.collectAsState()
     val showOnlyFlagged by viewModel.showOnlyFlagged.collectAsState()
+    val allBooks by viewModel.allBooks.collectAsState()
+    val allBookBookmarks by viewModel.allBookBookmarks.collectAsState()
+    val allBookHighlights by viewModel.allBookHighlights.collectAsState()
+    val allBookNotes by viewModel.allBookNotes.collectAsState()
+    val driveBooks by viewModel.driveBooks.collectAsState()
+    val isRefreshingDriveBooks by viewModel.isRefreshingDriveBooks.collectAsState()
+    val downloadingBookFileIds by viewModel.downloadingBookFileIds.collectAsState()
+    val isImportingBooks by viewModel.isImportingBooks.collectAsState()
+    val bookImportStatusText by viewModel.bookImportStatusText.collectAsState()
+    val activeBookTarget by viewModel.activeBookTarget.collectAsState()
+    val ebookReaderPreferences by viewModel.ebookReaderPreferences.collectAsState()
     val palette = LocalAppPalette.current
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -260,9 +273,11 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
     }
 
     // System Back Button Handling
-    val canNavigateBack = currentRoute != "home" || activeArticle != null || viewModel.hasBackStack()
+    val canNavigateBack = activeBookTarget != null || currentRoute != "home" || activeArticle != null || viewModel.hasBackStack()
     BackHandler(enabled = canNavigateBack) {
-        if (activeArticle != null) {
+        if (activeBookTarget != null) {
+            viewModel.clearActiveBookTarget()
+        } else if (activeArticle != null) {
             viewModel.selectArticle(null)
         } else if (currentRoute == "flashcard") {
             if (isFocusMode) {
@@ -294,13 +309,17 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
         val hideTopBar = (currentRoute == "flashcard" && isFocusMode) ||
                          currentRoute == "article_reader" ||
                          currentRoute == "question_bank" ||
+                         currentRoute == "course_quiz" ||
                          currentRoute == "courses" ||
+                         currentRoute == "books" ||
                          (currentRoute == "games" && selectedGameSection != null)
         val hideBottomBar = currentRoute == "flashcard" ||
                             currentRoute == "question_bank" ||
+                            currentRoute == "course_quiz" ||
                             isArticleReading ||
                             (currentRoute == "games" && selectedGameSection != null)
 
+        Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             topBar = {
                 if (!hideTopBar) {
@@ -350,6 +369,8 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                                     val screenTitle = when (currentRoute) {
                                         "flashcard" -> "Flashcards"
                                         "games" -> "Features"
+                                        "course_quiz" -> "Quiz test"
+                                        "books" -> "Books"
                                         "confusion_set" -> "Confusion Set"
                                         "courses" -> "Course Library"
                                         "settings", "admin", "profile" -> "Settings"
@@ -445,8 +466,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                         val navItems = listOf(
                             NavigationItem("home", "Home", Icons.Default.Home),
                             NavigationItem("flashcard", "Flashcard", Icons.Default.Style),
-                            NavigationItem("games", "Features", Icons.Default.Category),
-                            NavigationItem("courses", "Courses", Icons.Default.School),
+                            NavigationItem("books", "Books", Icons.AutoMirrored.Filled.MenuBook),
                             NavigationItem("settings", "Settings", Icons.Default.Settings)
                         )
 
@@ -557,7 +577,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                                 }
                             )
                         }
-                        "games", "question_bank", "confusion_set" -> GamePracticeScreen(
+                        "games", "course_quiz", "question_bank", "confusion_set" -> GamePracticeScreen(
                             games = allGames,
                             questions = allQuestions,
                             courses = allCourses,
@@ -571,6 +591,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             onRefreshDriveQB = { viewModel.refreshDriveQBList() },
                             onDownloadDriveQB = { item -> viewModel.downloadAndAddDriveQB(item) },
                             initialSection = when (currentRoute) {
+                                "course_quiz" -> "course_quiz"
                                 "question_bank" -> "question_bank"
                                 "confusion_set" -> "confusion_set"
                                 else -> null
@@ -604,17 +625,69 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             articles = allArticles,
                             activeArticle = activeArticle,
                             words = allWords,
+                            bookGroups = allArticleBookGroups,
                             onSelectArticle = { art -> viewModel.setActiveArticle(art) },
                             onSaveArticle = { title, content, author, id ->
                                 viewModel.saveArticle(title, content, author, id)
                             },
+                            onSaveParsedArticle = { item ->
+                                viewModel.saveParsedArticle(item)
+                            },
                             onSaveArticlesBatch = { batch ->
                                 viewModel.saveArticlesBatch(batch)
                             },
+                            onSaveParsedArticlesBatch = { items ->
+                                viewModel.saveParsedArticlesBatch(items)
+                            },
                             onDeleteArticle = { id -> viewModel.deleteArticle(id) },
                             onRateWord = { id, st -> viewModel.rateWord(id, st) },
+                            onSaveBookGroup = { title, subtitle, ids, existingId ->
+                                viewModel.saveArticleBookGroup(title, subtitle, ids, existingId)
+                            },
+                            onDeleteBookGroup = { id -> viewModel.deleteArticleBookGroup(id) },
+                            onFindBookPassages = { question ->
+                                viewModel.findBookPassagesForQuestion(question)
+                            },
+                            onOpenBookPassage = { match ->
+                                viewModel.openBookInReader(
+                                    bookId = match.bookId,
+                                    pageNumber = match.pageNumber,
+                                    highlightQuery = match.bestLine.ifBlank { match.passageSnippet },
+                                    highlightParagraph = match.passageSnippet
+                                )
+                            },
                             onBack = { viewModel.navigateBack() },
                             onSectionChange = { selectedGameSection = it }
+                        )
+                        "books" -> BookLibraryScreen(
+                            books = allBooks,
+                            bookmarks = allBookBookmarks,
+                            highlights = allBookHighlights,
+                            notes = allBookNotes,
+                            driveBooks = driveBooks,
+                            isRefreshingDriveBooks = isRefreshingDriveBooks,
+                            downloadingBookFileIds = downloadingBookFileIds,
+                            isImportingBooks = isImportingBooks,
+                            bookImportStatusText = bookImportStatusText,
+                            observeBookToc = { bId -> viewModel.bookRepository.getTocForBook(bId) },
+                            onImportBookUris = { uris -> viewModel.importBooksFromUris(uris) },
+                            onImportFolderUri = { uri -> viewModel.importBooksFromFolderUri(uri) },
+                            onRefreshDriveBooks = { folderId -> viewModel.refreshDriveBooksList(folderId) },
+                            onDownloadDriveBook = { item -> viewModel.downloadAndAddDriveBook(item) },
+                            onDownloadAllDriveBooks = { viewModel.downloadAllDriveBooks() },
+                            onOpenReader = { bId, page, _ ->
+                                viewModel.openBookInReader(
+                                    bookId = bId,
+                                    pageNumber = page,
+                                    preferredMode = "ebook"
+                                )
+                            },
+                            onUpdateBookMetadata = { bId, title, author, subject, desc ->
+                                viewModel.updateBookMetadata(bId, title, author, subject, desc)
+                            },
+                            onReindexBook = { bId -> viewModel.reindexBook(bId) },
+                            onDeleteBook = { book -> viewModel.deleteBook(book) },
+                            onBack = { viewModel.navigateBack() }
                         )
                         "article_reader" -> {
                             val pendingShared by viewModel.pendingSharedTextOrUrl.collectAsState()
@@ -623,6 +696,7 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                                 activeArticle = activeArticle,
                                 words = allWords,
                                 courses = allCourses,
+                                bookGroups = allArticleBookGroups,
                                 isSyncing = isSyncingArticles,
                                 syncUrl = articleSyncUrl,
                                 pendingSharedTextOrUrl = pendingShared,
@@ -633,11 +707,21 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                                 onSaveArticle = { title, content, author, id ->
                                     viewModel.saveArticle(title, content, author, id)
                                 },
+                                onSaveParsedArticle = { item ->
+                                    viewModel.saveParsedArticle(item)
+                                },
                                 onSaveArticlesBatch = { batch ->
                                     viewModel.saveArticlesBatch(batch)
                                 },
+                                onSaveParsedArticlesBatch = { items ->
+                                    viewModel.saveParsedArticlesBatch(items)
+                                },
                                 onDeleteArticle = { id -> viewModel.deleteArticle(id) },
                                 onRateWord = { id, st -> viewModel.rateWord(id, st) },
+                                onSaveBookGroup = { title, subtitle, ids, existingId ->
+                                    viewModel.saveArticleBookGroup(title, subtitle, ids, existingId)
+                                },
+                                onDeleteBookGroup = { id -> viewModel.deleteArticleBookGroup(id) },
                                 onAddSampleData = { viewModel.addSampleData(force = true) },
                                 onBack = { viewModel.navigateBack() }
                             )
@@ -761,6 +845,58 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                     }
                 )
             }
+        }
+
+        val currentBookTarget = activeBookTarget
+        if (currentBookTarget != null) {
+            val targetBook = allBooks.find { it.id == currentBookTarget.bookId }
+            val readerPages by remember(currentBookTarget.bookId) {
+                viewModel.bookRepository.getPagesForBook(currentBookTarget.bookId)
+            }.collectAsState(initial = emptyList())
+            val readerToc by remember(currentBookTarget.bookId) {
+                viewModel.bookRepository.getTocForBook(currentBookTarget.bookId)
+            }.collectAsState(initial = emptyList())
+            val readerBookmarks by remember(currentBookTarget.bookId) {
+                viewModel.bookRepository.getBookmarksForBook(currentBookTarget.bookId)
+            }.collectAsState(initial = emptyList())
+            val readerHighlights by remember(currentBookTarget.bookId) {
+                viewModel.bookRepository.getHighlightsForBook(currentBookTarget.bookId)
+            }.collectAsState(initial = emptyList())
+            val readerNotes by remember(currentBookTarget.bookId) {
+                viewModel.bookRepository.getNotesForBook(currentBookTarget.bookId)
+            }.collectAsState(initial = emptyList())
+
+            if (targetBook != null) {
+                HybridBookReaderScreen(
+                    book = targetBook,
+                    pages = readerPages,
+                    tocEntries = readerToc,
+                    bookmarks = readerBookmarks,
+                    highlights = readerHighlights,
+                    notes = readerNotes,
+                    initialTarget = currentBookTarget,
+                    ebookPreferences = ebookReaderPreferences,
+                    onUpdateEbookPreferences = { prefs -> viewModel.updateEbookPreferences(prefs) },
+                    onUpdateReadingProgress = { bId, page, mode ->
+                        viewModel.updateBookReadingProgress(bId, page, mode)
+                    },
+                    onToggleBookmark = { bId, page, title, snippet ->
+                        viewModel.toggleBookBookmark(bId, page, title, snippet)
+                    },
+                    onDeleteBookmark = { id -> viewModel.deleteBookBookmark(id) },
+                    onAddHighlight = { bId, page, txt, hex ->
+                        viewModel.addBookHighlight(bId, page, txt, hex)
+                    },
+                    onDeleteHighlight = { id -> viewModel.deleteBookHighlight(id) },
+                    onSaveNote = { bId, page, noteTxt, selTxt, exId ->
+                        viewModel.saveBookNote(bId, page, noteTxt, selTxt, existingId = exId)
+                    },
+                    onDeleteNote = { id -> viewModel.deleteBookNote(id) },
+                    onSearchInBook = { bId, q -> viewModel.searchInsideBook(bId, q) },
+                    onBack = { viewModel.clearActiveBookTarget() }
+                )
+            }
+        }
         }
     }
 }

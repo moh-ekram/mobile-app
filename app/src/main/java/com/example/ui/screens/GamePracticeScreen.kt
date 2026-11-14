@@ -68,13 +68,22 @@ fun GamePracticeScreen(
     articles: List<ArticleEntity> = emptyList(),
     activeArticle: ArticleEntity? = null,
     words: List<VocabularyWordEntity> = emptyList(),
+    bookGroups: List<ArticleBookGroupEntity> = emptyList(),
     onSelectArticle: (ArticleEntity?) -> Unit = {},
     onSaveArticle: (title: String, content: String, author: String, id: String?) -> Unit = { _, _, _, _ -> },
+    onSaveParsedArticle: (com.example.data.parser.ParsedArticleItem) -> Unit = { item ->
+        onSaveArticle(item.title, item.content, item.author, null)
+    },
     onSaveArticlesBatch: (List<Triple<String, String, String>>) -> Unit = { list ->
         list.forEach { (t, c, a) -> onSaveArticle(t, c, a, null) }
     },
+    onSaveParsedArticlesBatch: (List<com.example.data.parser.ParsedArticleItem>) -> Unit = { items ->
+        onSaveArticlesBatch(items.map { Triple(it.title, it.content, it.author) })
+    },
     onDeleteArticle: (String) -> Unit = {},
     onRateWord: (wordId: String, status: String) -> Unit = { _, _ -> },
+    onSaveBookGroup: (title: String, subtitle: String, articleIds: List<String>, existingId: String?) -> Unit = { _, _, _, _ -> },
+    onDeleteBookGroup: (String) -> Unit = {},
     onBack: () -> Unit = {},
     onSectionChange: (String?) -> Unit = {},
     initialSection: String? = null,
@@ -93,6 +102,8 @@ fun GamePracticeScreen(
     onAddSampleData: () -> Unit = {},
     onBackupQBProgress: () -> Unit = {},
     onRestoreQBProgress: (bytes: ByteArray) -> Unit = {},
+    onFindBookPassages: (suspend (QuizQuestionItem) -> List<BookPassageMatch>)? = null,
+    onOpenBookPassage: (BookPassageMatch) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -608,11 +619,16 @@ fun GamePracticeScreen(
                     activeArticle = activeArticle,
                     words = words,
                     courses = courses,
+                    bookGroups = bookGroups,
                     onSelectArticle = onSelectArticle,
                     onSaveArticle = onSaveArticle,
+                    onSaveParsedArticle = onSaveParsedArticle,
                     onSaveArticlesBatch = onSaveArticlesBatch,
+                    onSaveParsedArticlesBatch = onSaveParsedArticlesBatch,
                     onDeleteArticle = onDeleteArticle,
                     onRateWord = onRateWord,
+                    onSaveBookGroup = onSaveBookGroup,
+                    onDeleteBookGroup = onDeleteBookGroup,
                     modifier = Modifier.fillMaxSize()
                 )
             } else if (selectedSection == "course_quiz" && activeQuestions.isEmpty() && !isQuizCompleted) {
@@ -804,7 +820,9 @@ fun GamePracticeScreen(
                                     selectedSection = selectedSection,
                                     onOpenStem = { stemText, stemId ->
                                         activeStemBottomSheet = Pair(stemText, stemId)
-                                    }
+                                    },
+                                    onFindBookPassages = onFindBookPassages,
+                                    onOpenBookPassage = onOpenBookPassage
                                 )
                             }
                         }
@@ -877,7 +895,9 @@ fun GamePracticeScreen(
                                             selectedSection = selectedSection,
                                             onOpenStem = { stemText, stemId ->
                                                 activeStemBottomSheet = Pair(stemText, stemId)
-                                            }
+                                            },
+                                            onFindBookPassages = onFindBookPassages,
+                                            onOpenBookPassage = onOpenBookPassage
                                         )
                                     }
                                 }
@@ -986,7 +1006,9 @@ fun GamePracticeScreen(
                                     selectedSection = selectedSection,
                                     onOpenStem = { stemText, stemId ->
                                         activeStemBottomSheet = Pair(stemText, stemId)
-                                    }
+                                    },
+                                    onFindBookPassages = onFindBookPassages,
+                                    onOpenBookPassage = onOpenBookPassage
                                 )
                             }
 

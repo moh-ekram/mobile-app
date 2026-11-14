@@ -415,40 +415,55 @@ class ArticleSitemapService private constructor() {
                     semaphore.withPermit {
                         try {
                             val parsedResult = ArticleParser.fetchWebArticle(item.url)
-                            val (finalTitle, finalAuthor, finalContent) = if (parsedResult.isSuccess) {
+                            val entity = if (parsedResult.isSuccess) {
                                 val parsed = parsedResult.getOrThrow()
-                                Triple(
-                                    if (parsed.title.isNotBlank()) parsed.title else item.title,
-                                    parsed.author ?: item.section ?: "Web Source",
-                                    parsed.content
+                                val finalContent = parsed.content
+                                val wordCount = finalContent.split(Regex("""\s+""")).filter { it.isNotBlank() }.size
+                                ArticleEntity(
+                                    id = UUID.randomUUID().toString(),
+                                    title = if (parsed.title.isNotBlank()) parsed.title else item.title,
+                                    content = finalContent,
+                                    author = parsed.author.ifBlank { item.section ?: "Web Source" },
+                                    courseId = courseId,
+                                    createdAt = System.currentTimeMillis(),
+                                    wordCount = wordCount,
+                                    sourceUrl = parsed.sourceUrl.ifBlank { item.url },
+                                    websiteName = parsed.websiteName,
+                                    publishedDate = parsed.publishedDate.ifBlank { formatFriendlyDate(item.lastMod) ?: "" },
+                                    faviconUrl = parsed.faviconUrl,
+                                    coverImageUrl = parsed.coverImageUrl
                                 )
                             } else {
                                 // Fallback: scrape directly using ArticleFlashcardScraperService
                                 val scraperResult = ArticleFlashcardScraperService.getInstance().scrapeArticle(item.url)
-                                if (scraperResult.isSuccess) {
+                                val (finalTitle, finalAuthor, finalContent) = if (scraperResult.isSuccess) {
                                     val scraped = scraperResult.getOrThrow()
                                     Triple(scraped.title.ifBlank { item.title }, scraped.author ?: "Web Source", scraped.mainBodyText)
                                 } else {
                                     Triple(item.title, "Web Source", "Full article content could not be retrieved from ${item.url}.")
                                 }
+                                val wordCount = finalContent.split(Regex("""\s+""")).filter { it.isNotBlank() }.size
+                                val host = try { java.net.URI(item.url).host?.removePrefix("www.") ?: "" } catch (_: Exception) { "" }
+                                ArticleEntity(
+                                    id = UUID.randomUUID().toString(),
+                                    title = finalTitle,
+                                    content = finalContent,
+                                    author = finalAuthor,
+                                    courseId = courseId,
+                                    createdAt = System.currentTimeMillis(),
+                                    wordCount = wordCount,
+                                    sourceUrl = item.url,
+                                    websiteName = host,
+                                    publishedDate = formatFriendlyDate(item.lastMod) ?: "",
+                                    faviconUrl = if (host.isNotBlank()) "https://www.google.com/s2/favicons?domain=$host&sz=64" else ""
+                                )
                             }
-
-                            val wordCount = finalContent.split(Regex("""\s+""")).filter { it.isNotBlank() }.size
-                            val entity = ArticleEntity(
-                                id = UUID.randomUUID().toString(),
-                                title = finalTitle,
-                                content = finalContent,
-                                author = finalAuthor,
-                                courseId = courseId,
-                                createdAt = System.currentTimeMillis(),
-                                wordCount = wordCount
-                            )
 
                             database.articleDao().insertArticle(entity)
                             synchronized(savedEntities) {
                                 savedEntities.add(entity)
                             }
-                            onProgress(index + 1, selectedArticles.size, finalTitle)
+                            onProgress(index + 1, selectedArticles.size, entity.title)
                         } catch (e: Exception) {
                             onProgress(index + 1, selectedArticles.size, "Failed: ${item.title}")
                         }

@@ -529,7 +529,7 @@ internal fun GameCategoryCard(
 }
 
 
-internal data class QuizQuestionItem(
+data class QuizQuestionItem(
     val id: String = "",
     val sheetType: String = "",
     val question: String,

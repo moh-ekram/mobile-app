@@ -3,6 +3,7 @@ package com.example.data.repository
 import android.content.Context
 import com.example.data.backup.BackupManager
 import com.example.data.local.AppDatabase
+import com.example.data.model.ArticleBookGroupEntity
 import com.example.data.model.ArticleEntity
 import com.example.data.model.DeletedArticleTitleEntity
 import com.example.data.model.CourseEntity
@@ -60,6 +61,7 @@ class MemorizerRepository(
     val distinctGroups: Flow<List<String>> = database.vocabularyDao().getDistinctGroups()
     val allCourses: Flow<List<CourseEntity>> = database.courseDao().getAllCourses()
     val allArticles: Flow<List<ArticleEntity>> = database.articleDao().getAllArticles()
+    val allArticleBookGroups: Flow<List<ArticleBookGroupEntity>> = database.articleBookGroupDao().getAllBookGroups()
     val allGames: Flow<List<GamePracticeEntity>> = database.gamePracticeDao().getAllItems()
     val allQuestions: Flow<List<QuestionBankEntity>> = database.questionBankDao().getAllQuestions()
 
@@ -163,9 +165,15 @@ class MemorizerRepository(
         content: String,
         author: String = "Unknown Author",
         courseId: String = "course_default",
-        articleId: String? = null
+        articleId: String? = null,
+        sourceUrl: String = "",
+        websiteName: String = "",
+        publishedDate: String = "",
+        faviconUrl: String = "",
+        coverImageUrl: String = ""
     ): ArticleEntity = withContext(Dispatchers.IO) {
         val id = articleId ?: ("art_" + System.currentTimeMillis())
+        val existing = if (articleId != null) database.articleDao().getArticleById(articleId) else null
         val count = content.split("\\s+".toRegex()).count { it.isNotBlank() }
         val article = ArticleEntity(
             id = id,
@@ -173,10 +181,52 @@ class MemorizerRepository(
             content = content,
             author = author.ifBlank { "Unknown Author" },
             courseId = courseId,
-            wordCount = count
+            createdAt = existing?.createdAt ?: System.currentTimeMillis(),
+            wordCount = count,
+            sourceUrl = sourceUrl.ifBlank { existing?.sourceUrl ?: "" },
+            websiteName = websiteName.ifBlank { existing?.websiteName ?: "" },
+            publishedDate = publishedDate.ifBlank { existing?.publishedDate ?: "" },
+            faviconUrl = faviconUrl.ifBlank { existing?.faviconUrl ?: "" },
+            coverImageUrl = coverImageUrl.ifBlank { existing?.coverImageUrl ?: "" }
         )
         database.articleDao().insertArticle(article)
         article
+    }
+
+    suspend fun saveParsedArticlesBatch(
+        items: List<com.example.data.parser.ParsedArticleItem>,
+        courseId: String = "course_default"
+    ): List<ArticleEntity> = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        val entities = items.mapIndexed { index, item ->
+            val count = item.content.split("\\s+".toRegex()).count { it.isNotBlank() }
+            ArticleEntity(
+                id = "art_${now}_$index",
+                title = item.title.ifBlank { "Article ${index + 1}" },
+                content = item.content,
+                author = item.author.ifBlank { "Anonymous Author" },
+                courseId = courseId,
+                createdAt = now + (items.size - index),
+                wordCount = count,
+                sourceUrl = item.sourceUrl,
+                websiteName = item.websiteName,
+                publishedDate = item.publishedDate,
+                faviconUrl = item.faviconUrl,
+                coverImageUrl = item.coverImageUrl
+            )
+        }
+        if (entities.isNotEmpty()) {
+            database.articleDao().insertArticles(entities)
+        }
+        entities
+    }
+
+    suspend fun saveArticleBookGroup(group: ArticleBookGroupEntity) = withContext(Dispatchers.IO) {
+        database.articleBookGroupDao().insertBookGroup(group)
+    }
+
+    suspend fun deleteArticleBookGroup(id: String) = withContext(Dispatchers.IO) {
+        database.articleBookGroupDao().deleteBookGroupById(id)
     }
 
     suspend fun saveArticles(articles: List<ArticleEntity>) = withContext(Dispatchers.IO) {
@@ -826,6 +876,7 @@ class MemorizerRepository(
         database.vocabularyDao().clearAll()
         database.gamePracticeDao().clearAll()
         database.questionBankDao().clearAll()
+        database.articleBookGroupDao().clearAll()
         database.articleDao().clearAll()
         database.courseDao().clearAll()
         val emptyProgress = UserProgressEntity(

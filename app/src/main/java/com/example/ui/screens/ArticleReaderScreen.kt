@@ -8,9 +8,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -36,6 +38,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.*
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -46,11 +49,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.data.model.ArticleBookGroupEntity
 import com.example.data.model.ArticleEntity
 import com.example.data.model.CourseEntity
 import com.example.data.model.VocabularyWordEntity
 import com.example.data.parser.ArticleParser
 import com.example.data.parser.ParsedArticleItem
+import com.example.data.pdf.ArticleRichContentParser
 import com.example.ui.theme.*
 import java.util.Locale
 import android.content.ClipboardManager
@@ -62,13 +67,14 @@ import org.json.JSONObject
 import org.json.JSONArray
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ArticleReaderScreen(
     articles: List<ArticleEntity>,
     activeArticle: ArticleEntity?,
     words: List<VocabularyWordEntity>,
     courses: List<CourseEntity> = emptyList(),
+    bookGroups: List<ArticleBookGroupEntity> = emptyList(),
     isSyncing: Boolean = false,
     syncUrl: String = "",
     pendingSharedTextOrUrl: String? = null,
@@ -77,11 +83,19 @@ fun ArticleReaderScreen(
     onSetSyncUrl: (String) -> Unit = {},
     onSelectArticle: (ArticleEntity?) -> Unit,
     onSaveArticle: (title: String, content: String, author: String, id: String?) -> Unit,
+    onSaveParsedArticle: (ParsedArticleItem) -> Unit = { item ->
+        onSaveArticle(item.title, item.content, item.author, null)
+    },
     onSaveArticlesBatch: (List<Triple<String, String, String>>) -> Unit = { list ->
         list.forEach { (t, c, a) -> onSaveArticle(t, c, a, null) }
     },
+    onSaveParsedArticlesBatch: (List<ParsedArticleItem>) -> Unit = { items ->
+        onSaveArticlesBatch(items.map { Triple(it.title, it.content, it.author) })
+    },
     onDeleteArticle: (String) -> Unit,
     onRateWord: (wordId: String, status: String) -> Unit,
+    onSaveBookGroup: (title: String, subtitle: String, articleIds: List<String>, existingId: String?) -> Unit = { _, _, _, _ -> },
+    onDeleteBookGroup: (String) -> Unit = {},
     onAddSampleData: () -> Unit = {},
     onBack: () -> Unit,
     modifier: Modifier = Modifier
@@ -90,6 +104,7 @@ fun ArticleReaderScreen(
     var initialEditorTab by remember { mutableIntStateOf(0) }
     var showSyncDialog by remember { mutableStateOf(false) }
     var showReaderSettingsDialog by remember { mutableStateOf(false) }
+    var showBookStudioDialog by remember { mutableStateOf(false) }
 
     BackHandler {
         if (activeArticle != null) {
@@ -118,6 +133,12 @@ fun ArticleReaderScreen(
                         }
                     },
                     actions = {
+                        IconButton(
+                            onClick = { showBookStudioDialog = true },
+                            modifier = Modifier.testTag("topbar_book_studio_button")
+                        ) {
+                            Icon(Icons.Default.AutoStories, contentDescription = "Book & PDF Studio", tint = IndigoPrimary)
+                        }
                         IconButton(
                             onClick = { showSyncDialog = true },
                             enabled = !isSyncing
@@ -158,6 +179,7 @@ fun ArticleReaderScreen(
             activeArticle = activeArticle,
             words = words,
             courses = courses,
+            bookGroups = bookGroups,
             isSyncing = isSyncing,
             syncUrl = syncUrl,
             pendingSharedTextOrUrl = pendingSharedTextOrUrl,
@@ -166,9 +188,13 @@ fun ArticleReaderScreen(
             onSetSyncUrl = onSetSyncUrl,
             onSelectArticle = onSelectArticle,
             onSaveArticle = onSaveArticle,
+            onSaveParsedArticle = onSaveParsedArticle,
             onSaveArticlesBatch = onSaveArticlesBatch,
+            onSaveParsedArticlesBatch = onSaveParsedArticlesBatch,
             onDeleteArticle = onDeleteArticle,
             onRateWord = onRateWord,
+            onSaveBookGroup = onSaveBookGroup,
+            onDeleteBookGroup = onDeleteBookGroup,
             onAddSampleData = onAddSampleData,
             showAddDialogFromParent = showAddDialog,
             initialAddDialogTabFromParent = initialEditorTab,
@@ -177,18 +203,21 @@ fun ArticleReaderScreen(
             onDismissSyncDialog = { showSyncDialog = false },
             showReaderSettingsFromParent = showReaderSettingsDialog,
             onDismissReaderSettings = { showReaderSettingsDialog = false },
+            showBookStudioFromParent = showBookStudioDialog,
+            onDismissBookStudio = { showBookStudioDialog = false },
             modifier = if (activeArticle == null) Modifier.padding(innerPadding) else Modifier.statusBarsPadding()
         )
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ArticleReaderView(
     articles: List<ArticleEntity>,
     activeArticle: ArticleEntity?,
     words: List<VocabularyWordEntity>,
     courses: List<CourseEntity> = emptyList(),
+    bookGroups: List<ArticleBookGroupEntity> = emptyList(),
     isSyncing: Boolean = false,
     syncUrl: String = "",
     pendingSharedTextOrUrl: String? = null,
@@ -197,11 +226,19 @@ fun ArticleReaderView(
     onSetSyncUrl: (String) -> Unit = {},
     onSelectArticle: (ArticleEntity?) -> Unit,
     onSaveArticle: (title: String, content: String, author: String, id: String?) -> Unit,
+    onSaveParsedArticle: (ParsedArticleItem) -> Unit = { item ->
+        onSaveArticle(item.title, item.content, item.author, null)
+    },
     onSaveArticlesBatch: (List<Triple<String, String, String>>) -> Unit = { list ->
         list.forEach { (t, c, a) -> onSaveArticle(t, c, a, null) }
     },
+    onSaveParsedArticlesBatch: (List<ParsedArticleItem>) -> Unit = { items ->
+        onSaveArticlesBatch(items.map { Triple(it.title, it.content, it.author) })
+    },
     onDeleteArticle: (String) -> Unit,
     onRateWord: (wordId: String, status: String) -> Unit,
+    onSaveBookGroup: (title: String, subtitle: String, articleIds: List<String>, existingId: String?) -> Unit = { _, _, _, _ -> },
+    onDeleteBookGroup: (String) -> Unit = {},
     onAddSampleData: () -> Unit = {},
     showAddDialogFromParent: Boolean = false,
     initialAddDialogTabFromParent: Int = 0,
@@ -210,6 +247,8 @@ fun ArticleReaderView(
     onDismissSyncDialog: () -> Unit = {},
     showReaderSettingsFromParent: Boolean = false,
     onDismissReaderSettings: () -> Unit = {},
+    showBookStudioFromParent: Boolean = false,
+    onDismissBookStudio: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -220,6 +259,11 @@ fun ArticleReaderView(
     var showLocalReaderSettings by remember { mutableStateOf(false) }
     var showCourseFilterDialog by remember { mutableStateOf(false) }
     var articlePendingDelete by remember { mutableStateOf<ArticleEntity?>(null) }
+    var isSelectionMode by remember { mutableStateOf(false) }
+    var selectedBookArticleIds by remember { mutableStateOf<List<String>>(emptyList()) }
+    var showLocalBookStudio by remember { mutableStateOf(false) }
+    var studioInitialSelectedIds by remember { mutableStateOf<List<String>>(emptyList()) }
+    var pdfPreviewRequest by remember { mutableStateOf<Triple<String, String, List<ArticleEntity>>?>(null) }
     val readerScope = rememberCoroutineScope()
     var isExtractingSharedArticle by remember { mutableStateOf(false) }
     var sharedArticleError by remember { mutableStateOf<String?>(null) }
@@ -296,12 +340,15 @@ fun ArticleReaderView(
         popupWordIndex = 0
     }
 
-    BackHandler(enabled = currentArticle != null || matchedWordsForPopup.isNotEmpty()) {
+    BackHandler(enabled = currentArticle != null || matchedWordsForPopup.isNotEmpty() || isSelectionMode) {
         if (matchedWordsForPopup.isNotEmpty()) {
             matchedWordsForPopup = emptyList()
             popupWordIndex = 0
-        } else {
+        } else if (currentArticle != null) {
             onSelectArticle(null)
+        } else if (isSelectionMode) {
+            isSelectionMode = false
+            selectedBookArticleIds = emptyList()
         }
     }
 
@@ -678,7 +725,7 @@ fun ArticleReaderView(
                                             isExtractingSharedArticle = false
                                             fetchResult.fold(
                                                 onSuccess = { item ->
-                                                    onSaveArticle(item.title, item.content, item.author, null)
+                                                    onSaveParsedArticle(item)
                                                     onClearPendingShared()
                                                 },
                                                 onFailure = { err ->
@@ -689,10 +736,9 @@ fun ArticleReaderView(
                                             isExtractingSharedArticle = false
                                             val parsed = ArticleParser.parseArticles(text)
                                             if (parsed.size > 1) {
-                                                onSaveArticlesBatch(parsed.map { Triple(it.title, it.content, it.author) })
+                                                onSaveParsedArticlesBatch(parsed)
                                             } else if (parsed.size == 1) {
-                                                val single = parsed.first()
-                                                onSaveArticle(single.title, single.content, single.author, null)
+                                                onSaveParsedArticle(parsed.first())
                                             } else {
                                                 onSaveArticle("Shared Article", text, "Shared via Android", null)
                                             }
@@ -911,7 +957,7 @@ fun ArticleReaderView(
                                 }
                             }
 
-                            // Right: Minimal, Iconized Toolbar (Sync, URL, Add, Settings)
+                            // Right: Minimal, Iconized Toolbar (Select, Book PDF Studio, Sync, URL, Add, Settings)
                             Surface(
                                 color = Color.White,
                                 shape = RoundedCornerShape(8.dp),
@@ -921,6 +967,44 @@ fun ArticleReaderView(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier.padding(horizontal = 2.dp, vertical = 2.dp)
                                 ) {
+                                    IconButton(
+                                        onClick = {
+                                            if (isSelectionMode) {
+                                                isSelectionMode = false
+                                                selectedBookArticleIds = emptyList()
+                                            } else {
+                                                isSelectionMode = true
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .testTag("toggle_article_select_mode")
+                                    ) {
+                                        Icon(
+                                            if (isSelectionMode) Icons.Default.Close else Icons.Default.Checklist,
+                                            contentDescription = if (isSelectionMode) "Exit Selection Mode" else "Select Articles for Book",
+                                            modifier = Modifier.size(16.dp),
+                                            tint = if (isSelectionMode) IndigoPrimary else SlateText
+                                        )
+                                    }
+
+                                    IconButton(
+                                        onClick = {
+                                            studioInitialSelectedIds = selectedBookArticleIds
+                                            showLocalBookStudio = true
+                                        },
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .testTag("open_book_studio_button")
+                                    ) {
+                                        Icon(
+                                            Icons.Default.AutoStories,
+                                            contentDescription = "Book & PDF Generator",
+                                            modifier = Modifier.size(16.dp),
+                                            tint = IndigoPrimary
+                                        )
+                                    }
+
                                     IconButton(
                                         onClick = {
                                             if (syncUrl.isNotBlank()) onSync(syncUrl) else showSyncDialog = true
@@ -991,8 +1075,22 @@ fun ArticleReaderView(
                     }
 
                     items(articles, key = { it.id }) { art ->
+                        val isSelectedForBook = art.id in selectedBookArticleIds
+                        val cleanPreview = remember(art.content) {
+                            ArticleRichContentParser.toCleanReaderText(art.content)
+                                .take(140)
+                                .replace("\n", " ")
+                        }
+                        val websiteDisplay = remember(art) {
+                            ArticleRichContentParser.deriveWebsiteName(art)
+                        }
+                        val dateDisplay = remember(art) {
+                            ArticleRichContentParser.derivePublishedDate(art)
+                        }
+
                         val dismissState = rememberSwipeToDismissBoxState(
                             confirmValueChange = { value ->
+                                if (isSelectionMode) return@rememberSwipeToDismissBoxState false
                                 when (value) {
                                     SwipeToDismissBoxValue.EndToStart -> {
                                         articlePendingDelete = art
@@ -1010,6 +1108,8 @@ fun ArticleReaderView(
 
                         SwipeToDismissBox(
                             state = dismissState,
+                            enableDismissFromStartToEnd = !isSelectionMode,
+                            enableDismissFromEndToStart = !isSelectionMode,
                             backgroundContent = {
                                 val isDelete = dismissState.targetValue == SwipeToDismissBoxValue.EndToStart || dismissState.dismissDirection == SwipeToDismissBoxValue.EndToStart
                                 val isEdit = dismissState.targetValue == SwipeToDismissBoxValue.StartToEnd || dismissState.dismissDirection == SwipeToDismissBoxValue.StartToEnd
@@ -1045,43 +1145,182 @@ fun ArticleReaderView(
                             Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { onSelectArticle(art) },
+                                    .combinedClickable(
+                                        onClick = {
+                                            if (isSelectionMode) {
+                                                selectedBookArticleIds = if (isSelectedForBook) {
+                                                    selectedBookArticleIds - art.id
+                                                } else {
+                                                    selectedBookArticleIds + art.id
+                                                }
+                                            } else {
+                                                onSelectArticle(art)
+                                            }
+                                        },
+                                        onLongClick = {
+                                            isSelectionMode = true
+                                            if (!isSelectedForBook) {
+                                                selectedBookArticleIds = selectedBookArticleIds + art.id
+                                            }
+                                        }
+                                    ),
                                 shape = RoundedCornerShape(12.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color.White),
-                                border = CardDefaults.outlinedCardBorder().copy(
-                                    brush = androidx.compose.ui.graphics.SolidColor(SlateBorder)
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isSelectedForBook) IndigoLight.copy(alpha = 0.55f) else Color.White
+                                ),
+                                border = BorderStroke(
+                                    width = if (isSelectedForBook) 1.5.dp else 1.dp,
+                                    color = if (isSelectedForBook) IndigoPrimary else SlateBorder
                                 )
                             ) {
-                                Column(modifier = Modifier.padding(14.dp)) {
-                                    Text(
-                                        text = art.title,
-                                        fontFamily = selectArticleFontForText(art.title),
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = SlateText,
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-
-                                    if (art.author.isNotBlank() && art.author != "Anonymous Author") {
-                                        Spacer(modifier = Modifier.height(2.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(14.dp),
+                                    verticalAlignment = Alignment.Top,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
                                         Text(
-                                            text = "By ${art.author}",
-                                            fontFamily = PoppinsFontFamily,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            color = SlateMuted
+                                            text = art.title,
+                                            fontFamily = selectArticleFontForText(art.title),
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = SlateText,
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+
+                                        val metaLine = buildString {
+                                            if (art.author.isNotBlank() && !art.author.equals("Anonymous Author", ignoreCase = true)) {
+                                                append("By ${art.author}")
+                                            }
+                                            if (websiteDisplay.isNotBlank() && websiteDisplay != "Saved Article") {
+                                                if (isNotEmpty()) append(" • ")
+                                                append(websiteDisplay)
+                                            }
+                                            if (dateDisplay.isNotBlank()) {
+                                                if (isNotEmpty()) append(" • ")
+                                                append(dateDisplay)
+                                            }
+                                        }
+                                        if (metaLine.isNotBlank()) {
+                                            Spacer(modifier = Modifier.height(2.dp))
+                                            Text(
+                                                text = metaLine,
+                                                fontFamily = PoppinsFontFamily,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = SlateMuted,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = cleanPreview + if (art.content.length > 140) "..." else "",
+                                            fontFamily = selectArticleFontForText(cleanPreview),
+                                            fontSize = 12.5.sp,
+                                            lineHeight = 18.sp,
+                                            color = SlateText.copy(alpha = 0.8f),
+                                            maxLines = 2
                                         )
                                     }
 
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = art.content.take(130).replace("\n", " ") + if (art.content.length > 130) "..." else "",
-                                        fontFamily = selectArticleFontForText(art.content),
-                                        fontSize = 12.5.sp,
-                                        lineHeight = 18.sp,
-                                        color = SlateText.copy(alpha = 0.8f),
-                                        maxLines = 2
-                                    )
+                                    if (isSelectionMode) {
+                                        val orderNum = selectedBookArticleIds.indexOf(art.id)
+                                        Box(
+                                            modifier = Modifier
+                                                .size(26.dp)
+                                                .clip(CircleShape)
+                                                .background(if (isSelectedForBook) IndigoPrimary else SlateLight)
+                                                .border(1.dp, if (isSelectedForBook) IndigoPrimary else SlateBorder, CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (orderNum >= 0) {
+                                                Text(
+                                                    text = "${orderNum + 1}",
+                                                    color = Color.White,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            } else {
+                                                Icon(
+                                                    Icons.Default.Add,
+                                                    contentDescription = "Select",
+                                                    tint = SlateMuted,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Multi-Select Book Builder Action Bar
+                AnimatedVisibility(
+                    visible = isSelectionMode,
+                    enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                    exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+                ) {
+                    Surface(
+                        color = Color.White,
+                        shadowElevation = 10.dp,
+                        border = BorderStroke(1.dp, SlateBorder.copy(alpha = 0.7f)),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column {
+                                Text(
+                                    text = "${selectedBookArticleIds.size} selected",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = SlateText
+                                )
+                                Text(
+                                    text = "Tap cards to add in chapter order",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 10.5.sp,
+                                    color = SlateMuted
+                                )
+                            }
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                TextButton(
+                                    onClick = {
+                                        isSelectionMode = false
+                                        selectedBookArticleIds = emptyList()
+                                    }
+                                ) {
+                                    Text("Cancel", fontFamily = PoppinsFontFamily, fontSize = 12.sp, color = SlateMuted)
+                                }
+
+                                Button(
+                                    onClick = {
+                                        studioInitialSelectedIds = selectedBookArticleIds
+                                        showLocalBookStudio = true
+                                    },
+                                    enabled = selectedBookArticleIds.isNotEmpty(),
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                                    modifier = Modifier.testTag("build_pdf_from_selected_button")
+                                ) {
+                                    Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Create Book", fontFamily = PoppinsFontFamily, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                                 }
                             }
                         }
@@ -1351,7 +1590,10 @@ fun ArticleReaderView(
                         }
 
                         // Reading Content with Interactive Words
-                        val isBengaliArticle = isBengaliText(currentArticle.content)
+                        val readableContent = remember(currentArticle.content) {
+                            ArticleRichContentParser.toCleanReaderText(currentArticle.content)
+                        }
+                        val isBengaliArticle = isBengaliText(readableContent)
                         val selectedFont = if (isBengaliArticle) AikyaFontFamily else when (readerFontFamily) {
                             "serif" -> FontFamily.Serif
                             "monospace" -> FontFamily.Monospace
@@ -1360,14 +1602,14 @@ fun ArticleReaderView(
                         }
                         val isExtraBold = (readerHighlightBold == "extra_bold")
 
-                        val tokenToWordsMap = remember(currentArticle.content, place1MultiMap, place2MultiMap, place3MultiMap, readerMatchMode, readerMinWordLength) {
+                        val tokenToWordsMap = remember(readableContent, place1MultiMap, place2MultiMap, place3MultiMap, readerMatchMode, readerMinWordLength) {
                             mutableMapOf<String, List<VocabularyWordEntity>>()
                         }
 
-                        val annotatedText = remember(currentArticle.content, place1MultiMap, place2MultiMap, place3MultiMap, readerMatchMode, readerMinWordLength, isExtraBold, isReaderNightMode) {
+                        val annotatedText = remember(readableContent, place1MultiMap, place2MultiMap, place3MultiMap, readerMatchMode, readerMinWordLength, isExtraBold, isReaderNightMode) {
                             tokenToWordsMap.clear()
                             buildPlaceHighlightedAnnotatedString(
-                                content = currentArticle.content,
+                                content = readableContent,
                                 place1MultiMap = place1MultiMap,
                                 place2MultiMap = place2MultiMap,
                                 place3MultiMap = place3MultiMap,
@@ -1918,16 +2160,53 @@ fun ArticleReaderView(
                 showAddDialog = false
                 onDismissAddDialog()
             },
+            onSaveSingleParsed = { parsed ->
+                onSaveParsedArticle(parsed)
+                showAddDialog = false
+                onDismissAddDialog()
+            },
             onSaveBatch = { parsedArticles ->
                 if (parsedArticles.size == 1) {
-                    val single = parsedArticles.first()
-                    onSaveArticle(single.title, single.content, single.author, null)
+                    onSaveParsedArticle(parsedArticles.first())
                 } else {
-                    onSaveArticlesBatch(parsedArticles.map { Triple(it.title, it.content, it.author) })
+                    onSaveParsedArticlesBatch(parsedArticles)
                 }
                 showAddDialog = false
                 onDismissAddDialog()
             }
+        )
+    }
+
+    // Multi-Article Book & PDF Studio Dialog
+    if (showLocalBookStudio || showBookStudioFromParent) {
+        ArticleBookStudioDialog(
+            articles = articles,
+            bookGroups = bookGroups,
+            initialSelectedIds = studioInitialSelectedIds,
+            onSaveBookGroup = onSaveBookGroup,
+            onDeleteBookGroup = onDeleteBookGroup,
+            onOpenPdfPreview = { title, subtitle, ordered ->
+                showLocalBookStudio = false
+                onDismissBookStudio()
+                isSelectionMode = false
+                selectedBookArticleIds = emptyList()
+                pdfPreviewRequest = Triple(title, subtitle, ordered)
+            },
+            onDismiss = {
+                showLocalBookStudio = false
+                onDismissBookStudio()
+            }
+        )
+    }
+
+    // Live A4 PDF Preview & Download Dialog
+    val activePreview = pdfPreviewRequest
+    if (activePreview != null) {
+        PdfBookPreviewDialog(
+            bookTitle = activePreview.first,
+            bookSubtitle = activePreview.second,
+            articles = activePreview.third,
+            onDismiss = { pdfPreviewRequest = null }
         )
     }
 
@@ -2767,6 +3046,7 @@ private fun ArticleEditorDialog(
     initialTab: Int = 0,
     onDismiss: () -> Unit,
     onSaveSingle: (title: String, content: String, author: String) -> Unit,
+    onSaveSingleParsed: (ParsedArticleItem) -> Unit = { item -> onSaveSingle(item.title, item.content, item.author) },
     onSaveBatch: (List<ParsedArticleItem>) -> Unit
 ) {
     val context = LocalContext.current
@@ -2778,6 +3058,7 @@ private fun ArticleEditorDialog(
     var title by remember { mutableStateOf(initialTitle) }
     var author by remember { mutableStateOf(initialAuthor) }
     var content by remember { mutableStateOf(initialContent) }
+    var fetchedWebMeta by remember { mutableStateOf<ParsedArticleItem?>(null) }
 
     // Bulk URLs states
     var bulkUrlsInput by remember { mutableStateOf("") }
@@ -3085,6 +3366,7 @@ private fun ArticleEditorDialog(
                                                                 title = item.title
                                                                 author = item.author
                                                                 content = item.content
+                                                                fetchedWebMeta = item
                                                                 singleWebUrl = ""
                                                             },
                                                             onFailure = { err ->
@@ -3240,18 +3522,29 @@ private fun ArticleEditorDialog(
                             Button(
                                 onClick = {
                                     if (content.isNotBlank()) {
-                                        val parsed = ArticleParser.parseArticles(content, title, author)
-                                        if (parsed.size > 1) {
-                                            onSaveBatch(parsed)
-                                        } else if (parsed.size == 1) {
-                                            val single = parsed.first()
-                                            onSaveSingle(single.title, single.content, single.author)
-                                        } else {
-                                            onSaveSingle(
-                                                title.trim().ifEmpty { "New Article" },
-                                                content.trim(),
-                                                author.trim().ifEmpty { "Anonymous Author" }
+                                        val webMeta = fetchedWebMeta
+                                        if (webMeta != null && !isEditing) {
+                                            onSaveSingleParsed(
+                                                webMeta.copy(
+                                                    title = title.trim().ifEmpty { webMeta.title },
+                                                    author = author.trim().ifEmpty { webMeta.author },
+                                                    content = content.trim()
+                                                )
                                             )
+                                        } else {
+                                            val parsed = ArticleParser.parseArticles(content, title, author)
+                                            if (parsed.size > 1) {
+                                                onSaveBatch(parsed)
+                                            } else if (parsed.size == 1) {
+                                                val single = parsed.first()
+                                                onSaveSingle(single.title, single.content, single.author)
+                                            } else {
+                                                onSaveSingle(
+                                                    title.trim().ifEmpty { "New Article" },
+                                                    content.trim(),
+                                                    author.trim().ifEmpty { "Anonymous Author" }
+                                                )
+                                            }
                                         }
                                     }
                                 },

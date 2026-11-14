@@ -126,7 +126,9 @@ internal fun QuizQuestionCardView(
     qbExplanationFontSize: Float = 12f,
     qbExplanationFont: String = "auto",
     selectedSection: String? = null,
-    onOpenStem: (stemText: String, stemId: String?) -> Unit = { _, _ -> }
+    onOpenStem: (stemText: String, stemId: String?) -> Unit = { _, _ -> },
+    onFindBookPassages: (suspend (QuizQuestionItem) -> List<BookPassageMatch>)? = null,
+    onOpenBookPassage: (BookPassageMatch) -> Unit = {}
 ) {
     val options = remember(currentQ) {
         listOf(currentQ.opt1, currentQ.opt2, currentQ.opt3, currentQ.opt4, currentQ.opt5)
@@ -310,9 +312,207 @@ internal fun QuizQuestionCardView(
                         )
                     }
                 }
+            } else if (isAnswered && currentQ.explanation.isNullOrBlank() && onFindBookPassages != null) {
+                var isSearchingBooks by remember(currentQ.id, currentQ.question) { mutableStateOf(true) }
+                var bookPassages by remember(currentQ.id, currentQ.question) {
+                    mutableStateOf<List<BookPassageMatch>>(emptyList())
+                }
+
+                LaunchedEffect(currentQ.id, currentQ.question, isAnswered) {
+                    isSearchingBooks = true
+                    bookPassages = try {
+                        onFindBookPassages(currentQ)
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                    isSearchingBooks = false
+                }
+
+                if (isSearchingBooks || bookPassages.isNotEmpty()) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp)
+                            .testTag("smart_book_explanation_card_${currentQ.id}"),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
+                        border = BorderStroke(1.dp, Color(0xFFCBD5E1))
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.MenuBook,
+                                    contentDescription = null,
+                                    tint = IndigoPrimary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "BOOK EXPLANATION",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = IndigoPrimary,
+                                    letterSpacing = 0.8.sp
+                                )
+                            }
+
+                            if (isSearchingBooks) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(14.dp),
+                                        strokeWidth = 2.dp,
+                                        color = IndigoPrimary
+                                    )
+                                    Text(
+                                        text = "Searching linked books...",
+                                        fontFamily = PoppinsFontFamily,
+                                        fontSize = 12.sp,
+                                        color = SlateMuted
+                                    )
+                                }
+                            } else {
+                                bookPassages.forEach { match ->
+                                    Surface(
+                                        onClick = { onOpenBookPassage(match) },
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = Color.White,
+                                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("book_passage_item_${match.bookId}_${match.pageNumber}")
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = match.bookTitle,
+                                                    fontFamily = selectFontForText(match.bookTitle),
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = SlateText,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Surface(
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    color = IndigoLight
+                                                ) {
+                                                    Text(
+                                                        text = "Page ${match.pageNumber}",
+                                                        fontFamily = PoppinsFontFamily,
+                                                        fontSize = 10.5.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        color = IndigoPrimary,
+                                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                                    )
+                                                }
+                                            }
+
+                                            val highlightedParagraph = remember(
+                                                match.passageSnippet,
+                                                match.bestLine,
+                                                match.matchedTerms
+                                            ) {
+                                                buildAnnotatedString {
+                                                    val para = match.passageSnippet
+                                                    append(para)
+
+                                                    val candidateLine = match.bestLine.trim().ifBlank {
+                                                        com.example.data.search.BookSearchEngine.findBestMatchingLine(
+                                                            para,
+                                                            match.matchedTerms.joinToString(" ")
+                                                        )
+                                                    }
+
+                                                    if (candidateLine.length >= 3) {
+                                                        val idx = para.indexOf(candidateLine, ignoreCase = true)
+                                                        if (idx >= 0) {
+                                                            val end = (idx + candidateLine.length).coerceAtMost(para.length)
+                                                            addStyle(
+                                                                SpanStyle(
+                                                                    background = IndigoPrimary.copy(alpha = 0.11f),
+                                                                    color = Color(0xFF1E1B4B),
+                                                                    fontWeight = FontWeight.SemiBold
+                                                                ),
+                                                                idx,
+                                                                end
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            // Minimal paragraph highlight container with subtle accent bar
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(IntrinsicSize.Min)
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(IndigoPrimary.copy(alpha = 0.04f))
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .width(3.dp)
+                                                        .fillMaxHeight()
+                                                        .background(IndigoPrimary.copy(alpha = 0.72f))
+                                                )
+                                                Text(
+                                                    text = highlightedParagraph,
+                                                    fontFamily = resolveQbFontFamily(qbExplanationFont, match.passageSnippet),
+                                                    fontSize = qbExplanationFontSize.sp,
+                                                    color = SlateText.copy(alpha = 0.80f),
+                                                    lineHeight = (qbExplanationFontSize * 1.48f).sp,
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                                                )
+                                            }
+
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                Text(
+                                                    text = "Open in Book Reader",
+                                                    fontFamily = PoppinsFontFamily,
+                                                    fontSize = 10.5.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = IndigoPrimary
+                                                )
+                                                Icon(
+                                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                                    contentDescription = null,
+                                                    tint = IndigoPrimary,
+                                                    modifier = Modifier.size(12.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                    }
+                }
             }
         }
     }
+}
 }
 
 @Composable

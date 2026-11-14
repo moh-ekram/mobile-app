@@ -56,6 +56,11 @@ android {
     includeInApk = false
     includeInBundle = true
   }
+  packaging {
+    resources {
+      excludes += listOf("META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*")
+    }
+  }
 }
 
 dependencies {
@@ -73,10 +78,12 @@ dependencies {
   implementation(libs.androidx.navigation.compose)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
+  implementation(libs.androidx.documentfile)
   implementation(libs.coil.compose)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.okhttp)
   implementation(libs.jsoup)
+  implementation(libs.pdfbox.android)
   debugImplementation(libs.androidx.ui.tooling)
   testImplementation("junit:junit:4.13.2")
   "ksp"(libs.androidx.room.compiler)

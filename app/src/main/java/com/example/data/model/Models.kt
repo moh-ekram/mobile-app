@@ -22,7 +22,22 @@ data class ArticleEntity(
     val author: String = "Unknown Author",
     val courseId: String = "course_default",
     val createdAt: Long = System.currentTimeMillis(),
-    val wordCount: Int = 0
+    val wordCount: Int = 0,
+    val sourceUrl: String = "",
+    val websiteName: String = "",
+    val publishedDate: String = "",
+    val faviconUrl: String = "",
+    val coverImageUrl: String = ""
+)
+
+@Entity(tableName = "article_book_groups")
+data class ArticleBookGroupEntity(
+    @PrimaryKey val id: String,
+    val title: String,
+    val subtitle: String = "",
+    val articleIdsJson: String = "[]",
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
 )
 
 @Entity(tableName = "deleted_article_titles")
