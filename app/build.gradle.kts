@@ -83,7 +83,6 @@ dependencies {
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.okhttp)
   implementation(libs.jsoup)
-  implementation(libs.pdfbox.android)
   debugImplementation(libs.androidx.ui.tooling)
   testImplementation("junit:junit:4.13.2")
   "ksp"(libs.androidx.room.compiler)

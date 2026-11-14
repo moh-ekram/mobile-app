@@ -1,13 +1,8 @@
 package com.example.data.parser
 
 import android.content.Context
-import android.util.Log
 import com.example.data.model.BookPageEntity
 import com.example.data.model.BookTocEntity
-import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
-import com.tom_roush.pdfbox.pdmodel.PDDocument
-import com.tom_roush.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineItem
-import com.tom_roush.pdfbox.text.PDFTextStripper
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 import java.io.ByteArrayInputStream
@@ -20,7 +15,7 @@ data class ParsedBookContent(
     val title: String,
     val author: String,
     val subject: String,
-    val format: String, // "PDF" or "DOCX"
+    val format: String, // "DOCX"
     val totalPages: Int,
     val pages: List<BookPageEntity>,
     val tocEntries: List<BookTocEntity>
@@ -28,39 +23,16 @@ data class ParsedBookContent(
 
 object BookParserService {
 
-    private const val TAG = "BookParserService"
-
-    @Volatile
-    private var pdfBoxInitialized = false
-
-    private fun ensurePdfBoxInitialized(context: Context) {
-        if (!pdfBoxInitialized) {
-            synchronized(this) {
-                if (!pdfBoxInitialized) {
-                    PDFBoxResourceLoader.init(context.applicationContext)
-                    pdfBoxInitialized = true
-                }
-            }
-        }
-    }
-
     fun detectFormat(fileName: String, headerBytes: ByteArray? = null): String {
         val lower = fileName.lowercase().trim()
-        if (lower.endsWith(".pdf")) return "PDF"
         if (lower.endsWith(".docx")) return "DOCX"
         if (headerBytes != null && headerBytes.size >= 4) {
-            // %PDF
-            if (headerBytes[0] == 0x25.toByte() && headerBytes[1] == 0x50.toByte() &&
-                headerBytes[2] == 0x44.toByte() && headerBytes[3] == 0x46.toByte()
-            ) {
-                return "PDF"
-            }
             // PK.. (ZIP / DOCX)
             if (headerBytes[0] == 0x50.toByte() && headerBytes[1] == 0x4B.toByte()) {
                 return "DOCX"
             }
         }
-        return "PDF"
+        return ""
     }
 
     fun parseBookFile(
@@ -79,117 +51,10 @@ object BookParserService {
             if (formatHint.isNotBlank()) "file.${formatHint.lowercase()}" else localFile.name,
             header
         )
-        return if (format == "PDF") {
-            parsePdfFile(context, bookId, localFile, fallbackTitle)
-        } else {
-            parseDocxFile(bookId, localFile, fallbackTitle)
+        if (format != "DOCX") {
+            throw IllegalArgumentException("Only DOCX eBook format is supported.")
         }
-    }
-
-    private fun parsePdfFile(
-        context: Context,
-        bookId: String,
-        localFile: File,
-        fallbackTitle: String
-    ): ParsedBookContent {
-        ensurePdfBoxInitialized(context)
-        PDDocument.load(localFile).use { document ->
-            val info = document.documentInformation
-            val rawTitle = info?.title?.trim()?.takeIf { it.isNotBlank() } ?: fallbackTitle
-            val author = info?.author?.trim().orEmpty()
-            val subject = info?.subject?.trim().orEmpty()
-            val totalPages = document.numberOfPages.coerceAtLeast(1)
-
-            // 1. Extract PDF outline TOC entries if available
-            val tocList = mutableListOf<BookTocEntity>()
-            val outline = try {
-                document.documentCatalog?.documentOutline
-            } catch (_: Exception) {
-                null
-            }
-            if (outline != null) {
-                var sortIdx = 0
-                fun traverseOutline(item: PDOutlineItem?, level: Int) {
-                    var current = item
-                    while (current != null) {
-                        val entryTitle = current.title?.trim().orEmpty()
-                        if (entryTitle.isNotBlank()) {
-                            val pageNum = try {
-                                val destPage = current.findDestinationPage(document)
-                                if (destPage != null) {
-                                    val idx = document.pages.indexOf(destPage)
-                                    if (idx >= 0) idx + 1 else 1
-                                } else 1
-                            } catch (_: Exception) {
-                                1
-                            }
-                            tocList.add(
-                                BookTocEntity(
-                                    id = "${bookId}_toc_${sortIdx}",
-                                    bookId = bookId,
-                                    title = entryTitle,
-                                    level = level.coerceIn(1, 3),
-                                    pageNumber = pageNum.coerceIn(1, totalPages),
-                                    sortOrder = sortIdx
-                                )
-                            )
-                            sortIdx++
-                        }
-                        traverseOutline(current.firstChild, level + 1)
-                        current = current.nextSibling
-                    }
-                }
-                traverseOutline(outline.firstChild, 1)
-            }
-
-            // 2. Extract page-by-page text using PDFTextStripper
-            val rawPageTexts = ArrayList<String>(totalPages)
-            val stripper = PDFTextStripper().apply {
-                sortByPosition = true
-            }
-            for (pageNum in 1..totalPages) {
-                val extracted = try {
-                    stripper.startPage = pageNum
-                    stripper.endPage = pageNum
-                    cleanExtractedText(stripper.getText(document) ?: "")
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error extracting page $pageNum from ${localFile.name}: ${e.message}")
-                    ""
-                }
-                rawPageTexts.add(extracted)
-            }
-
-            // 3. Fallback heuristic TOC if document has no outline
-            if (tocList.isEmpty()) {
-                tocList.addAll(extractHeuristicTocFromPages(bookId, rawPageTexts))
-            }
-
-            // 4. Assign active chapter title to every page
-            val sortedToc = tocList.sortedBy { it.pageNumber }
-            val pages = rawPageTexts.mapIndexed { idx, text ->
-                val pageNum = idx + 1
-                val activeChapter = sortedToc.lastOrNull { it.pageNumber <= pageNum }?.title ?: ""
-                val words = countWords(text)
-                BookPageEntity(
-                    id = "${bookId}_p${pageNum}",
-                    bookId = bookId,
-                    pageNumber = pageNum,
-                    chapterTitle = activeChapter,
-                    textContent = text,
-                    wordCount = words
-                )
-            }
-
-            return ParsedBookContent(
-                title = rawTitle,
-                author = author,
-                subject = subject,
-                format = "PDF",
-                totalPages = pages.size,
-                pages = pages,
-                tocEntries = tocList
-            )
-        }
+        return parseDocxFile(bookId, localFile, fallbackTitle)
     }
 
     private data class DocxParagraph(

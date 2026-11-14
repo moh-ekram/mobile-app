@@ -41,9 +41,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.example.data.model.ArticleEntity
 import com.example.data.model.CourseEntity
-import com.example.data.model.UserProgressEntity
 import com.example.data.model.UserSession
 import com.example.data.model.VocabularyWordEntity
 import com.example.ui.theme.*
@@ -53,7 +51,6 @@ import java.util.Locale
 fun HomeScreen(
     user: UserSession?,
     words: List<VocabularyWordEntity>,
-    progress: UserProgressEntity?,
     courses: List<CourseEntity> = emptyList(),
     activeCourseId: String = "course_default",
     onSelectCourse: (String) -> Unit = {},
@@ -62,13 +59,6 @@ fun HomeScreen(
     onSelectGroup: (String?) -> Unit,
     onSelectStatus: (String) -> Unit = {},
     onSelectFlagged: () -> Unit = {},
-    articles: List<ArticleEntity> = emptyList(),
-    onSelectArticle: (ArticleEntity) -> Unit = {},
-    widgetWord: VocabularyWordEntity? = null,
-    widgetCategory: String = "all",
-    onSetWidgetCategory: (String) -> Unit = {},
-    onCycleWidgetWord: () -> Unit = {},
-    onRateWidgetWord: (String, String) -> Unit = { _, _ -> },
     onRefreshWidget: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {

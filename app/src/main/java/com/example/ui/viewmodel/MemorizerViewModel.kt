@@ -754,125 +754,6 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
     fun setActiveCourse(id: String) = selectCourse(id)
     fun setActiveArticle(article: ArticleEntity?) = selectArticle(article)
 
-    // Scraped Flashcard Generation States
-    val isScrapingFlashcards = MutableStateFlow(false)
-    val lastGeneratedCardsCount = MutableStateFlow<Int?>(null)
-
-    // Sitemap XML Extraction & Batch Processing States
-    val isFetchingSitemap = MutableStateFlow(false)
-    val sitemapResult = MutableStateFlow<com.example.data.service.SitemapFetchResult?>(null)
-    val isBatchProcessingSitemap = MutableStateFlow(false)
-    val sitemapBatchProgress = MutableStateFlow<Pair<Int, Int>?>(null)
-    val sitemapCurrentProcessingTitle = MutableStateFlow("")
-
-    fun fetchWebsiteSitemap(
-        urlOrDomain: String,
-        onComplete: (Result<com.example.data.service.SitemapFetchResult>) -> Unit = {}
-    ) {
-        viewModelScope.launch {
-            isFetchingSitemap.value = true
-            val result = repository.fetchWebsiteSitemap(urlOrDomain)
-            isFetchingSitemap.value = false
-            result.onSuccess {
-                sitemapResult.value = it
-                _statusMessage.value = "Found ${it.articles.size} article URLs in sitemap!"
-            }.onFailure {
-                _statusMessage.value = "Sitemap error: ${it.message}"
-            }
-            onComplete(result)
-        }
-    }
-
-    fun batchImportSitemapArticles(
-        selectedArticles: List<com.example.data.service.SitemapArticleItem>,
-        courseId: String = "course_default",
-        onComplete: (Int, String?) -> Unit = { _, _ -> }
-    ) {
-        viewModelScope.launch {
-            isBatchProcessingSitemap.value = true
-            sitemapBatchProgress.value = 0 to selectedArticles.size
-            val result = repository.batchImportSitemapArticles(
-                selectedArticles = selectedArticles,
-                courseId = courseId,
-                onProgress = { cur, tot, currentTitle ->
-                    sitemapBatchProgress.value = cur to tot
-                    sitemapCurrentProcessingTitle.value = currentTitle
-                }
-            )
-            isBatchProcessingSitemap.value = false
-            sitemapBatchProgress.value = null
-            sitemapCurrentProcessingTitle.value = ""
-
-            result.fold(
-                onSuccess = { saved ->
-                    _statusMessage.value = "Imported ${saved.size} articles to library!"
-                    onComplete(saved.size, null)
-                },
-                onFailure = { error ->
-                    _statusMessage.value = "Import error: ${error.message}"
-                    onComplete(0, error.message ?: "Failed to import articles")
-                }
-            )
-        }
-    }
-
-    fun batchGenerateSitemapFlashcards(
-        selectedArticles: List<com.example.data.service.SitemapArticleItem>,
-        onComplete: (Int, String?) -> Unit = { _, _ -> }
-    ) {
-        viewModelScope.launch {
-            isBatchProcessingSitemap.value = true
-            sitemapBatchProgress.value = 0 to selectedArticles.size
-            val result = repository.batchGenerateSitemapFlashcards(
-                selectedArticles = selectedArticles,
-                onProgress = { cur, tot, currentTitle ->
-                    sitemapBatchProgress.value = cur to tot
-                    sitemapCurrentProcessingTitle.value = currentTitle
-                }
-            )
-            isBatchProcessingSitemap.value = false
-            sitemapBatchProgress.value = null
-            sitemapCurrentProcessingTitle.value = ""
-
-            result.fold(
-                onSuccess = { count ->
-                    _statusMessage.value = "Generated and saved $count flashcards!"
-                    onComplete(count, null)
-                },
-                onFailure = { error ->
-                    _statusMessage.value = "Flashcard error: ${error.message}"
-                    onComplete(0, error.message ?: "Failed to generate flashcards")
-                }
-            )
-        }
-    }
-
-    fun scrapeAndGenerateFlashcardsFromUrls(
-        urls: List<String>,
-        onComplete: (Int, String?) -> Unit = { _, _ -> }
-    ) {
-        viewModelScope.launch {
-            isScrapingFlashcards.value = true
-            val result = repository.scrapeAndGenerateFlashcards(urls, saveToDb = true)
-            isScrapingFlashcards.value = false
-            result.fold(
-                onSuccess = { cards ->
-                    lastGeneratedCardsCount.value = cards.size
-                    _statusMessage.value = "Generated and saved ${cards.size} flashcards!"
-                    onComplete(cards.size, null)
-                },
-                onFailure = { error ->
-                    _statusMessage.value = "Flashcard generation error: ${error.message}"
-                    onComplete(0, error.message ?: "Failed to scrape and generate flashcards")
-                }
-            )
-        }
-    }
-
-    suspend fun extractMainBodyText(url: String): Result<String> {
-        return repository.scrapeArticleAndExtractBody(url)
-    }
-
     // Vocabulary State
     val allWords: StateFlow<List<VocabularyWordEntity>> = repository.allWords
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -1138,10 +1019,6 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
             }
         }
     }
-
-    // Games State
-    val allGames: StateFlow<List<GamePracticeEntity>> = repository.allGames
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Question Bank State
     val allQuestions: StateFlow<List<QuestionBankEntity>> = repository.allQuestions
@@ -1462,17 +1339,6 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         return repository.backupManager.generateBackupJsonString(uid)
     }
 
-    fun triggerCloudSync() {
-        viewModelScope.launch {
-            val uid = _currentUser.value?.userId ?: "1235"
-            val progress = repository.getProgress(uid).firstOrNull()
-            if (progress != null) {
-                val res = repository.supabaseService.syncProgressRecord(progress)
-                _statusMessage.value = res.getOrDefault("Sync completed")
-            }
-        }
-    }
-
     fun restoreBackupContent(content: String, isJson: Boolean) {
         viewModelScope.launch {
             val uid = _currentUser.value?.userId ?: "1235"
@@ -1514,28 +1380,6 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
                 _statusMessage.value = "Imported $count words into course!"
             }.onFailure { err ->
                 _statusMessage.value = "Import failed: ${err.message}"
-            }
-        }
-    }
-
-    fun importGameItems(items: List<GamePracticeEntity>) {
-        viewModelScope.launch {
-            val result = repository.importGameItems(items)
-            result.onSuccess { count ->
-                _statusMessage.value = "Imported $count game questions successfully!"
-            }.onFailure { err ->
-                _statusMessage.value = "Game import failed: ${err.message}"
-            }
-        }
-    }
-
-    fun importGameFile(content: String, sheetType: String) {
-        viewModelScope.launch {
-            val result = repository.importGameFile(content, sheetType)
-            result.onSuccess { count ->
-                _statusMessage.value = "Imported $count game questions for $sheetType!"
-            }.onFailure { err ->
-                _statusMessage.value = "Game import failed: ${err.message}"
             }
         }
     }
@@ -1662,7 +1506,7 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             val uid = _currentUser.value?.userId ?: "1235"
             repository.resetAllData(uid)
-            _statusMessage.value = "Loaded default sample course, games, and question bank!"
+            _statusMessage.value = "Loaded default sample course and question bank!"
         }
     }
 
@@ -1715,33 +1559,6 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
             val uid = _currentUser.value?.userId ?: "1235"
             repository.updateStatusForWords(ids, newStatus, uid)
             _statusMessage.value = "Status updated for ${ids.size} words"
-        }
-    }
-
-    fun deleteGameItem(id: String) {
-        viewModelScope.launch {
-            repository.deleteGameItem(id)
-            _statusMessage.value = "Game item removed"
-        }
-    }
-
-    fun deleteGamesBySection(section: String) {
-        viewModelScope.launch {
-            repository.deleteGamesBySection(section)
-            _statusMessage.value = "Game items deleted"
-        }
-    }
-
-    fun clearAllGames() {
-        viewModelScope.launch {
-            repository.clearAllGames()
-            _statusMessage.value = "All game items cleared"
-        }
-    }
-
-    fun recordGameAnswer(questionId: String, isCorrect: Boolean) {
-        viewModelScope.launch {
-            repository.recordGameAnswer(questionId, isCorrect)
         }
     }
 
@@ -1810,8 +1627,7 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         bookId: String,
         pageNumber: Int? = null,
         highlightQuery: String? = null,
-        highlightParagraph: String? = null,
-        preferredMode: String? = null
+        highlightParagraph: String? = null
     ) {
         val targetBook = allBooks.value.find { it.id == bookId }
         val resolvedPage = (pageNumber ?: targetBook?.lastReadPage ?: 1).coerceAtLeast(1)
@@ -1819,8 +1635,7 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
             bookId = bookId,
             pageNumber = resolvedPage,
             highlightQuery = highlightQuery,
-            highlightParagraph = highlightParagraph,
-            preferredMode = "ebook"
+            highlightParagraph = highlightParagraph
         )
     }
 
@@ -1940,9 +1755,9 @@ class MemorizerViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun updateBookReadingProgress(bookId: String, page: Int, mode: String) {
+    fun updateBookReadingProgress(bookId: String, page: Int) {
         viewModelScope.launch {
-            bookRepository.updateReadingProgress(bookId, page, mode)
+            bookRepository.updateReadingProgress(bookId, page)
         }
     }
 

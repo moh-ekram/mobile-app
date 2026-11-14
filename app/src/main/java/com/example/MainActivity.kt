@@ -219,7 +219,6 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
     val selectedStatuses by viewModel.selectedStatuses.collectAsState()
     val cardSortOrder by viewModel.cardSortOrder.collectAsState()
     val distinctGroups by viewModel.distinctGroups.collectAsState()
-    val allGames by viewModel.allGames.collectAsState()
     val allQuestions by viewModel.allQuestions.collectAsState()
     val allArticles by viewModel.allArticles.collectAsState()
     val allArticleBookGroups by viewModel.allArticleBookGroups.collectAsState()
@@ -233,8 +232,6 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
     val isFocusMode by viewModel.isFocusMode.collectAsState()
     val isFlipAnimationEnabled by viewModel.isFlipAnimationEnabled.collectAsState()
     val isHapticEnabled by viewModel.isHapticEnabled.collectAsState()
-    val currentWidgetWord by viewModel.currentWidgetWord.collectAsState()
-    val widgetCategory by viewModel.widgetCategory.collectAsState()
     val isSyncingDrive by viewModel.isSyncingDrive.collectAsState()
     val driveSyncUrl by viewModel.driveSyncUrl.collectAsState()
     val driveSyncSummary by viewModel.driveSyncSummary.collectAsState()
@@ -516,7 +513,6 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                         "home" -> HomeScreen(
                             user = currentUser,
                             words = allWords,
-                            progress = userProgress,
                             courses = allCourses,
                             activeCourseId = activeCourseId,
                             onSelectCourse = { cId -> viewModel.setActiveCourse(cId) },
@@ -531,13 +527,6 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                                 viewModel.setShowOnlyFlagged(true)
                                 viewModel.setRoute("flashcard")
                             },
-                            articles = allArticles,
-                            onSelectArticle = { art -> viewModel.setActiveArticle(art) },
-                            widgetWord = currentWidgetWord,
-                            widgetCategory = widgetCategory,
-                            onSetWidgetCategory = { cat -> viewModel.setWidgetCategory(cat) },
-                            onCycleWidgetWord = { viewModel.cycleNextWidgetWord() },
-                            onRateWidgetWord = { id, st -> viewModel.rateWord(id, st) },
                             onRefreshWidget = { viewModel.cycleNextWidgetWord() }
                         )
                         "flashcard" -> {
@@ -578,7 +567,6 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             )
                         }
                         "games", "course_quiz", "question_bank", "confusion_set" -> GamePracticeScreen(
-                            games = allGames,
                             questions = allQuestions,
                             courses = allCourses,
                             activeCourseId = activeCourseId,
@@ -598,9 +586,6 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             },
                             onCompleteQuiz = { score, total ->
                                 viewModel.recordQuizCompletion(score, total)
-                            },
-                            onRecordGameAnswer = { qId, isCorrect ->
-                                viewModel.recordGameAnswer(qId, isCorrect)
                             },
                             onRecordWordQuizAnswer = { wId, isCorrect ->
                                 viewModel.recordWordQuizAnswer(wId, isCorrect)
@@ -675,11 +660,10 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             onRefreshDriveBooks = { folderId -> viewModel.refreshDriveBooksList(folderId) },
                             onDownloadDriveBook = { item -> viewModel.downloadAndAddDriveBook(item) },
                             onDownloadAllDriveBooks = { viewModel.downloadAllDriveBooks() },
-                            onOpenReader = { bId, page, _ ->
+                            onOpenReader = { bId, page ->
                                 viewModel.openBookInReader(
                                     bookId = bId,
-                                    pageNumber = page,
-                                    preferredMode = "ebook"
+                                    pageNumber = page
                                 )
                             },
                             onUpdateBookMetadata = { bId, title, author, subject, desc ->
@@ -757,7 +741,6 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             backupDirectoryPath = viewModel.repository.backupManager.getBackupPathString(),
                             customBackupTreeUri = customBackupTreeUri,
                             words = allWords,
-                            games = allGames,
                             questions = allQuestions,
                             courses = allCourses,
                             activeCourseId = activeCourseId,
@@ -786,7 +769,6 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             onRefreshWidget = { viewModel.refreshWidget() },
                             onExportToUri = { uri -> viewModel.exportBackupToUri(uri) },
                             onRestoreFromUri = { uri -> viewModel.restoreFromUri(uri) },
-                            onCloudSync = { viewModel.triggerCloudSync() },
                             onRestoreBackup = { content, isJson -> viewModel.restoreBackupContent(content, isJson) },
                             onUpdateProfile = { name, avatar, targetExam, goal, bio ->
                                 viewModel.updateProfile(name, avatar, targetExam, goal, bio)
@@ -810,14 +792,9 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                             onMoveWordsToCourse = { ids, newCourseId -> viewModel.moveWordsToCourse(ids, newCourseId) },
                             onUpdateStatusForWords = { ids, newStatus -> viewModel.updateStatusForWords(ids, newStatus) },
                             onReportWord = { id, isReported, reason -> viewModel.reportWord(id, isReported, reason) },
-                            onDeleteGame = { id -> viewModel.deleteGameItem(id) },
-                            onDeleteGamesBySection = { sec -> viewModel.deleteGamesBySection(sec) },
-                            onClearAllGames = { viewModel.clearAllGames() },
                             onDeleteQuestion = { id -> viewModel.deleteQuestionBankItem(id) },
                             onClearAllQB = { viewModel.clearAllQuestionBank() },
                             onImportCourse = { content, isJson, cId, title -> viewModel.importCourseFile(content, isJson, cId, title) },
-                            onImportGame = { content, type -> viewModel.importGameFile(content, type) },
-                            onImportGameItems = { items -> viewModel.importGameItems(items) },
                             onImportQB = { content -> viewModel.importQuestionBankFile(content) },
                             qbSyncUrl = qbSyncUrl,
                             isSyncingQB = isSyncingQB,
@@ -877,8 +854,8 @@ fun MemorizerApp(viewModel: MemorizerViewModel = viewModel()) {
                     initialTarget = currentBookTarget,
                     ebookPreferences = ebookReaderPreferences,
                     onUpdateEbookPreferences = { prefs -> viewModel.updateEbookPreferences(prefs) },
-                    onUpdateReadingProgress = { bId, page, mode ->
-                        viewModel.updateBookReadingProgress(bId, page, mode)
+                    onUpdateReadingProgress = { bId, page ->
+                        viewModel.updateBookReadingProgress(bId, page)
                     },
                     onToggleBookmark = { bId, page, title, snippet ->
                         viewModel.toggleBookBookmark(bId, page, title, snippet)

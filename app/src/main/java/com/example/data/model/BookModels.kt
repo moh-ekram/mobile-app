@@ -12,7 +12,7 @@ data class BookEntity(
     val author: String = "",
     val subject: String = "",
     val description: String = "",
-    val format: String = "PDF", // "PDF" or "DOCX"
+    val format: String = "DOCX",
     val fileName: String = "",
     val localFilePath: String = "",
     val sourceType: String = "device", // "device", "folder", "drive"
@@ -20,7 +20,6 @@ data class BookEntity(
     val fileSizeBytes: Long = 0L,
     val totalPages: Int = 0,
     val lastReadPage: Int = 1,
-    val lastReaderMode: String = "ebook", // "ebook" or "pdf"
     val indexStatus: String = "ready", // "indexing", "ready", "error"
     val indexError: String? = null,
     val importedAt: Long = System.currentTimeMillis(),
@@ -143,8 +142,7 @@ data class BookReaderTarget(
     val bookId: String,
     val pageNumber: Int = 1,
     val highlightQuery: String? = null,
-    val highlightParagraph: String? = null,
-    val preferredMode: String? = null
+    val highlightParagraph: String? = null
 )
 
 data class BookPassageMatch(

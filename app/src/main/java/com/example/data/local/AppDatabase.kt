@@ -11,13 +11,11 @@ import com.example.data.model.*
 @Database(
     entities = [
         VocabularyWordEntity::class,
-        GamePracticeEntity::class,
         QuestionBankEntity::class,
         UserProgressEntity::class,
         CourseEntity::class,
         ArticleEntity::class,
         DeletedArticleTitleEntity::class,
-        Flashcard::class,
         ArchivedWordProgressEntity::class,
         BookEntity::class,
         BookPageEntity::class,
@@ -27,25 +25,70 @@ import com.example.data.model.*
         BookNoteEntity::class,
         ArticleBookGroupEntity::class
     ],
-    version = 14,
+    version = 15,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun vocabularyDao(): VocabularyDao
-    abstract fun gamePracticeDao(): GamePracticeDao
     abstract fun questionBankDao(): QuestionBankDao
     abstract fun userProgressDao(): UserProgressDao
     abstract fun courseDao(): CourseDao
     abstract fun articleDao(): ArticleDao
     abstract fun articleBookGroupDao(): ArticleBookGroupDao
     abstract fun deletedArticleDao(): DeletedArticleDao
-    abstract fun flashcardDao(): FlashcardDao
     abstract fun archivedWordProgressDao(): ArchivedWordProgressDao
     abstract fun bookDao(): BookDao
 
     companion object {
         @Volatile
         private var INSTANCE: AppDatabase? = null
+
+        val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS `game_practice_items`")
+                db.execSQL("DROP TABLE IF EXISTS `flashcards`")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `books_new` (
+                        `id` TEXT NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `author` TEXT NOT NULL,
+                        `subject` TEXT NOT NULL,
+                        `description` TEXT NOT NULL,
+                        `format` TEXT NOT NULL,
+                        `fileName` TEXT NOT NULL,
+                        `localFilePath` TEXT NOT NULL,
+                        `sourceType` TEXT NOT NULL,
+                        `sourceRef` TEXT NOT NULL,
+                        `fileSizeBytes` INTEGER NOT NULL,
+                        `totalPages` INTEGER NOT NULL,
+                        `lastReadPage` INTEGER NOT NULL,
+                        `indexStatus` TEXT NOT NULL,
+                        `indexError` TEXT,
+                        `importedAt` INTEGER NOT NULL,
+                        `lastOpenedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`id`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO `books_new` (
+                        `id`, `title`, `author`, `subject`, `description`, `format`, `fileName`,
+                        `localFilePath`, `sourceType`, `sourceRef`, `fileSizeBytes`, `totalPages`,
+                        `lastReadPage`, `indexStatus`, `indexError`, `importedAt`, `lastOpenedAt`
+                    )
+                    SELECT
+                        `id`, `title`, `author`, `subject`, `description`, `format`, `fileName`,
+                        `localFilePath`, `sourceType`, `sourceRef`, `fileSizeBytes`, `totalPages`,
+                        `lastReadPage`, `indexStatus`, `indexError`, `importedAt`, `lastOpenedAt`
+                    FROM `books`
+                    """.trimIndent()
+                )
+                db.execSQL("DROP TABLE `books`")
+                db.execSQL("ALTER TABLE `books_new` RENAME TO `books`")
+            }
+        }
 
         val MIGRATION_13_14 = object : Migration(13, 14) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -202,7 +245,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "memorizer_database"
                 )
-                    .addMigrations(MIGRATION_12_13, MIGRATION_13_14)
+                    .addMigrations(MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15)
                     .addCallback(object : Callback() {
                         override fun onCreate(db: SupportSQLiteDatabase) {
                             super.onCreate(db)

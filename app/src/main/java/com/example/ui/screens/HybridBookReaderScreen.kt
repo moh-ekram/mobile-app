@@ -55,7 +55,7 @@ fun HybridBookReaderScreen(
     initialTarget: BookReaderTarget,
     ebookPreferences: EbookReaderPreferences,
     onUpdateEbookPreferences: (EbookReaderPreferences) -> Unit,
-    onUpdateReadingProgress: (bookId: String, page: Int, mode: String) -> Unit,
+    onUpdateReadingProgress: (bookId: String, page: Int) -> Unit,
     onToggleBookmark: (bookId: String, page: Int, title: String, snippet: String) -> Unit,
     onDeleteBookmark: (String) -> Unit,
     onAddHighlight: (bookId: String, page: Int, selectedText: String, colorHex: String) -> Unit,
@@ -101,7 +101,7 @@ fun HybridBookReaderScreen(
 
     // Persist reading position in Ebook mode
     LaunchedEffect(currentPage) {
-        onUpdateReadingProgress(book.id, currentPage, "ebook")
+        onUpdateReadingProgress(book.id, currentPage)
     }
 
     BackHandler {

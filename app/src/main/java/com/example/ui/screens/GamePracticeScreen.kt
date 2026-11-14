@@ -58,10 +58,8 @@ import org.json.JSONObject
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GamePracticeScreen(
-    games: List<GamePracticeEntity>,
     questions: List<QuestionBankEntity>,
     onCompleteQuiz: (score: Int, total: Int) -> Unit,
-    onRecordGameAnswer: (questionId: String, isCorrect: Boolean) -> Unit = { _, _ -> },
     courses: List<CourseEntity> = emptyList(),
     activeCourseId: String = "all",
     onRecordWordQuizAnswer: (wordId: String, isCorrect: Boolean) -> Unit = { _, _ -> },
@@ -107,7 +105,6 @@ fun GamePracticeScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var statsUpdateTrigger by remember { mutableIntStateOf(0) }
     var wordHighlightColor by remember { mutableStateOf("red") } // "red" (default), "blue", "green"
 
     // Top Section: null means list menu of categories; non-null opens dedicated section
@@ -174,10 +171,6 @@ fun GamePracticeScreen(
     var courseQuizViewMode by remember {
         mutableStateOf(quizTestPrefs.getString("quiz_view_mode", "continuous") ?: "continuous")
     }
-
-    // Game Mode Filtering & Count Config
-    var gameStatusFilter by remember { mutableStateOf("all") } // "all", "correct", "incorrect", "not_studied"
-    var gameQuestionCount by remember { mutableIntStateOf(10) }
 
     // Question Bank Config - Multi-Selection Grid Style with Memory
     var qbFilters1 by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -365,7 +358,7 @@ fun GamePracticeScreen(
         }
     }
 
-    fun startQuizForCategory(section: String, statusFilter: String = "all", maxCount: Int? = null) {
+    fun startQuizForCategory(section: String) {
         val list = when (section) {
             "course_quiz" -> {
                 val targetCourseIds = if (courseQuizCourseIds.isNotEmpty() && "all" !in courseQuizCourseIds) {
@@ -632,16 +625,6 @@ fun GamePracticeScreen(
                     modifier = Modifier.fillMaxSize()
                 )
             } else if (selectedSection == "course_quiz" && activeQuestions.isEmpty() && !isQuizCompleted) {
-                val primaryCourseId = if (courseQuizCourseIds.size == 1 && "all" !in courseQuizCourseIds) {
-                    courseQuizCourseIds.first()
-                } else if (activeCourseId.isNotBlank() && activeCourseId != "all") {
-                    activeCourseId
-                } else {
-                    "all"
-                }
-                val quizStats = remember(primaryCourseId, words, statsUpdateTrigger) {
-                    QuizTestStats.getStats(context, primaryCourseId, words)
-                }
                 CourseQuizConfigView(
                     courses = courses,
                     words = words,
@@ -675,7 +658,6 @@ fun GamePracticeScreen(
                         courseQuizViewMode = it
                         quizTestPrefs.edit().putString("quiz_view_mode", it).apply()
                     },
-                    pooledStats = quizStats,
                     getPlace1 = ::getPlace1,
                     getPlace2 = ::getPlace2,
                     onStart = {
@@ -722,39 +704,14 @@ fun GamePracticeScreen(
                     onRestoreQBProgress = onRestoreQBProgress
                 )
             } else if (isQuizCompleted) {
-                val primaryCourseId = if (courseQuizCourseIds.size == 1 && "all" !in courseQuizCourseIds) {
-                    courseQuizCourseIds.first()
-                } else if (activeCourseId.isNotBlank() && activeCourseId != "all") {
-                    activeCourseId
-                } else {
-                    "all"
-                }
-                val quizStats = remember(primaryCourseId, words, statsUpdateTrigger) {
-                    QuizTestStats.getStats(context, primaryCourseId, words)
-                }
                 QuizSummaryView(
                     score = currentScore,
                     total = activeQuestions.size,
-                    pooledScore = quizStats.first,
-                    pooledTotal = quizStats.second,
-                    isQuizTest = (selectedSection == "course_quiz"),
                     isQuestionBank = (selectedSection == "question_bank"),
-                    onRetake = { startQuizForCategory(selectedSection ?: "course_quiz", gameStatusFilter, gameQuestionCount) },
+                    onRetake = { startQuizForCategory(selectedSection ?: "course_quiz") },
                     onBackToBanks = {
                         activeQuestions = emptyList()
                         isQuizCompleted = false
-                    },
-                    onPracticeMissed = {
-                        val missed = activeQuestions.filterIndexed { idx, q ->
-                            val ans = userAnswers[idx]
-                            ans == null || !isOptionTheAnswer(ans, 0, q.answer)
-                        }
-                        if (missed.isNotEmpty()) {
-                            activeQuestions = missed
-                            userAnswers = emptyMap()
-                            currentScore = 0
-                            isQuizCompleted = false
-                        }
                     }
                 )
             } else if (activeQuestions.isNotEmpty()) {
@@ -802,8 +759,6 @@ fun GamePracticeScreen(
                                         if (currentQ.id.isNotBlank()) {
                                             if (currentQ.sheetType == "course_quiz" || words.any { it.id == currentQ.id }) {
                                                 onRecordWordQuizAnswer(currentQ.id, isCorrect)
-                                            } else if (currentQ.sheetType != "qb" && selectedSection != "question_bank") {
-                                                onRecordGameAnswer(currentQ.id, isCorrect)
                                             }
                                         }
                                     },
@@ -877,8 +832,6 @@ fun GamePracticeScreen(
                                                 if (pageQ.id.isNotBlank()) {
                                                     if (pageQ.sheetType == "course_quiz" || words.any { it.id == pageQ.id }) {
                                                         onRecordWordQuizAnswer(pageQ.id, isCorrect)
-                                                    } else if (pageQ.sheetType != "qb" && selectedSection != "question_bank") {
-                                                        onRecordGameAnswer(pageQ.id, isCorrect)
                                                     }
                                                 }
                                             },
@@ -988,8 +941,6 @@ fun GamePracticeScreen(
                                         if (currentOneByOneQ.id.isNotBlank()) {
                                             if (currentOneByOneQ.sheetType == "course_quiz" || words.any { it.id == currentOneByOneQ.id }) {
                                                 onRecordWordQuizAnswer(currentOneByOneQ.id, isCorrect)
-                                            } else if (currentOneByOneQ.sheetType != "qb" && selectedSection != "question_bank") {
-                                                onRecordGameAnswer(currentOneByOneQ.id, isCorrect)
                                             }
                                         }
                                     },
@@ -1088,17 +1039,6 @@ fun GamePracticeScreen(
                                         onUpdateQuestionStatus(q.id, newStatus)
                                     }
                                 }
-                            }
-                            if (selectedSection == "course_quiz") {
-                                val primaryCourseId = if (courseQuizCourseIds.size == 1 && "all" !in courseQuizCourseIds) {
-                                    courseQuizCourseIds.first()
-                                } else if (activeCourseId.isNotBlank() && activeCourseId != "all") {
-                                    activeCourseId
-                                } else {
-                                    "all"
-                                }
-                                QuizTestStats.recordAttempt(context, currentScore, activeQuestions.size, primaryCourseId)
-                                statsUpdateTrigger++
                             }
                             onCompleteQuiz(currentScore, activeQuestions.size)
                         },

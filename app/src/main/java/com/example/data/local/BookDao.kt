@@ -30,8 +30,8 @@ interface BookDao {
     @Query("UPDATE books SET title = :title, author = :author, subject = :subject, description = :description WHERE id = :bookId")
     suspend fun updateBookMetadata(bookId: String, title: String, author: String, subject: String, description: String)
 
-    @Query("UPDATE books SET lastReadPage = :page, lastReaderMode = :mode, lastOpenedAt = :timestamp WHERE id = :bookId")
-    suspend fun updateReadingProgress(bookId: String, page: Int, mode: String, timestamp: Long = System.currentTimeMillis())
+    @Query("UPDATE books SET lastReadPage = :page, lastOpenedAt = :timestamp WHERE id = :bookId")
+    suspend fun updateReadingProgress(bookId: String, page: Int, timestamp: Long = System.currentTimeMillis())
 
     @Query("UPDATE books SET indexStatus = :status, indexError = :error, totalPages = :totalPages WHERE id = :bookId")
     suspend fun updateIndexStatus(bookId: String, status: String, error: String?, totalPages: Int)

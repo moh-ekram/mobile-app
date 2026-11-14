@@ -11,14 +11,86 @@ data class ResolvedQuizQuestion(
     val correctAnswer: String
 )
 
+sealed class StrictAnswerResult {
+    data class Valid(
+        val optionIndex: Int,
+        val letter: String,
+        val selectedOptionText: String
+    ) : StrictAnswerResult()
+
+    data class NeedsReview(
+        val issueType: ImportIssueType,
+        val reason: String
+    ) : StrictAnswerResult()
+}
+
 object QuestionAnswerResolver {
 
     /**
-     * Identifies the correct option following 3 canonical rules:
-     * 1. Exact match with any of the options;
-     * 2. If Ans column does not have exact matching data or is empty,
-     *    whichever option among Opt1..Opt5 contains '#' is the answer (and '#' is stripped);
-     * 3. If A, B, C, D, E is written in the Ans column, then A=Opt1, B=Opt2, C=Opt3, D=Opt4, E=Opt5.
+     * Strict import validation rule:
+     * - Ans MUST be strictly A, B, C, D, or E (case-insensitive, trimmed).
+     * - '#' is NEVER treated as an answer marker and is NEVER stripped from option text.
+     * - If Ans is empty, outside A-E, or points to a blank option (e.g. Ans=E when Opt5 is empty),
+     *   returns StrictAnswerResult.NeedsReview instead of silently defaulting to Opt1.
+     */
+    fun resolveStrictImport(
+        rawOpt1: String,
+        rawOpt2: String,
+        rawOpt3: String,
+        rawOpt4: String,
+        rawOpt5: String = "",
+        rawAnswer: String
+    ): StrictAnswerResult {
+        val opts = listOf(
+            ImportNormalization.cleanInvisibleChars(rawOpt1).trim(),
+            ImportNormalization.cleanInvisibleChars(rawOpt2).trim(),
+            ImportNormalization.cleanInvisibleChars(rawOpt3).trim(),
+            ImportNormalization.cleanInvisibleChars(rawOpt4).trim(),
+            ImportNormalization.cleanInvisibleChars(rawOpt5).trim()
+        )
+        val cleanedAns = ImportNormalization.cleanInvisibleChars(rawAnswer).trim()
+        if (cleanedAns.isEmpty()) {
+            return StrictAnswerResult.NeedsReview(
+                issueType = ImportIssueType.NEEDS_REVIEW_INVALID_ANSWER,
+                reason = "Ans কলাম ফাঁকা আছে; উত্তর অবশ্যই A–E হতে হবে।"
+            )
+        }
+
+        val upper = cleanedAns.uppercase()
+        val idx = when (upper) {
+            "A" -> 0
+            "B" -> 1
+            "C" -> 2
+            "D" -> 3
+            "E" -> 4
+            else -> -1
+        }
+        if (idx == -1) {
+            return StrictAnswerResult.NeedsReview(
+                issueType = ImportIssueType.NEEDS_REVIEW_INVALID_ANSWER,
+                reason = "অবৈধ উত্তর '$cleanedAns' — Ans কলামে শুধু A, B, C, D বা E অনুমোদিত।"
+            )
+        }
+
+        val targetOpt = opts[idx]
+        if (targetOpt.isBlank()) {
+            val optLabel = "Opt${idx + 1}"
+            return StrictAnswerResult.NeedsReview(
+                issueType = ImportIssueType.NEEDS_REVIEW_EMPTY_OPTION,
+                reason = "উত্তর '$upper' দেওয়া হয়েছে কিন্তু $optLabel ফাঁকা।"
+            )
+        }
+
+        return StrictAnswerResult.Valid(
+            optionIndex = idx,
+            letter = upper,
+            selectedOptionText = targetOpt
+        )
+    }
+
+    /**
+     * Resolves an already-stored QuestionBankEntity's options and answer for quiz display.
+     * Supports both stored exact option text and A-E letters without '#' stripping or Opt1 fallback.
      */
     fun resolve(
         rawOpt1: String,
@@ -35,72 +107,48 @@ object QuestionAnswerResolver {
         val o5 = rawOpt5.trim()
 
         val rawOpts = if (o5.isNotBlank()) listOf(o1, o2, o3, o4, o5) else listOf(o1, o2, o3, o4)
-        val cleanOpts = rawOpts.map { it.replace("#", "").trim() }
-        val hashIndex = rawOpts.indexOfFirst { it.contains("#") }
         val trimmedAns = rawAnswer.trim()
 
         var matchedIndex = -1
 
-        // Rule 1: Exact match with any of the options (checked against clean options and raw options)
+        // 1. Exact text match with any stored option
         if (trimmedAns.isNotBlank()) {
-            for (i in cleanOpts.indices) {
-                if (cleanOpts[i].isNotBlank() && cleanOpts[i].equals(trimmedAns, ignoreCase = true)) {
+            for (i in rawOpts.indices) {
+                if (rawOpts[i].isNotBlank() && rawOpts[i].equals(trimmedAns, ignoreCase = true)) {
                     matchedIndex = i
                     break
                 }
             }
-            if (matchedIndex == -1) {
-                for (i in rawOpts.indices) {
-                    if (rawOpts[i].isNotBlank() && rawOpts[i].equals(trimmedAns, ignoreCase = true)) {
-                        matchedIndex = i
-                        break
-                    }
-                }
-            }
         }
 
-        // Rule 3: If written as A, B, C, D, E (or variants like "A.", "(B)", "opt1", "1", etc.), map to Opt1..Opt5
+        // 2. Letter A-E match (pointing to a valid non-blank option)
         if (matchedIndex == -1 && trimmedAns.isNotBlank()) {
-            val norm = trimmedAns.lowercase()
-                .replace("(", "")
-                .replace(")", "")
-                .replace(".", "")
-                .replace("option", "opt")
-                .trim()
-
-            matchedIndex = when (norm) {
-                "a", "opt1", "opt 1", "1" -> 0
-                "b", "opt2", "opt 2", "2" -> 1
-                "c", "opt3", "opt 3", "3" -> 2
-                "d", "opt4", "opt 4", "4" -> 3
-                "e", "opt5", "opt 5", "5" -> 4
+            val idx = when (trimmedAns.uppercase()) {
+                "A" -> 0
+                "B" -> 1
+                "C" -> 2
+                "D" -> 3
+                "E" -> 4
                 else -> -1
             }
+            if (idx in rawOpts.indices && rawOpts[idx].isNotBlank()) {
+                matchedIndex = idx
+            }
         }
 
-        // Rule 2: If Ans column does not have exact matching data or is empty, whichever contains '#' is the answer
-        if (matchedIndex == -1 && hashIndex != -1) {
-            matchedIndex = hashIndex
-        }
-
-        // Fallback: If still unmatched, fallback to 0 or first available option
-        if (matchedIndex == -1 || matchedIndex >= cleanOpts.size) {
-            matchedIndex = cleanOpts.indexOfFirst { it.isNotBlank() }.coerceAtLeast(0)
-        }
-
-        val nonBlankOpts = cleanOpts.filter { it.isNotBlank() }
-        val finalAnswer = if (matchedIndex in cleanOpts.indices && cleanOpts[matchedIndex].isNotBlank()) {
-            cleanOpts[matchedIndex]
+        val nonBlankOpts = rawOpts.filter { it.isNotBlank() }
+        val finalAnswer = if (matchedIndex in rawOpts.indices && rawOpts[matchedIndex].isNotBlank()) {
+            rawOpts[matchedIndex]
         } else {
-            nonBlankOpts.firstOrNull() ?: ""
+            trimmedAns
         }
 
         return ResolvedQuizQuestion(
-            cleanOpt1 = cleanOpts.getOrElse(0) { "" },
-            cleanOpt2 = cleanOpts.getOrElse(1) { "" },
-            cleanOpt3 = cleanOpts.getOrElse(2) { "" },
-            cleanOpt4 = cleanOpts.getOrElse(3) { "" },
-            cleanOpt5 = cleanOpts.getOrElse(4) { "" },
+            cleanOpt1 = rawOpts.getOrElse(0) { "" },
+            cleanOpt2 = rawOpts.getOrElse(1) { "" },
+            cleanOpt3 = rawOpts.getOrElse(2) { "" },
+            cleanOpt4 = rawOpts.getOrElse(3) { "" },
+            cleanOpt5 = rawOpts.getOrElse(4) { "" },
             options = nonBlankOpts,
             correctOptionIndex = matchedIndex,
             correctAnswer = finalAnswer

@@ -7,7 +7,6 @@ import com.example.data.model.ArticleBookGroupEntity
 import com.example.data.model.ArticleEntity
 import com.example.data.model.DeletedArticleTitleEntity
 import com.example.data.model.CourseEntity
-import com.example.data.model.GamePracticeEntity
 import com.example.data.model.QuestionBankEntity
 import com.example.data.model.QbProgressRecord
 import com.example.data.model.UserProgressEntity
@@ -62,7 +61,6 @@ class MemorizerRepository(
     val allCourses: Flow<List<CourseEntity>> = database.courseDao().getAllCourses()
     val allArticles: Flow<List<ArticleEntity>> = database.articleDao().getAllArticles()
     val allArticleBookGroups: Flow<List<ArticleBookGroupEntity>> = database.articleBookGroupDao().getAllBookGroups()
-    val allGames: Flow<List<GamePracticeEntity>> = database.gamePracticeDao().getAllItems()
     val allQuestions: Flow<List<QuestionBankEntity>> = database.questionBankDao().getAllQuestions()
 
     fun getWordsForCourse(courseId: String): Flow<List<VocabularyWordEntity>> =
@@ -135,7 +133,7 @@ class MemorizerRepository(
             if (words.isNotEmpty()) {
                 val archived = words.map { w ->
                     ArchivedWordProgressEntity(
-                        id = "${courseId}_${w.word.lowercase().trim()}",
+                        id = "${courseId}_${w.id}",
                         originalId = w.id,
                         word = w.word,
                         normalizedWord = w.word.lowercase().trim(),
@@ -375,33 +373,6 @@ class MemorizerRepository(
         if (ids.isEmpty()) return@withContext
         database.vocabularyDao().updateStatusForWords(ids, newStatus)
         refreshProgressAndSync(userId)
-    }
-
-    suspend fun addGameItem(item: GamePracticeEntity) = withContext(Dispatchers.IO) {
-        database.gamePracticeDao().insertItem(item)
-    }
-
-    suspend fun deleteGameItem(id: String) = withContext(Dispatchers.IO) {
-        database.gamePracticeDao().deleteItemById(id)
-    }
-
-    suspend fun deleteGamesBySection(section: String) = withContext(Dispatchers.IO) {
-        database.gamePracticeDao().deleteItemsBySection(section)
-    }
-
-    suspend fun deleteGameItems(ids: List<String>) = withContext(Dispatchers.IO) {
-        if (ids.isNotEmpty()) {
-            database.gamePracticeDao().deleteItemsByIds(ids)
-        }
-    }
-
-    suspend fun clearAllGames() = withContext(Dispatchers.IO) {
-        database.gamePracticeDao().clearAll()
-    }
-
-    suspend fun recordGameAnswer(questionId: String, isCorrect: Boolean) = withContext(Dispatchers.IO) {
-        val status = if (isCorrect) "correct" else "incorrect"
-        database.gamePracticeDao().recordAttempt(questionId, status, isCorrect)
     }
 
     suspend fun recordWordQuizAnswer(wordId: String, isCorrect: Boolean, userId: String = "1235") = withContext(Dispatchers.IO) {
@@ -693,33 +664,6 @@ class MemorizerRepository(
         }
     }
 
-    suspend fun importGameItems(items: List<GamePracticeEntity>): Result<Int> = withContext(Dispatchers.IO) {
-        try {
-            if (items.isNotEmpty()) {
-                database.gamePracticeDao().insertItems(items)
-                Result.success(items.size)
-            } else {
-                Result.failure(Exception("No valid game questions found to import"))
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    suspend fun importGameFile(content: String, defaultSheetType: String = "practice"): Result<Int> = withContext(Dispatchers.IO) {
-        try {
-            val items = FileParsers.parseGameCsv(content, defaultSheetType)
-            if (items.isNotEmpty()) {
-                database.gamePracticeDao().insertItems(items)
-                Result.success(items.size)
-            } else {
-                Result.failure(Exception("No valid game questions found"))
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
     suspend fun importQuestionBankFile(content: String, clearExisting: Boolean = false, bankName: String = "General QB"): Result<Int> = withContext(Dispatchers.IO) {
         try {
             val items = FileParsers.parseQuestionBankAny(content, bankName)
@@ -829,52 +773,8 @@ class MemorizerRepository(
 
     fun getQbProgressBackupFile(): java.io.File = backupManager.getQbProgressBackupFile()
 
-    val articleScraperService = com.example.data.service.ArticleFlashcardScraperService.getInstance()
-    val articleSitemapService = com.example.data.service.ArticleSitemapService.getInstance()
-
-    suspend fun scrapeArticleAndExtractBody(url: String): Result<String> {
-        return articleScraperService.extractMainBodyTextFromUrl(url)
-    }
-
-    suspend fun scrapeAndGenerateFlashcards(
-        urls: List<String>,
-        saveToDb: Boolean = true
-    ): Result<List<com.example.data.service.GeneratedFlashcard>> = withContext(Dispatchers.IO) {
-        try {
-            val words = database.vocabularyDao().getAllWordsList()
-            val cards = articleScraperService.generateFlashcardsFromUrls(urls, words)
-            if (saveToDb && cards.isNotEmpty()) {
-                articleScraperService.saveToFlashcardDatabase(context, cards)
-                articleScraperService.saveToVocabularyDatabase(context, cards)
-            }
-            Result.success(cards)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    suspend fun fetchWebsiteSitemap(urlOrDomain: String): Result<com.example.data.service.SitemapFetchResult> {
-        return articleSitemapService.fetchSitemap(urlOrDomain)
-    }
-
-    suspend fun batchImportSitemapArticles(
-        selectedArticles: List<com.example.data.service.SitemapArticleItem>,
-        courseId: String = "course_default",
-        onProgress: (current: Int, total: Int, currentTitle: String) -> Unit = { _, _, _ -> }
-    ): Result<List<ArticleEntity>> {
-        return articleSitemapService.batchImportArticlesToReader(context, selectedArticles, courseId, onProgress)
-    }
-
-    suspend fun batchGenerateSitemapFlashcards(
-        selectedArticles: List<com.example.data.service.SitemapArticleItem>,
-        onProgress: (current: Int, total: Int, currentTitle: String) -> Unit = { _, _, _ -> }
-    ): Result<Int> {
-        return articleSitemapService.batchGenerateFlashcardsFromArticles(context, selectedArticles, onProgress)
-    }
-
     suspend fun resetAllData(userId: String = "1235") = withContext(Dispatchers.IO) {
         database.vocabularyDao().clearAll()
-        database.gamePracticeDao().clearAll()
         database.questionBankDao().clearAll()
         database.articleBookGroupDao().clearAll()
         database.articleDao().clearAll()

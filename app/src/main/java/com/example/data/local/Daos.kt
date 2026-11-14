@@ -241,42 +241,6 @@ interface VocabularyDao {
 }
 
 @Dao
-interface GamePracticeDao {
-    @Query("SELECT * FROM game_practice_items ORDER BY id ASC")
-    fun getAllItems(): Flow<List<GamePracticeEntity>>
-
-    @Query("SELECT * FROM game_practice_items ORDER BY id ASC")
-    suspend fun getAllItemsList(): List<GamePracticeEntity>
-
-    @Query("SELECT * FROM game_practice_items WHERE sheetType = :type ORDER BY id ASC")
-    fun getItemsByType(type: String): Flow<List<GamePracticeEntity>>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertItems(items: List<GamePracticeEntity>)
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertItem(item: GamePracticeEntity)
-
-    @Delete
-    suspend fun deleteItem(item: GamePracticeEntity)
-
-    @Query("DELETE FROM game_practice_items WHERE id = :id")
-    suspend fun deleteItemById(id: String)
-
-    @Query("DELETE FROM game_practice_items WHERE sheetType = :section")
-    suspend fun deleteItemsBySection(section: String)
-
-    @Query("DELETE FROM game_practice_items WHERE id IN (:ids)")
-    suspend fun deleteItemsByIds(ids: List<String>)
-
-    @Query("UPDATE game_practice_items SET lastAttemptStatus = :status, correctCount = CASE WHEN :isCorrect = 1 THEN correctCount + 1 ELSE correctCount END, incorrectCount = CASE WHEN :isCorrect = 0 THEN incorrectCount + 1 ELSE incorrectCount END WHERE id = :id")
-    suspend fun recordAttempt(id: String, status: String, isCorrect: Boolean)
-
-    @Query("DELETE FROM game_practice_items")
-    suspend fun clearAll()
-}
-
-@Dao
 interface QuestionBankDao {
     @Query("SELECT * FROM question_bank_items ORDER BY id ASC")
     fun getAllQuestions(): Flow<List<QuestionBankEntity>>
@@ -304,35 +268,14 @@ interface QuestionBankDao {
         incoming: List<QuestionBankEntity>,
         savedProgressMap: Map<String, QbProgressRecord> = emptyMap()
     ): Pair<Int, Int> {
-        fun normKey(text: String): String {
-            val key = text.lowercase().trim().replace(Regex("[^\\p{L}\\p{Nd}]"), "")
-            return if (key.isNotBlank()) key else text.lowercase().trim()
-        }
-
-        val existingList = getAllQuestionsList()
-        val existingMap = existingList.associateBy { it.id }
-        val existingByPrompt = existingList.associateBy { normKey(it.question) }
-
-        val savedProgressByPrompt = savedProgressMap.values
-            .filter { it.questionPrompt.isNotBlank() }
-            .associateBy { normKey(it.questionPrompt) }
-
-        val savedProgressByRawPrompt = savedProgressMap.values
-            .filter { it.questionPrompt.isNotBlank() }
-            .associateBy { it.questionPrompt.trim().lowercase() }
+        if (incoming.isEmpty()) return Pair(0, 0)
+        val existingMap = getAllQuestionsList().associateBy { it.id }
 
         var updated = 0
         var inserted = 0
         val merged = incoming.map { inc ->
-            val ex = existingMap[inc.id] ?: existingByPrompt[normKey(inc.question)]
-            val incNormPrompt = normKey(inc.question)
-            val incRawPrompt = inc.question.trim().lowercase()
-
+            val ex = existingMap[inc.id]
             val savedProg = savedProgressMap[inc.id]
-                ?: savedProgressMap[inc.id.replace("qb_", "")]
-                ?: savedProgressMap["qb_${inc.id}"]
-                ?: (if (incNormPrompt.isNotBlank()) savedProgressByPrompt[incNormPrompt] else null)
-                ?: (if (incRawPrompt.isNotBlank()) savedProgressByRawPrompt[incRawPrompt] else null)
 
             val matchedProg = when {
                 savedProg != null && savedProg.status.isNotBlank() && savedProg.status != "unrated" -> savedProg
@@ -344,13 +287,17 @@ interface QuestionBankDao {
                 else -> null
             }
 
-            if (matchedProg != null && (matchedProg.status != "unrated" || matchedProg.timesAnswered > 0 || inc.status == "unrated")) {
+            if (ex != null || (matchedProg != null && (matchedProg.status != "unrated" || matchedProg.timesAnswered > 0))) {
                 updated++
-                inc.copy(
-                    status = if (matchedProg.status.isNotBlank()) matchedProg.status else inc.status,
-                    timesAnswered = maxOf(matchedProg.timesAnswered, inc.timesAnswered),
-                    lastAnsweredAt = maxOf(matchedProg.lastAnsweredAt, inc.lastAnsweredAt)
-                )
+                if (matchedProg != null) {
+                    inc.copy(
+                        status = if (matchedProg.status.isNotBlank() && matchedProg.status != "unrated") matchedProg.status else inc.status,
+                        timesAnswered = maxOf(matchedProg.timesAnswered, inc.timesAnswered),
+                        lastAnsweredAt = maxOf(matchedProg.lastAnsweredAt, inc.lastAnsweredAt)
+                    )
+                } else {
+                    inc
+                }
             } else {
                 inserted++
                 inc
@@ -398,42 +345,6 @@ interface UserProgressDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertOrUpdate(progress: UserProgressEntity)
-}
-
-@Dao
-interface FlashcardDao {
-    @Query("SELECT * FROM flashcards ORDER BY id DESC")
-    fun getAllFlashcards(): Flow<List<Flashcard>>
-
-    @Query("SELECT * FROM flashcards ORDER BY id DESC")
-    suspend fun getAllFlashcardsList(): List<Flashcard>
-
-    @Query("SELECT * FROM flashcards WHERE id = :id LIMIT 1")
-    suspend fun getFlashcardById(id: Long): Flashcard?
-
-    @Query("SELECT * FROM flashcards WHERE masteryLevel = :level ORDER BY id DESC")
-    fun getFlashcardsByMasteryLevel(level: Int): Flow<List<Flashcard>>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insert(flashcard: Flashcard): Long
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertAll(flashcards: List<Flashcard>)
-
-    @Update
-    suspend fun update(flashcard: Flashcard)
-
-    @Query("UPDATE flashcards SET masteryLevel = :level, updatedAt = :updatedAt WHERE id = :id")
-    suspend fun updateMasteryLevel(id: Long, level: Int, updatedAt: Long = System.currentTimeMillis())
-
-    @Delete
-    suspend fun delete(flashcard: Flashcard)
-
-    @Query("DELETE FROM flashcards WHERE id = :id")
-    suspend fun deleteById(id: Long)
-
-    @Query("DELETE FROM flashcards")
-    suspend fun clearAll()
 }
 
 @Dao

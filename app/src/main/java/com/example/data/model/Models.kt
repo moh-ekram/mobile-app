@@ -47,19 +47,6 @@ data class DeletedArticleTitleEntity(
     val deletedAt: Long = System.currentTimeMillis()
 )
 
-/**
- * Flashcard Room database entity storing word, definition, and mastery level.
- */
-@Entity(tableName = "flashcards")
-data class Flashcard(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val word: String,
-    val definition: String,
-    val masteryLevel: Int = 0, // e.g. 0: New, 1: Learning, 2: Familiar, 3: Mastered
-    val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
-)
-
 @Entity(tableName = "vocabulary_words")
 data class VocabularyWordEntity(
     @PrimaryKey val id: String,
@@ -99,23 +86,6 @@ data class ArchivedWordProgressEntity(
     val quizCorrectCount: Int = 0,
     val quizIncorrectCount: Int = 0,
     val archivedAt: Long = System.currentTimeMillis()
-)
-
-@Entity(tableName = "game_practice_items")
-data class GamePracticeEntity(
-    @PrimaryKey val id: String,
-    val sheetType: String, // "odd_one_out", "analogy", "practice"
-    val question: String,
-    val opt1: String,
-    val opt2: String,
-    val opt3: String,
-    val opt4: String,
-    val opt5: String = "",
-    val answer: String,
-    val explanation: String? = null,
-    val lastAttemptStatus: String? = "not_studied", // "correct", "incorrect", "not_studied"
-    val correctCount: Int = 0,
-    val incorrectCount: Int = 0
 )
 
 @Entity(tableName = "question_bank_items")

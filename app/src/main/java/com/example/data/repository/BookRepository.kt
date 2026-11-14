@@ -104,8 +104,7 @@ class BookRepository(
                     } else if (child.isFile) {
                         val name = child.name?.lowercase() ?: ""
                         val mime = child.type?.lowercase() ?: ""
-                        if (name.endsWith(".pdf") || name.endsWith(".docx") ||
-                            mime == "application/pdf" ||
+                        if (name.endsWith(".docx") ||
                             mime.contains("wordprocessingml.document")
                         ) {
                             supportedFiles.add(child)
@@ -116,19 +115,19 @@ class BookRepository(
             collectSupported(rootDoc, 0)
 
             if (supportedFiles.isEmpty()) {
-                return@withContext Result.failure(IllegalStateException("No PDF or DOCX files found in the selected folder."))
+                return@withContext Result.failure(IllegalStateException("No DOCX eBook files found in the selected folder."))
             }
 
             val imported = mutableListOf<BookEntity>()
             supportedFiles.forEachIndexed { idx, doc ->
-                val name = doc.name ?: "Book_${idx + 1}.pdf"
+                val name = doc.name ?: "Book_${idx + 1}.docx"
                 onProgress(idx + 1, supportedFiles.size, name)
                 val res = importBookFromUri(doc.uri, sourceType = "folder")
                 res.getOrNull()?.let { imported.add(it) }
             }
 
             if (imported.isEmpty()) {
-                Result.failure(IllegalStateException("Failed to import PDF/DOCX books from the selected folder."))
+                Result.failure(IllegalStateException("Failed to import DOCX eBooks from the selected folder."))
             } else {
                 Result.success(imported)
             }
@@ -163,13 +162,13 @@ class BookRepository(
         try {
             val format = BookParserService.detectFormat(fileName, bytes)
             val lowerName = fileName.lowercase()
-            if (!lowerName.endsWith(".pdf") && !lowerName.endsWith(".docx") && format !in listOf("PDF", "DOCX")) {
-                return@withContext Result.failure(IllegalArgumentException("Unsupported format. Only PDF and DOCX books are supported."))
+            if (!lowerName.endsWith(".docx") && format != "DOCX") {
+                return@withContext Result.failure(IllegalArgumentException("Unsupported format. Only DOCX eBooks are supported."))
             }
 
             val bookId = existingBookId ?: ("book_" + UUID.randomUUID().toString().replace("-", "").take(12))
             val cleanBaseTitle = fileName.substringBeforeLast(".").replace("_", " ").trim().ifBlank { "Untitled Book" }
-            val ext = format.lowercase()
+            val ext = format.lowercase().ifBlank { "docx" }
             val targetFile = File(booksDirectory, "$bookId.$ext")
             targetFile.writeBytes(bytes)
 
@@ -177,7 +176,7 @@ class BookRepository(
             val placeholder = BookEntity(
                 id = bookId,
                 title = cleanBaseTitle,
-                format = format,
+                format = format.ifBlank { "DOCX" },
                 fileName = fileName,
                 localFilePath = targetFile.absolutePath,
                 sourceType = sourceType,
@@ -185,7 +184,6 @@ class BookRepository(
                 fileSizeBytes = targetFile.length(),
                 totalPages = 0,
                 lastReadPage = 1,
-                lastReaderMode = "ebook",
                 indexStatus = "indexing",
                 importedAt = now,
                 lastOpenedAt = now
@@ -271,8 +269,8 @@ class BookRepository(
         BookFtsHelper.updateBookTitleInIndex(database.openHelper.writableDatabase, bookId, cleanTitle)
     }
 
-    suspend fun updateReadingProgress(bookId: String, page: Int, mode: String) = withContext(Dispatchers.IO) {
-        bookDao.updateReadingProgress(bookId, page.coerceAtLeast(1), mode, System.currentTimeMillis())
+    suspend fun updateReadingProgress(bookId: String, page: Int) = withContext(Dispatchers.IO) {
+        bookDao.updateReadingProgress(bookId, page.coerceAtLeast(1), System.currentTimeMillis())
     }
 
     suspend fun toggleBookmark(bookId: String, pageNumber: Int, title: String, snippet: String): Boolean =
@@ -378,7 +376,7 @@ class BookRepository(
             }
         } catch (_: Exception) {}
         if (name.isBlank()) {
-            name = uri.lastPathSegment?.substringAfterLast("/") ?: "ImportedBook.pdf"
+            name = uri.lastPathSegment?.substringAfterLast("/") ?: "ImportedBook.docx"
         }
         return name
     }

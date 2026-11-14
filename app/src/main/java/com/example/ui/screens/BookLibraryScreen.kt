@@ -58,7 +58,7 @@ fun BookLibraryScreen(
     onRefreshDriveBooks: (String) -> Unit,
     onDownloadDriveBook: (DiscoveredDriveFile) -> Unit,
     onDownloadAllDriveBooks: () -> Unit,
-    onOpenReader: (bookId: String, pageNumber: Int?, preferredMode: String?) -> Unit,
+    onOpenReader: (bookId: String, pageNumber: Int?) -> Unit,
     onUpdateBookMetadata: (bookId: String, title: String, author: String, subject: String, description: String) -> Unit,
     onReindexBook: (String) -> Unit,
     onDeleteBook: (BookEntity) -> Unit,
@@ -164,7 +164,6 @@ fun BookLibraryScreen(
                             onClick = {
                                 filePickerLauncher.launch(
                                     arrayOf(
-                                        "application/pdf",
                                         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                                     )
                                 )
@@ -311,7 +310,7 @@ fun BookLibraryScreen(
                     BookCardItem(
                         book = book,
                         onCardClick = { selectedBookForProfile = book },
-                        onQuickRead = { onOpenReader(book.id, book.lastReadPage, "ebook") }
+                        onQuickRead = { onOpenReader(book.id, book.lastReadPage) }
                     )
                 }
             }
@@ -332,9 +331,9 @@ fun BookLibraryScreen(
             highlightCount = bookHighlights.size,
             noteCount = bookNotes.size,
             onDismiss = { selectedBookForProfile = null },
-            onOpenReader = { page, mode ->
+            onOpenReader = { page ->
                 selectedBookForProfile = null
-                onOpenReader(liveProfileBook.id, page, mode)
+                onOpenReader(liveProfileBook.id, page)
             },
             onUpdateMetadata = { t, a, s, d ->
                 onUpdateBookMetadata(liveProfileBook.id, t, a, s, d)
@@ -404,9 +403,8 @@ private fun BookCardItem(
     onQuickRead: () -> Unit
 ) {
     val palette = LocalAppPalette.current
-    val isPdf = book.format.equals("PDF", ignoreCase = true)
-    val badgeBg = if (isPdf) RoseLight else IndigoLight
-    val badgeColor = if (isPdf) RoseError else IndigoPrimary
+    val badgeBg = IndigoLight
+    val badgeColor = IndigoPrimary
     val progressFraction = if (book.totalPages > 0) {
         (book.lastReadPage.toFloat() / book.totalPages.toFloat()).coerceIn(0f, 1f)
     } else 0f
@@ -514,7 +512,7 @@ private fun BookProfileSheet(
     highlightCount: Int,
     noteCount: Int,
     onDismiss: () -> Unit,
-    onOpenReader: (page: Int, mode: String) -> Unit,
+    onOpenReader: (page: Int) -> Unit,
     onUpdateMetadata: (title: String, author: String, subject: String, description: String) -> Unit,
     onReindex: () -> Unit,
     onDelete: () -> Unit
@@ -550,13 +548,13 @@ private fun BookProfileSheet(
                     ) {
                         Surface(
                             shape = RoundedCornerShape(6.dp),
-                            color = if (book.format == "PDF") RoseLight else IndigoLight
+                            color = IndigoLight
                         ) {
                             Text(
                                 text = book.format,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (book.format == "PDF") RoseError else IndigoPrimary,
+                                color = IndigoPrimary,
                                 modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
                             )
                         }
@@ -642,7 +640,7 @@ private fun BookProfileSheet(
 
             // Ebook Reader Launch Button
             Button(
-                onClick = { onOpenReader(book.lastReadPage, "ebook") },
+                onClick = { onOpenReader(book.lastReadPage) },
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
                 modifier = Modifier
@@ -690,7 +688,7 @@ private fun BookProfileSheet(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .clip(RoundedCornerShape(8.dp))
-                                            .clickable { onOpenReader(entry.pageNumber, "ebook") }
+                                            .clickable { onOpenReader(entry.pageNumber) }
                                             .padding(horizontal = 8.dp, vertical = 6.dp),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
@@ -884,7 +882,7 @@ private fun DriveBooksCatalogDialog(
                             color = palette.textPrimary
                         )
                         Text(
-                            text = "Download PDF & DOCX books for offline study",
+                            text = "Download DOCX eBooks for offline study",
                             fontSize = 11.5.sp,
                             color = palette.textMuted
                         )
@@ -965,7 +963,7 @@ private fun DriveBooksCatalogDialog(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text("No PDF/DOCX files discovered yet", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            Text("No DOCX eBooks discovered yet", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                             Text(
                                 text = "Verify folder sharing is set to 'Anyone with the link' and tap Refresh, or use File / Folder import from your device.",
                                 fontSize = 11.5.sp,

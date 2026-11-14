@@ -338,7 +338,7 @@ object GoogleDriveSyncService {
         while (m1.find()) addCandidate(m1.group(1), m1.group(2))
 
         // Pattern 2: JSON array entries in folder JS payload
-        val p3 = Pattern.compile("""\["([a-zA-Z0-9_-]{20,})"\s*,\s*"([^"]+\.(?:pdf|docx|doc))"""", Pattern.CASE_INSENSITIVE)
+        val p3 = Pattern.compile("""\["([a-zA-Z0-9_-]{20,})"\s*,\s*"([^"]+\.(?:docx|doc))"""", Pattern.CASE_INSENSITIVE)
         val m3 = p3.matcher(html)
         while (m3.find()) addCandidate(m3.group(1), m3.group(2))
 
@@ -354,12 +354,12 @@ object GoogleDriveSyncService {
 
         return list.filter {
             val lower = it.title.lowercase()
-            lower.endsWith(".pdf") || lower.endsWith(".docx") || !lower.contains(".")
+            lower.endsWith(".docx") || !lower.contains(".")
         }
     }
 
     /**
-     * Downloads a single PDF or DOCX book from Google Drive (supports direct files,
+     * Downloads a single DOCX eBook from Google Drive (supports direct files,
      * large-file usercontent bypass, and Google Docs export as DOCX).
      */
     suspend fun downloadSingleBookDriveFile(item: DiscoveredDriveFile): DownloadedBookFile = withContext(Dispatchers.IO) {
@@ -382,11 +382,9 @@ object GoogleDriveSyncService {
                     val bytes = response.body?.bytes() ?: return@use
                     if (bytes.size < 32) return@use
 
-                    val isPdfMagic = bytes[0] == 0x25.toByte() && bytes[1] == 0x50.toByte() &&
-                        bytes[2] == 0x44.toByte() && bytes[3] == 0x46.toByte() // %PDF
                     val isZipMagic = bytes[0] == 0x50.toByte() && bytes[1] == 0x4B.toByte() // PK.. (docx)
 
-                    if (!isPdfMagic && !isZipMagic) {
+                    if (!isZipMagic) {
                         if (contentType.contains("text/html")) return@use
                     }
 
@@ -400,15 +398,13 @@ object GoogleDriveSyncService {
                     }
 
                     val format = when {
-                        isPdfMagic -> "PDF"
                         isZipMagic -> "DOCX"
-                        fileName.endsWith(".pdf", true) -> "PDF"
                         fileName.endsWith(".docx", true) -> "DOCX"
                         else -> return@use
                     }
 
-                    if (!fileName.endsWith(".pdf", true) && !fileName.endsWith(".docx", true)) {
-                        fileName = "$fileName.${format.lowercase()}"
+                    if (!fileName.endsWith(".docx", true)) {
+                        fileName = "$fileName.docx"
                     }
 
                     return@withContext DownloadedBookFile(
@@ -420,7 +416,7 @@ object GoogleDriveSyncService {
             } catch (_: Exception) {}
         }
 
-        throw IOException("Could not download '${item.title}' as PDF or DOCX. Ensure sharing is 'Anyone with the link'.")
+        throw IOException("Could not download '${item.title}' as DOCX eBook. Ensure sharing is 'Anyone with the link'.")
     }
 
     /**

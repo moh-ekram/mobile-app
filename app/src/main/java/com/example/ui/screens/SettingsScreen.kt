@@ -67,7 +67,6 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 import coil.compose.AsyncImage
 import com.example.data.model.CourseEntity
-import com.example.data.model.GamePracticeEntity
 import com.example.data.model.QuestionBankEntity
 import com.example.data.model.UserProgressEntity
 import com.example.data.model.UserSession
@@ -99,7 +98,6 @@ fun SettingsScreen(
     backupDirectoryPath: String,
     customBackupTreeUri: String? = null,
     words: List<VocabularyWordEntity> = emptyList(),
-    games: List<GamePracticeEntity> = emptyList(),
     questions: List<QuestionBankEntity> = emptyList(),
     courses: List<CourseEntity> = emptyList(),
     activeCourseId: String = "",
@@ -126,7 +124,6 @@ fun SettingsScreen(
     onRefreshWidget: () -> Unit = {},
     onExportToUri: (Uri) -> Unit = {},
     onRestoreFromUri: (Uri) -> Unit = {},
-    onCloudSync: () -> Unit = {},
     onRefreshDriveCourses: () -> Unit = {},
     onDownloadDriveCourse: (DiscoveredDriveFile) -> Unit = {},
     onRestoreBackup: (String, Boolean) -> Unit = { _, _ -> },
@@ -150,14 +147,9 @@ fun SettingsScreen(
     onMoveWordsToCourse: (List<String>, String) -> Unit = { _, _ -> },
     onUpdateStatusForWords: (List<String>, String) -> Unit = { _, _ -> },
     onReportWord: (String, Boolean, String?) -> Unit = { _, _, _ -> },
-    onDeleteGame: (String) -> Unit = {},
-    onDeleteGamesBySection: (String) -> Unit = {},
-    onClearAllGames: () -> Unit = {},
     onDeleteQuestion: (String) -> Unit = {},
     onClearAllQB: () -> Unit = {},
     onImportCourse: (String, Boolean, String, String?) -> Unit = { _, _, _, _ -> },
-    onImportGame: (String, String) -> Unit = { _, _ -> },
-    onImportGameItems: (List<GamePracticeEntity>) -> Unit = {},
     onImportQB: (String) -> Unit = {},
     qbSyncUrl: String = "",
     isSyncingQB: Boolean = false,
@@ -438,7 +430,6 @@ fun SettingsScreen(
                     onRestoreFromDriveDirect = onRestoreFromDriveDirect,
                     onExportFile = { driveExportLauncher.launch("memorizer_backup_${System.currentTimeMillis()}.json") },
                     onRestoreFile = { driveRestoreLauncher.launch(arrayOf("application/json", "text/*", "*/*")) },
-                    onCloudSync = onCloudSync,
                     onDirectPasteRestore = { showRestoreDialog = true },
                     onResetData = { showResetConfirmDialog = true },
                     onImportQBClick = { showQbSyncDialog = true },
@@ -577,7 +568,7 @@ fun SettingsScreen(
             onDismissRequest = { showResetConfirmDialog = false },
             shape = RoundedCornerShape(20.dp),
             title = { Text("Reset to Sample Data", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFFE11D48)) },
-            text = { Text("Reset all courses, words, and games back to default sample content? Custom progress will be replaced.", fontSize = 12.5.sp) },
+            text = { Text("Reset all courses, words, and question banks back to default sample content? Custom progress will be replaced.", fontSize = 12.5.sp) },
             confirmButton = {
                 Button(
                     onClick = {
@@ -3436,7 +3427,6 @@ private fun BackupSettingsTab(
     onRestoreFromDriveDirect: () -> Unit,
     onExportFile: () -> Unit,
     onRestoreFile: () -> Unit,
-    onCloudSync: () -> Unit,
     onDirectPasteRestore: () -> Unit,
     onResetData: () -> Unit,
     onImportQBClick: () -> Unit = {},

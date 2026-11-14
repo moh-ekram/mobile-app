@@ -2,7 +2,6 @@ package com.example.data.repository
 
 import com.example.data.model.ArticleEntity
 import com.example.data.model.CourseEntity
-import com.example.data.model.GamePracticeEntity
 import com.example.data.model.QuestionBankEntity
 import com.example.data.model.VocabularyWordEntity
 
@@ -486,89 +485,6 @@ To any perceptive observer, metropolitan life illustrates just how poignant and 
             courseId = "course_ielts_academic",
             createdAt = 1700000020000L,
             wordCount = 205
-        )
-    )
-
-    val sampleGames: List<GamePracticeEntity> = listOf(
-        // Odd One Out
-        GamePracticeEntity(
-            id = "ooo_1",
-            sheetType = "odd_one_out",
-            question = "Which word does NOT belong with the others?",
-            opt1 = "Diminish",
-            opt2 = "Abate",
-            opt3 = "Escalate#",
-            opt4 = "Subside",
-            answer = "Escalate",
-            explanation = "'Escalate' means to increase, whereas Diminish, Abate, and Subside all mean to decrease or lessen."
-        ),
-        GamePracticeEntity(
-            id = "ooo_2",
-            sheetType = "odd_one_out",
-            question = "Find the Odd One Out among the speech styles:",
-            opt1 = "Garrulous",
-            opt2 = "Taciturn#",
-            opt3 = "Loquacious",
-            opt4 = "Voluble",
-            answer = "Taciturn",
-            explanation = "'Taciturn' means reserved or quiet. The other three words mean talkative."
-        ),
-        GamePracticeEntity(
-            id = "ooo_3",
-            sheetType = "odd_one_out",
-            question = "Identify the word that doesn't fit the pattern of duration:",
-            opt1 = "Ephemeral",
-            opt2 = "Transient",
-            opt3 = "Perpetual#",
-            opt4 = "Evanescent",
-            answer = "Perpetual",
-            explanation = "'Perpetual' means eternal or never-ending, while the others mean short-lived."
-        ),
-        // Analogy
-        GamePracticeEntity(
-            id = "ana_1",
-            sheetType = "analogy",
-            question = "METICULOUS : CARE :: ?",
-            opt1 = "Garrulous : Silence",
-            opt2 = "Zealous : Passion#",
-            opt3 = "Ephemeral : Eternity",
-            opt4 = "Ostentatious : Modesty",
-            answer = "Zealous : Passion",
-            explanation = "A meticulous person possesses care; a zealous person possesses passion (Characteristic relationship)."
-        ),
-        GamePracticeEntity(
-            id = "ana_2",
-            sheetType = "analogy",
-            question = "CACOPHONY : SOUND :: ?",
-            opt1 = "Odor : Smell",
-            opt2 = "Glare : Light#",
-            opt3 = "Music : Melody",
-            opt4 = "Silence : Noise",
-            answer = "Glare : Light",
-            explanation = "Cacophony is an unpleasantly harsh sound; glare is unpleasantly harsh light."
-        ),
-        // Practice MCQs
-        GamePracticeEntity(
-            id = "prac_1",
-            sheetType = "practice",
-            question = "Which word best describes a situation where smartphones are found everywhere?",
-            opt1 = "Ostentatious",
-            opt2 = "Ubiquitous#",
-            opt3 = "Reticent",
-            opt4 = "Aberrant",
-            answer = "Ubiquitous",
-            explanation = "'Ubiquitous' means present, appearing, or found everywhere."
-        ),
-        GamePracticeEntity(
-            id = "prac_2",
-            sheetType = "practice",
-            question = "Choose the closest synonym for 'PRAGMATIC':",
-            opt1 = "Idealistic",
-            opt2 = "Sensible & Practical#",
-            opt3 = "Dreamy",
-            opt4 = "Boastful",
-            answer = "Sensible & Practical",
-            explanation = "Pragmatic describes dealing with things sensibly and realistically."
         )
     )
 

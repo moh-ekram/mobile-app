@@ -55,9 +55,7 @@ import org.json.JSONObject
 @Composable
 internal fun QuizProgressHeaderCard(
     answeredCount: Int,
-    totalCount: Int,
-    quizViewMode: String = "continuous",
-    onViewModeChange: (String) -> Unit = {}
+    totalCount: Int
 ) {
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -519,13 +517,9 @@ internal fun QuizQuestionCardView(
 internal fun QuizSummaryView(
     score: Int,
     total: Int,
-    pooledScore: Int? = null,
-    pooledTotal: Int? = null,
-    isQuizTest: Boolean = false,
     isQuestionBank: Boolean = false,
     onRetake: () -> Unit,
-    onBackToBanks: (() -> Unit)? = null,
-    onPracticeMissed: (() -> Unit)? = null
+    onBackToBanks: (() -> Unit)? = null
 ) {
     val percent = if (total > 0) (score * 100 / total) else 0
 
@@ -639,7 +633,6 @@ internal fun CourseQuizConfigView(
     onGroupsChange: (Set<String>) -> Unit,
     questionCount: Int,
     onCountChange: (Int) -> Unit,
-    pooledStats: Triple<Int, Int, Int> = Triple(0, 0, 0),
     questionOrder: String = "serial",
     onOrderChange: (String) -> Unit = {},
     quizViewMode: String = "continuous",

@@ -9,7 +9,6 @@ import com.example.data.model.UserProgressEntity
 import com.example.data.model.VocabularyWordEntity
 import com.example.data.model.CourseEntity
 import com.example.data.model.ArticleEntity
-import com.example.data.model.GamePracticeEntity
 import com.example.data.model.QuestionBankEntity
 import com.example.data.model.ArchivedWordProgressEntity
 import com.example.data.parser.FileParsers
@@ -350,7 +349,6 @@ class BackupManager(private val context: Context, private val database: AppDatab
             allArticles
         }
 
-        val games = database.gamePracticeDao().getAllItemsList()
         val questions = database.questionBankDao().getAllQuestionsList()
         val progress = database.userProgressDao().getProgressOnce(userId)
 
@@ -450,25 +448,6 @@ class BackupManager(private val context: Context, private val database: AppDatab
             articlesArray.put(aObj)
         }
         jsonRoot.put("articles", articlesArray)
-
-        val gamesArray = JSONArray()
-        games.forEach { g ->
-            val gObj = JSONObject()
-            gObj.put("id", g.id)
-            gObj.put("sheetType", g.sheetType)
-            gObj.put("question", g.question)
-            gObj.put("opt1", g.opt1)
-            gObj.put("opt2", g.opt2)
-            gObj.put("opt3", g.opt3)
-            gObj.put("opt4", g.opt4)
-            gObj.put("answer", g.answer)
-            gObj.put("explanation", g.explanation ?: "")
-            gObj.put("lastAttemptStatus", g.lastAttemptStatus ?: "not_studied")
-            gObj.put("correctCount", g.correctCount)
-            gObj.put("incorrectCount", g.incorrectCount)
-            gamesArray.put(gObj)
-        }
-        jsonRoot.put("games", gamesArray)
 
         val qbArray = JSONArray()
         questions.forEach { q ->
@@ -599,7 +578,6 @@ class BackupManager(private val context: Context, private val database: AppDatab
                 allArticles
             }
 
-            val games = database.gamePracticeDao().getAllItemsList()
             val questions = database.questionBankDao().getAllQuestionsList()
             val progress = database.userProgressDao().getProgressOnce(userId)
 
@@ -708,26 +686,6 @@ class BackupManager(private val context: Context, private val database: AppDatab
                 articlesArray.put(aObj)
             }
             jsonRoot.put("articles", articlesArray)
-
-            // Games Array
-            val gamesArray = JSONArray()
-            games.forEach { g ->
-                val gObj = JSONObject()
-                gObj.put("id", g.id)
-                gObj.put("sheetType", g.sheetType)
-                gObj.put("question", g.question)
-                gObj.put("opt1", g.opt1)
-                gObj.put("opt2", g.opt2)
-                gObj.put("opt3", g.opt3)
-                gObj.put("opt4", g.opt4)
-                gObj.put("answer", g.answer)
-                gObj.put("explanation", g.explanation ?: "")
-                gObj.put("lastAttemptStatus", g.lastAttemptStatus ?: "not_studied")
-                gObj.put("correctCount", g.correctCount)
-                gObj.put("incorrectCount", g.incorrectCount)
-                gamesArray.put(gObj)
-            }
-            jsonRoot.put("games", gamesArray)
 
             // Save Question Bank progress to separate dedicated file
             saveQbProgressBackupFile()
@@ -1153,7 +1111,6 @@ class BackupManager(private val context: Context, private val database: AppDatab
             val coursesToInsert = mutableListOf<CourseEntity>()
             val wordsToInsert = mutableListOf<VocabularyWordEntity>()
             val articlesToInsert = mutableListOf<ArticleEntity>()
-            val gamesToInsert = mutableListOf<GamePracticeEntity>()
             val questionsToInsert = mutableListOf<QuestionBankEntity>()
             val archivedToInsert = mutableListOf<ArchivedWordProgressEntity>()
 
@@ -1296,40 +1253,7 @@ class BackupManager(private val context: Context, private val database: AppDatab
                         }
                     }
 
-                    // Helper to parse game item:
-                    fun parseGameObj(gObj: JSONObject, defaultType: String) {
-                        val q = findStr(gObj, "question", "Question", "q", "Q", "prompt", "Prompt", "title")
-                        val o1 = findStr(gObj, "opt1", "Opt1", "option1", "Option1", "a", "A", "choice1", "Choice1")
-                        val o2 = findStr(gObj, "opt2", "Opt2", "option2", "Option2", "b", "B", "choice2", "Choice2")
-                        val o3 = findStr(gObj, "opt3", "Opt3", "option3", "Option3", "c", "C", "choice3", "Choice3")
-                        val o4 = findStr(gObj, "opt4", "Opt4", "option4", "Option4", "d", "D", "choice4", "Choice4")
-                        val ans = findStr(gObj, "answer", "Answer", "ans", "Ans", "correctAnswer", "correct_answer", "solution")
-
-                        if (q.isNotBlank() && (ans.isNotBlank() || o1.isNotBlank())) {
-                            val gId = findStr(gObj, "id", "gameId", "game_id").ifEmpty {
-                                "game_${System.currentTimeMillis()}_${gamesToInsert.size}"
-                            }
-                            val sType = findStr(gObj, "sheetType", "sheet_type", "type", "Type").ifEmpty { defaultType }
-                            gamesToInsert.add(
-                                GamePracticeEntity(
-                                    id = gId,
-                                    sheetType = sType,
-                                    question = q,
-                                    opt1 = o1,
-                                    opt2 = o2,
-                                    opt3 = o3,
-                                    opt4 = o4,
-                                    answer = ans,
-                                    explanation = findStr(gObj, "explanation", "Explanation", "exp", "Exp", "reason").ifEmpty { null },
-                                    lastAttemptStatus = findStr(gObj, "lastAttemptStatus", "last_attempt_status", "status").ifEmpty { "not_studied" },
-                                    correctCount = findIntVal(gObj, 0, "correctCount", "correct_count", "correct"),
-                                    incorrectCount = findIntVal(gObj, 0, "incorrectCount", "incorrect_count", "incorrect")
-                                )
-                            )
-                        }
-                    }
-
-                    // 1. Courses (and any nested words / games inside course objects)
+                    // 1. Courses (and any nested words inside course objects)
                     val cArr = root.optJSONArray("courses") ?: root.optJSONArray("courseList")
                     if (cArr != null) {
                         for (i in 0 until cArr.length()) {
@@ -1358,15 +1282,6 @@ class BackupManager(private val context: Context, private val database: AppDatab
                                 for (wIdx in 0 until nestedWords.length()) {
                                     val wObj = nestedWords.getJSONObject(wIdx)
                                     parseWordObj(wObj, fallbackCourseId = cId, fallbackCourseTitle = cTitle)
-                                }
-                            }
-
-                            // Nested games inside course
-                            val nestedGames = cObj.optJSONArray("games") ?: cObj.optJSONArray("gamePractice") ?: cObj.optJSONArray("quizzes")
-                            if (nestedGames != null) {
-                                for (gIdx in 0 until nestedGames.length()) {
-                                    val gObj = nestedGames.getJSONObject(gIdx)
-                                    parseGameObj(gObj, defaultType = "practice")
                                 }
                             }
 
@@ -1429,43 +1344,6 @@ class BackupManager(private val context: Context, private val database: AppDatab
                                     )
                                 )
                             }
-                        }
-                    }
-
-                    // 4. Root-level Games (check all variations and sheet types)
-                    val gamesArr = root.optJSONArray("games")
-                        ?: root.optJSONArray("gamePractice")
-                        ?: root.optJSONArray("game_practice")
-                        ?: root.optJSONArray("gamesPractice")
-                        ?: root.optJSONArray("practiceGames")
-                        ?: root.optJSONArray("quizzes")
-                        ?: root.optJSONArray("quiz")
-                        ?: root.optJSONArray("gameData")
-                        ?: root.optJSONArray("practice")
-                    if (gamesArr != null) {
-                        for (i in 0 until gamesArr.length()) {
-                            val gObj = gamesArr.getJSONObject(i)
-                            parseGameObj(gObj, defaultType = "practice")
-                        }
-                    }
-
-                    // Specific game sheets
-                    val oooArr = root.optJSONArray("oddOneOut") ?: root.optJSONArray("odd_one_out")
-                    if (oooArr != null) {
-                        for (i in 0 until oooArr.length()) {
-                            parseGameObj(oooArr.getJSONObject(i), defaultType = "odd_one_out")
-                        }
-                    }
-                    val anaArr = root.optJSONArray("analogy") ?: root.optJSONArray("analogies")
-                    if (anaArr != null) {
-                        for (i in 0 until anaArr.length()) {
-                            parseGameObj(anaArr.getJSONObject(i), defaultType = "analogy")
-                        }
-                    }
-                    val matchArr = root.optJSONArray("matching") ?: root.optJSONArray("match")
-                    if (matchArr != null) {
-                        for (i in 0 until matchArr.length()) {
-                            parseGameObj(matchArr.getJSONObject(i), defaultType = "match")
                         }
                     }
 
@@ -1633,23 +1511,6 @@ class BackupManager(private val context: Context, private val database: AppDatab
                                 }
                             }
                             hasCoursesOrWords = true
-                        } else if (item.has("question") || item.has("Question")) {
-                            val q = findStr(item, "question", "Question")
-                            val ans = findStr(item, "answer", "Answer", "ans")
-                            if (q.isNotBlank()) {
-                                gamesToInsert.add(
-                                    GamePracticeEntity(
-                                        id = "game_${System.currentTimeMillis()}_$i",
-                                        question = q,
-                                        opt1 = findStr(item, "opt1", "option1"),
-                                        opt2 = findStr(item, "opt2", "option2"),
-                                        opt3 = findStr(item, "opt3", "option3"),
-                                        opt4 = findStr(item, "opt4", "option4"),
-                                        answer = ans,
-                                        sheetType = findStr(item, "sheetType").ifEmpty { "practice" }
-                                    )
-                                )
-                            }
                         } else if (item.has("word") || item.has("Word") || item.has("place1")) {
                             val word = findStr(item, "word", "Word", "place1", "Place1")
                             val meaning = findStr(item, "meaning", "Meaning", "place2", "Place2")
@@ -1874,10 +1735,9 @@ class BackupManager(private val context: Context, private val database: AppDatab
                     if (!isDbSampleOrUnrated && dbScore > incomingScore) {
                         // DB course has legitimately higher progress: preserve DB course ID as sole course!
                         globalCourseIdRemap[resCourse.id] = matchInDb.id
-                        val dbWordMap = dbWords.associateBy { it.word.trim().lowercase() }.toMutableMap()
+                        val dbWordMap = dbWords.associateBy { it.id }.toMutableMap()
                         for (rw in incomingCourseWords) {
-                            val normW = rw.word.trim().lowercase()
-                            val existingW = dbWordMap[normW]
+                            val existingW = dbWordMap[rw.id]
                             if (existingW == null) {
                                 finalWordsToInsert.add(rw.copy(courseId = matchInDb.id))
                             } else {
@@ -1922,10 +1782,10 @@ class BackupManager(private val context: Context, private val database: AppDatab
                 finalArticlesToInsert.add(bestArticle.copy(courseId = targetCourseId))
             }
 
-            // Step 4: Question Bank items deduplication by question text
+            // Step 4: Question Bank items deduplication strictly by ID
             val finalQuestionsToInsert = mutableListOf<QuestionBankEntity>()
-            val questionsByText = questionsToInsert.groupBy { it.question.trim().lowercase() }
-            for ((_, qGroup) in questionsByText) {
+            val questionsById = questionsToInsert.groupBy { it.id }
+            for ((_, qGroup) in questionsById) {
                 val bestQ = qGroup.maxByOrNull {
                     (it.explanation ?: "").length + it.opt1.length + it.opt2.length + it.opt3.length + it.opt4.length
                 } ?: qGroup.first()
@@ -1947,7 +1807,7 @@ class BackupManager(private val context: Context, private val database: AppDatab
                 finalWordsToInsert.addAll(safeWords)
             }
 
-            val totalRestoredCount = finalWordsToInsert.size + finalCoursesToInsert.size + finalArticlesToInsert.size + gamesToInsert.size + finalQuestionsToInsert.size + archivedToInsert.size
+            val totalRestoredCount = finalWordsToInsert.size + finalCoursesToInsert.size + finalArticlesToInsert.size + finalQuestionsToInsert.size + archivedToInsert.size
             if (totalRestoredCount > 0) {
                 if (finalCoursesToInsert.isNotEmpty()) {
                     database.courseDao().insertCourses(finalCoursesToInsert)
@@ -1957,9 +1817,6 @@ class BackupManager(private val context: Context, private val database: AppDatab
                 }
                 if (finalArticlesToInsert.isNotEmpty()) {
                     database.articleDao().insertArticles(finalArticlesToInsert)
-                }
-                if (gamesToInsert.isNotEmpty()) {
-                    database.gamePracticeDao().insertItems(gamesToInsert)
                 }
                 if (finalQuestionsToInsert.isNotEmpty()) {
                     database.questionBankDao().insertQuestions(finalQuestionsToInsert)
@@ -2068,10 +1925,9 @@ class BackupManager(private val context: Context, private val database: AppDatab
             notifObj.put("sound_enabled", notifPrefs.getBoolean(NotificationHelper.KEY_SOUND_ENABLED, true))
             sObj.put("notification_preferences", notifObj)
 
-            // Game Stats & Accuracy Ratio Backup (Quiz Test)
+            // Game Stats & Accuracy Ratio Backup
             val cmPrefs = context.getSharedPreferences("column_match_stats_prefs", Context.MODE_PRIVATE)
             val archerPrefs = context.getSharedPreferences("archer_aim_stats_prefs", Context.MODE_PRIVATE)
-            val quizStatsPrefs = context.getSharedPreferences("quiz_test_stats_prefs", Context.MODE_PRIVATE)
             val gameStatsObj = JSONObject()
             gameStatsObj.put("cm_total_matches", cmPrefs.getInt("cm_total_matches", 0))
             gameStatsObj.put("cm_total_mistakes", cmPrefs.getInt("cm_total_mistakes", 0))
@@ -2079,9 +1935,6 @@ class BackupManager(private val context: Context, private val database: AppDatab
             gameStatsObj.put("archer_total_hits", archerPrefs.getInt("archer_total_hits", 0))
             gameStatsObj.put("archer_total_misses", archerPrefs.getInt("archer_total_misses", 0))
             gameStatsObj.put("archer_rounds", archerPrefs.getInt("archer_rounds", 0))
-            gameStatsObj.put("quiz_test_total_answered", quizStatsPrefs.getInt("quiz_test_total_answered", 0))
-            gameStatsObj.put("quiz_test_total_correct", quizStatsPrefs.getInt("quiz_test_total_correct", 0))
-            gameStatsObj.put("quiz_test_attempts", quizStatsPrefs.getInt("quiz_test_attempts", 0))
             sObj.put("game_stats", gameStatsObj)
         } catch (e: Exception) {
             android.util.Log.e("BackupManager", "Error building settings JSON", e)
@@ -2192,13 +2045,6 @@ class BackupManager(private val context: Context, private val database: AppDatab
                 if (gameStatsObj.has("archer_total_misses")) aEditor.putInt("archer_total_misses", gameStatsObj.optInt("archer_total_misses", 0))
                 if (gameStatsObj.has("archer_rounds")) aEditor.putInt("archer_rounds", gameStatsObj.optInt("archer_rounds", 0))
                 aEditor.apply()
-
-                val quizStatsPrefs = context.getSharedPreferences("quiz_test_stats_prefs", Context.MODE_PRIVATE)
-                val qEditor = quizStatsPrefs.edit()
-                if (gameStatsObj.has("quiz_test_total_answered")) qEditor.putInt("quiz_test_total_answered", gameStatsObj.optInt("quiz_test_total_answered", 0))
-                if (gameStatsObj.has("quiz_test_total_correct")) qEditor.putInt("quiz_test_total_correct", gameStatsObj.optInt("quiz_test_total_correct", 0))
-                if (gameStatsObj.has("quiz_test_attempts")) qEditor.putInt("quiz_test_attempts", gameStatsObj.optInt("quiz_test_attempts", 0))
-                qEditor.apply()
             }
         } catch (e: Exception) {
             android.util.Log.e("BackupManager", "Error restoring settings JSON", e)
