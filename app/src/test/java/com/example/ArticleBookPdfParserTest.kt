@@ -127,4 +127,42 @@ class ArticleBookPdfParserTest {
         assertEquals("thedailystar.net", ArticleRichContentParser.deriveWebsiteName(art))
         assertTrue(ArticleRichContentParser.derivePublishedDate(art).isNotBlank())
     }
+
+    @Test
+    fun parseBlocks_filtersNewspaperShareTagsAndEmails_whilePreservingRealContent() {
+        val raw = """
+            She announced plans to examine whether officials had violated ethics.
+
+            NPR does not offer or accept money for coverage or interviews. Anyone who makes such an offer or request is not an NPR employee and does not represent NPR.
+
+            • [trump](https://www.npr.org/tags/123/donald-trump)
+            • Facebook
+            • Flipboard
+            • Email
+
+            Tags: Politics, Courts, Justice Department
+
+            Questions? Email desk@newspaper.com
+
+            She sent an official email to the committee regarding Facebook advertising policy.
+
+            • First key policy recommendation from the panel
+            • Second budget reform item
+        """.trimIndent()
+
+        val blocks = ArticleRichContentParser.parseBlocks(raw)
+
+        assertEquals(4, blocks.size)
+        assertTrue(blocks[0] is ArticleContentBlock.Paragraph)
+        assertTrue((blocks[0] as ArticleContentBlock.Paragraph).text.contains("violated ethics"))
+
+        assertTrue(blocks[1] is ArticleContentBlock.Paragraph)
+        assertTrue((blocks[1] as ArticleContentBlock.Paragraph).text.contains("official email to the committee"))
+
+        assertTrue(blocks[2] is ArticleContentBlock.BulletItem)
+        assertEquals("First key policy recommendation from the panel", (blocks[2] as ArticleContentBlock.BulletItem).text)
+
+        assertTrue(blocks[3] is ArticleContentBlock.BulletItem)
+        assertEquals("Second budget reform item", (blocks[3] as ArticleContentBlock.BulletItem).text)
+    }
 }

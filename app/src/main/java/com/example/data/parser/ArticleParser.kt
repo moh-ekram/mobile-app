@@ -1,5 +1,6 @@
 package com.example.data.parser
 
+import com.example.data.pdf.ArticleRichContentParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -287,8 +288,14 @@ object ArticleParser {
                     ?.takeIf { it.startsWith("http", ignoreCase = true) }
                 ?: ""
 
-            // Strip out navigation, scripts, ads, footers, etc.
-            doc.select("script, style, noscript, nav, header, footer, aside, form, svg, iframe, .ad, .ads, .advertisement, .cookie, .banner, .social-share, .comments, #comments, .menu, .sidebar, .author-bio, [role=navigation], [role=banner]").remove()
+            // Strip out navigation, scripts, ads, footers, share tools, tag clouds, mailto/email widgets, etc.
+            doc.select(
+                "script, style, noscript, nav, header, footer, aside, form, svg, iframe, button, " +
+                    ".ad, .ads, .advertisement, .cookie, .banner, .social-share, .share-tools, .sharebar, .share-links, " +
+                    ".tags, .tag-list, .article-tags, .story-tags, .topics, .topic-list, .comments, #comments, " +
+                    ".menu, .sidebar, .author-bio, .newsletter, .newsletter-signup, .editorial-note, .recirc, .related-stories, " +
+                    "[rel=tag], [role=navigation], [role=banner], [role=complementary], [role=button], a[href^=mailto:]"
+            ).not("html, body, main, article, [role=main]").remove()
 
             // 1. Extract Title
             val rawTitle = doc.select("meta[property=og:title]").attr("content").ifBlank {
@@ -335,16 +342,34 @@ object ArticleParser {
                         if (txt.length >= 12) richBlocks.add("> $txt")
                     }
                     "ul" -> {
-                        val items = el.select("> li").mapNotNull { li ->
+                        val listContextAttr = "${el.className()} ${el.id()} ${el.attr("aria-label")} ${el.parent()?.className().orEmpty()} ${el.parent()?.id().orEmpty()}".lowercase()
+                        val isChromeList = Regex("""\b(share|social|tags?|topics?|tools|actions|toolbar|breadcrumb|newsletter|related)\b""")
+                            .containsMatchIn(listContextAttr)
+                        if (isChromeList) continue
+
+                        val rawItems = el.select("> li").mapNotNull { li ->
                             val t = formatInlineWithLinks(li).trim()
-                            if (t.length >= 3) "• $t" else null
+                            if (t.length >= 2) t else null
                         }
-                        if (items.isNotEmpty()) richBlocks.add(items.joinToString("\n"))
+                        if (rawItems.isEmpty()) continue
+
+                        val shareHits = rawItems.count { ArticleRichContentParser.isShareOrSocialItem(it) }
+                        val allShortLabels = rawItems.all { item ->
+                            val plain = item.replace(Regex("""\[([^\]]+)]\([^)]+\)"""), "$1").trim()
+                            plain.length <= 40 && !plain.endsWith('.') && plain.split(Regex("""\s+""")).size <= 3
+                        }
+                        if (shareHits >= 1 && allShortLabels) continue
+
+                        val cleanItems = rawItems
+                            .filterNot { ArticleRichContentParser.isShareOrSocialItem(it) }
+                            .filter { it.length >= 3 }
+                            .map { "• $it" }
+                        if (cleanItems.isNotEmpty()) richBlocks.add(cleanItems.joinToString("\n"))
                     }
                     "ol" -> {
                         val items = el.select("> li").mapIndexedNotNull { idx, li ->
                             val t = formatInlineWithLinks(li).trim()
-                            if (t.length >= 3) "${idx + 1}. $t" else null
+                            if (t.length >= 3 && !ArticleRichContentParser.isShareOrSocialItem(t)) "${idx + 1}. $t" else null
                         }
                         if (items.isNotEmpty()) richBlocks.add(items.joinToString("\n"))
                     }
@@ -358,6 +383,12 @@ object ArticleParser {
                         }
                     }
                     "p" -> {
+                        val pContextAttr = "${el.className()} ${el.id()} ${el.parent()?.className().orEmpty()}".lowercase()
+                        if (Regex("""\b(share|social|tags?|newsletter|editorial-note|disclaimer|copyright|recirc)\b""")
+                                .containsMatchIn(pContextAttr)
+                        ) {
+                            continue
+                        }
                         // Also check inline image inside paragraph
                         val imgEl = el.select("img").firstOrNull()
                         val imgSrc = extractValidImageUrl(imgEl)
@@ -366,7 +397,7 @@ object ArticleParser {
                             richBlocks.add("![${caption.replace("[", "").replace("]", "")}]($imgSrc)")
                         }
                         val formatted = formatInlineWithLinks(el).trim()
-                        if (formatted.length >= 20) {
+                        if (formatted.length >= 20 && !ArticleRichContentParser.isNoiseParagraph(formatted)) {
                             richBlocks.add(formatted)
                         }
                     }
@@ -432,9 +463,17 @@ object ArticleParser {
                     if (tag == "a") {
                         val linkText = node.text().trim()
                         val href = node.absUrl("href").trim()
+                        val hrefLower = href.lowercase()
+                        val isChromeHref = hrefLower.startsWith("mailto:") ||
+                            hrefLower.contains("javascript:") ||
+                            hrefLower.contains("/tag/") ||
+                            hrefLower.contains("/tags/") ||
+                            hrefLower.contains("facebook.com/sharer") ||
+                            hrefLower.contains("twitter.com/intent") ||
+                            hrefLower.contains("flipboard.com/bookmarklet")
                         if (linkText.isNotBlank() &&
                             href.startsWith("http", ignoreCase = true) &&
-                            !href.contains("javascript:", ignoreCase = true) &&
+                            !isChromeHref &&
                             linkText.length in 2..80
                         ) {
                             sb.append("[").append(linkText).append("](").append(href).append(")")

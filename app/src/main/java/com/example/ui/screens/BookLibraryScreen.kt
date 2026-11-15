@@ -8,35 +8,31 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.MenuBook
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.*
 import com.example.data.sync.DiscoveredDriveFile
 import com.example.data.sync.GoogleDriveSyncService
+import com.example.ui.components.MinimalBottomSheet
+import com.example.ui.components.MinimalPrimaryButton
+import com.example.ui.components.MinimalSecondaryButton
 import com.example.ui.theme.*
 import kotlinx.coroutines.flow.Flow
 
@@ -67,11 +63,12 @@ fun BookLibraryScreen(
 ) {
     val context = LocalContext.current
     val palette = LocalAppPalette.current
+    val accent = appAccentColor(palette.isDark)
 
     var selectedBookForProfile by remember { mutableStateOf<BookEntity?>(null) }
-    var showDriveBooksDialog by remember { mutableStateOf(false) }
+    var showImportMenu by remember { mutableStateOf(false) }
+    var showDriveBooksSheet by remember { mutableStateOf(false) }
 
-    // Keep profile sheet synced with live DB updates
     val liveProfileBook = remember(books, selectedBookForProfile) {
         selectedBookForProfile?.let { sel -> books.find { it.id == sel.id } }
     }
@@ -111,16 +108,18 @@ fun BookLibraryScreen(
             .fillMaxSize()
             .background(palette.background)
     ) {
-        // Minimal Top Bar with Back + Title on left and all Import actions in top-right corner
+        // Minimal Top Bar: Back + Title + Single "+" Import Menu
         Surface(
             color = palette.surface,
+            shadowElevation = AppElevation.None,
+            tonalElevation = AppElevation.None,
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 4.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                        .padding(horizontal = AppSpacing.Xs, vertical = AppSpacing.Xs),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
@@ -131,134 +130,196 @@ fun BookLibraryScreen(
                         IconButton(
                             onClick = onBack,
                             modifier = Modifier
-                                .size(48.dp)
+                                .size(AppSpacing.TouchMin)
                                 .testTag("books_back_button")
                         ) {
                             Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
                                 contentDescription = "Back",
-                                tint = palette.textPrimary
+                                tint = palette.textPrimary,
+                                modifier = Modifier.size(AppIconSize.Toolbar)
                             )
                         }
                         Text(
                             text = "Books",
                             fontFamily = PoppinsFontFamily,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold,
+                            fontSize = AppTypeSize.Headline,
+                            fontWeight = FontWeight.SemiBold,
                             color = palette.textPrimary,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
 
-                    // All Import Buttons in Top-Right Corner
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        TopImportIconAction(
-                            icon = Icons.Default.UploadFile,
-                            label = "File",
-                            contentDescription = "Import Book File",
-                            tint = IndigoPrimary,
-                            onClick = {
-                                filePickerLauncher.launch(
-                                    arrayOf(
-                                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    Box {
+                        IconButton(
+                            onClick = { showImportMenu = true },
+                            modifier = Modifier
+                                .size(AppSpacing.TouchMin)
+                                .testTag("books_import_menu_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Add,
+                                contentDescription = "Import Books",
+                                tint = accent,
+                                modifier = Modifier.size(AppIconSize.Toolbar)
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = showImportMenu,
+                            onDismissRequest = { showImportMenu = false },
+                            containerColor = palette.surface
+                        ) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = "Import File",
+                                        fontFamily = PoppinsFontFamily,
+                                        fontSize = AppTypeSize.Body,
+                                        color = palette.textPrimary
                                     )
-                                )
-                            },
-                            modifier = Modifier.testTag("books_import_file_button")
-                        )
-                        TopImportIconAction(
-                            icon = Icons.Default.CreateNewFolder,
-                            label = "Folder",
-                            contentDescription = "Import Folder",
-                            tint = IndigoPrimary,
-                            onClick = { folderPickerLauncher.launch(null) },
-                            modifier = Modifier.testTag("books_import_folder_button")
-                        )
-                        TopImportIconAction(
-                            icon = Icons.Default.CloudDownload,
-                            label = "Drive",
-                            contentDescription = "Import from Drive",
-                            tint = IndigoPrimary,
-                            onClick = {
-                                showDriveBooksDialog = true
-                                if (driveBooks.isEmpty()) {
-                                    onRefreshDriveBooks(GoogleDriveSyncService.DEFAULT_BOOKS_DRIVE_FOLDER_ID)
-                                }
-                            },
-                            modifier = Modifier.testTag("books_drive_catalog_button")
-                        )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Outlined.UploadFile,
+                                        contentDescription = null,
+                                        tint = accent,
+                                        modifier = Modifier.size(AppIconSize.Inline)
+                                    )
+                                },
+                                onClick = {
+                                    showImportMenu = false
+                                    filePickerLauncher.launch(
+                                        arrayOf(
+                                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                                        )
+                                    )
+                                },
+                                modifier = Modifier.testTag("books_import_file_button")
+                            )
+
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = "Import Folder",
+                                        fontFamily = PoppinsFontFamily,
+                                        fontSize = AppTypeSize.Body,
+                                        color = palette.textPrimary
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Outlined.CreateNewFolder,
+                                        contentDescription = null,
+                                        tint = accent,
+                                        modifier = Modifier.size(AppIconSize.Inline)
+                                    )
+                                },
+                                onClick = {
+                                    showImportMenu = false
+                                    folderPickerLauncher.launch(null)
+                                },
+                                modifier = Modifier.testTag("books_import_folder_button")
+                            )
+
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = "Import from Drive",
+                                        fontFamily = PoppinsFontFamily,
+                                        fontSize = AppTypeSize.Body,
+                                        color = accent
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Outlined.CloudDownload,
+                                        contentDescription = null,
+                                        tint = accent,
+                                        modifier = Modifier.size(AppIconSize.Inline)
+                                    )
+                                },
+                                onClick = {
+                                    showImportMenu = false
+                                    showDriveBooksSheet = true
+                                    if (driveBooks.isEmpty()) {
+                                        onRefreshDriveBooks(GoogleDriveSyncService.DEFAULT_BOOKS_DRIVE_FOLDER_ID)
+                                    }
+                                },
+                                modifier = Modifier.testTag("books_drive_catalog_button")
+                            )
+                        }
                     }
                 }
-                HorizontalDivider(color = palette.border.copy(alpha = 0.55f), thickness = 0.75.dp)
+                HorizontalDivider(
+                    color = palette.border.copy(alpha = 0.65f),
+                    thickness = AppBorder.Hairline
+                )
             }
         }
 
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 16.dp)
                 .testTag("book_library_list"),
-            contentPadding = PaddingValues(top = 14.dp, bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            contentPadding = PaddingValues(top = AppSpacing.Md, bottom = 28.dp)
         ) {
-            // Minimal Offline Book Library section header
             item {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 2.dp, vertical = 2.dp),
+                        .padding(horizontal = AppSpacing.Lg, vertical = AppSpacing.Sm),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "Offline Book Library",
                         fontFamily = PoppinsFontFamily,
-                        fontSize = 14.sp,
+                        fontSize = AppTypeSize.Caption,
                         fontWeight = FontWeight.SemiBold,
-                        color = palette.textPrimary
+                        color = palette.textMuted
                     )
                     if (books.isNotEmpty()) {
                         val bookLabel = if (books.size == 1) "1 book" else "${books.size} books"
                         Text(
                             text = "$bookLabel • ${books.sumOf { it.totalPages }} pages",
                             fontFamily = PoppinsFontFamily,
-                            fontSize = 11.5.sp,
+                            fontSize = AppTypeSize.Micro,
                             color = palette.textMuted
                         )
                     }
                 }
             }
 
-            // Indexing / Import Progress Indicator
             if (isImportingBooks) {
                 item {
                     Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = IndigoLight,
-                        modifier = Modifier.fillMaxWidth()
+                        shape = AppShapes.Medium,
+                        color = accent.copy(alpha = 0.10f),
+                        shadowElevation = AppElevation.None,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = AppSpacing.Lg, vertical = AppSpacing.Sm)
                     ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                                .padding(horizontal = AppSpacing.Md, vertical = AppSpacing.Md),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(AppSpacing.Md)
                         ) {
                             CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
+                                modifier = Modifier.size(AppIconSize.Small),
                                 strokeWidth = 2.dp,
-                                color = IndigoPrimary
+                                color = accent
                             )
                             Text(
                                 text = bookImportStatusText ?: "Indexing book offline...",
                                 fontFamily = PoppinsFontFamily,
-                                fontSize = 12.sp,
+                                fontSize = AppTypeSize.Caption,
                                 fontWeight = FontWeight.Medium,
-                                color = IndigoPrimary,
+                                color = accent,
                                 modifier = Modifier.weight(1f)
                             )
                         }
@@ -266,58 +327,53 @@ fun BookLibraryScreen(
                 }
             }
 
-            // Book List or Minimal Empty State
             if (books.isEmpty()) {
                 item {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 48.dp, horizontal = 16.dp),
+                            .padding(vertical = 56.dp, horizontal = AppSpacing.Xl),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(AppSpacing.Sm)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(52.dp)
-                                .clip(CircleShape)
-                                .background(IndigoLight),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.MenuBook,
-                                contentDescription = null,
-                                tint = IndigoPrimary,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Outlined.MenuBook,
+                            contentDescription = null,
+                            tint = palette.textMuted,
+                            modifier = Modifier.size(AppIconSize.Hero)
+                        )
                         Text(
                             text = "No Offline Books Yet",
                             fontFamily = PoppinsFontFamily,
-                            fontSize = 15.sp,
+                            fontSize = AppTypeSize.Title,
                             fontWeight = FontWeight.SemiBold,
                             color = palette.textPrimary
                         )
                         Text(
-                            text = "Use File, Folder, or Drive in the top-right corner to add books.",
+                            text = "Tap + in the top-right corner to add from File, Folder, or Drive.",
                             fontFamily = PoppinsFontFamily,
-                            fontSize = 12.sp,
+                            fontSize = AppTypeSize.Caption,
                             color = palette.textMuted
                         )
                     }
                 }
             } else {
                 items(books, key = { it.id }) { book ->
-                    BookCardItem(
+                    BookListRowItem(
                         book = book,
-                        onCardClick = { selectedBookForProfile = book },
+                        onRowClick = { selectedBookForProfile = book },
                         onQuickRead = { onOpenReader(book.id, book.lastReadPage) }
+                    )
+                    HorizontalDivider(
+                        thickness = AppBorder.Hairline,
+                        color = palette.border.copy(alpha = 0.55f),
+                        modifier = Modifier.padding(horizontal = AppSpacing.Lg)
                     )
                 }
             }
         }
     }
 
-    // Book Profile Sheet
     if (liveProfileBook != null) {
         val bookToc by observeBookToc(liveProfileBook.id).collectAsState(initial = emptyList())
         val bookBookmarks = remember(bookmarks, liveProfileBook.id) { bookmarks.filter { it.bookId == liveProfileBook.id } }
@@ -346,9 +402,8 @@ fun BookLibraryScreen(
         )
     }
 
-    // Google Drive Books Catalog Modal
-    if (showDriveBooksDialog) {
-        DriveBooksCatalogDialog(
+    if (showDriveBooksSheet) {
+        DriveBooksCatalogSheet(
             books = books,
             driveBooks = driveBooks,
             isRefreshing = isRefreshingDriveBooks,
@@ -356,154 +411,79 @@ fun BookLibraryScreen(
             onRefresh = { url -> onRefreshDriveBooks(url) },
             onDownloadSingle = { onDownloadDriveBook(it) },
             onDownloadAll = { onDownloadAllDriveBooks() },
-            onDismiss = { showDriveBooksDialog = false }
+            onDismiss = { showDriveBooksSheet = false }
         )
     }
 }
 
 @Composable
-private fun TopImportIconAction(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    contentDescription: String,
-    tint: Color,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier
-            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 6.dp, vertical = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = tint,
-            modifier = Modifier.size(19.dp)
-        )
-        Text(
-            text = label,
-            fontFamily = PoppinsFontFamily,
-            fontSize = 9.5.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = tint,
-            maxLines = 1
-        )
-    }
-}
-
-@Composable
-private fun BookCardItem(
+private fun BookListRowItem(
     book: BookEntity,
-    onCardClick: () -> Unit,
+    onRowClick: () -> Unit,
     onQuickRead: () -> Unit
 ) {
     val palette = LocalAppPalette.current
-    val badgeBg = IndigoLight
-    val badgeColor = IndigoPrimary
-    val progressFraction = if (book.totalPages > 0) {
-        (book.lastReadPage.toFloat() / book.totalPages.toFloat()).coerceIn(0f, 1f)
-    } else 0f
-    val progressPct = (progressFraction * 100).toInt()
+    val accent = appAccentColor(palette.isDark)
 
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = palette.surface,
-        border = BorderStroke(1.dp, palette.border.copy(alpha = 0.75f)),
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .clickable { onCardClick() }
-            .testTag("book_card_${book.id}")
+            .clickable(onClick = onRowClick)
+            .padding(start = AppSpacing.Lg, end = AppSpacing.Sm, top = AppSpacing.Md, bottom = AppSpacing.Md)
+            .testTag("book_card_${book.id}"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(AppSpacing.Md)
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(badgeBg),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = book.format.uppercase(),
-                        fontFamily = PoppinsFontFamily,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = badgeColor
-                    )
-                }
+            Text(
+                text = book.title,
+                fontFamily = selectFontForText(book.title),
+                fontSize = AppTypeSize.Title,
+                fontWeight = FontWeight.Medium,
+                color = palette.textPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
 
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(
-                        text = book.title,
-                        fontFamily = selectFontForText(book.title),
-                        fontSize = 14.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = palette.textPrimary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    val metaText = buildList {
-                        if (book.author.isNotBlank()) add(book.author)
-                        if (book.totalPages > 0) add("p.${book.lastReadPage}/${book.totalPages} ($progressPct%)")
-                    }.joinToString(" • ").ifBlank { book.fileName }
-                    Text(
-                        text = if (book.indexStatus == "indexing") "Indexing text..." else metaText,
-                        fontFamily = PoppinsFontFamily,
-                        fontSize = 11.5.sp,
-                        color = if (book.indexStatus == "error") RoseError else palette.textMuted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                TextButton(
-                    onClick = onQuickRead,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    modifier = Modifier
-                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                        .testTag("book_read_btn_${book.id}")
-                ) {
-                    Text(
-                        text = "Read",
-                        fontFamily = PoppinsFontFamily,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 12.5.sp,
-                        color = IndigoPrimary
-                    )
-                }
+            val subtitleText = when (book.indexStatus) {
+                "indexing" -> "Indexing text..."
+                "error" -> "Indexing failed"
+                else -> buildList {
+                    if (book.author.isNotBlank()) add(book.author)
+                    if (book.totalPages > 0) add("${book.totalPages} pages")
+                }.joinToString(" • ").ifBlank { book.fileName }
             }
 
-            if (progressFraction > 0f) {
-                LinearProgressIndicator(
-                    progress = { progressFraction },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(3.dp)
-                        .clip(CircleShape),
-                    color = IndigoPrimary.copy(alpha = 0.85f),
-                    trackColor = palette.border.copy(alpha = 0.5f)
-                )
-            }
+            Text(
+                text = subtitleText,
+                fontFamily = PoppinsFontFamily,
+                fontSize = AppTypeSize.Caption,
+                color = if (book.indexStatus == "error") RoseError else palette.textMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        TextButton(
+            onClick = onQuickRead,
+            modifier = Modifier
+                .defaultMinSize(minWidth = AppSpacing.TouchMin, minHeight = AppSpacing.TouchMin)
+                .testTag("book_read_btn_${book.id}")
+        ) {
+            Text(
+                text = "Read",
+                fontFamily = PoppinsFontFamily,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = AppTypeSize.Body,
+                color = accent
+            )
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BookProfileSheet(
     book: BookEntity,
@@ -518,116 +498,171 @@ private fun BookProfileSheet(
     onDelete: () -> Unit
 ) {
     val palette = LocalAppPalette.current
-    var showEditDialog by remember { mutableStateOf(false) }
-    var showDeleteConfirm by remember { mutableStateOf(false) }
+    val accent = appAccentColor(palette.isDark)
+    var showProfileMenu by remember { mutableStateOf(false) }
+    var showEditSheet by remember { mutableStateOf(false) }
+    var showDeleteSheet by remember { mutableStateOf(false) }
     var showTocList by remember { mutableStateOf(toc.isNotEmpty()) }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = palette.surface,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+    val metaSubtitle = listOf(book.author, book.subject).filter { it.isNotBlank() }.joinToString(" • ").ifBlank { null }
+
+    MinimalBottomSheet(
+        title = book.title,
+        subtitle = metaSubtitle,
+        onDismiss = onDismiss,
+        headerActions = {
+            Box {
+                IconButton(
+                    onClick = { showProfileMenu = true },
+                    modifier = Modifier.size(AppSpacing.TouchMin)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.MoreVert,
+                        contentDescription = "Book Options",
+                        tint = palette.textPrimary,
+                        modifier = Modifier.size(AppIconSize.Toolbar)
+                    )
+                }
+
+                DropdownMenu(
+                    expanded = showProfileMenu,
+                    onDismissRequest = { showProfileMenu = false },
+                    containerColor = palette.surface
+                ) {
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = "Edit",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = AppTypeSize.Body,
+                                color = palette.textPrimary
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Outlined.Edit,
+                                contentDescription = null,
+                                tint = palette.textPrimary,
+                                modifier = Modifier.size(AppIconSize.Inline)
+                            )
+                        },
+                        onClick = {
+                            showProfileMenu = false
+                            showEditSheet = true
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = "Re-index",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = AppTypeSize.Body,
+                                color = palette.textPrimary
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Outlined.Refresh,
+                                contentDescription = null,
+                                tint = palette.textPrimary,
+                                modifier = Modifier.size(AppIconSize.Inline)
+                            )
+                        },
+                        onClick = {
+                            showProfileMenu = false
+                            onReindex()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = "Delete",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = AppTypeSize.Body,
+                                color = RoseError
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Outlined.DeleteOutline,
+                                contentDescription = null,
+                                tint = RoseError,
+                                modifier = Modifier.size(AppIconSize.Inline)
+                            )
+                        },
+                        onClick = {
+                            showProfileMenu = false
+                            showDeleteSheet = true
+                        }
+                    )
+                }
+            }
+        }
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+                .heightIn(max = 480.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.Md)
         ) {
-            // Header
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(AppSpacing.Sm)
             ) {
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = IndigoLight
-                        ) {
-                            Text(
-                                text = book.format,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = IndigoPrimary,
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
-                            )
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = EmeraldLight
-                        ) {
-                            Text(
-                                text = book.sourceType.replaceFirstChar { it.uppercase() },
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = EmeraldSuccess,
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
-                            )
-                        }
-                        val linkIds = remember(book.fileName, book.title) {
-                            com.example.data.search.BookSearchEngine.extractBookLinkIds(book)
-                        }
-                        linkIds.forEach { tag ->
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = IndigoLight
-                            ) {
-                                Text(
-                                    text = "id-$tag",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = IndigoPrimary,
-                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
-                                )
-                            }
-                        }
-                    }
-
+                Surface(shape = AppShapes.Small, color = accent.copy(alpha = 0.12f)) {
                     Text(
-                        text = book.title,
-                        fontFamily = selectFontForText(book.title),
-                        fontSize = 19.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = palette.textPrimary
+                        text = book.format,
+                        fontSize = AppTypeSize.Micro,
+                        fontWeight = FontWeight.SemiBold,
+                        color = accent,
+                        modifier = Modifier.padding(horizontal = AppSpacing.Sm, vertical = 2.dp)
                     )
-                    if (book.author.isNotBlank() || book.subject.isNotBlank()) {
-                        Text(
-                            text = listOf(book.author, book.subject).filter { it.isNotBlank() }.joinToString(" • "),
-                            fontSize = 13.sp,
-                            color = palette.textMuted
-                        )
-                    }
-                    if (book.description.isNotBlank()) {
-                        Text(
-                            text = book.description,
-                            fontSize = 12.5.sp,
-                            color = palette.textMuted
-                        )
-                    }
                 }
-
-                IconButton(onClick = { showEditDialog = true }) {
-                    Icon(Icons.Default.Edit, contentDescription = "Edit Book Profile", tint = IndigoPrimary)
+                Surface(shape = AppShapes.Small, color = EmeraldSuccess.copy(alpha = 0.12f)) {
+                    Text(
+                        text = book.sourceType.replaceFirstChar { it.uppercase() },
+                        fontSize = AppTypeSize.Micro,
+                        fontWeight = FontWeight.Medium,
+                        color = EmeraldSuccess,
+                        modifier = Modifier.padding(horizontal = AppSpacing.Sm, vertical = 2.dp)
+                    )
+                }
+                val linkIds = remember(book.fileName, book.title) {
+                    com.example.data.search.BookSearchEngine.extractBookLinkIds(book)
+                }
+                linkIds.forEach { tag ->
+                    Surface(shape = AppShapes.Small, color = accent.copy(alpha = 0.12f)) {
+                        Text(
+                            text = "id-$tag",
+                            fontSize = AppTypeSize.Micro,
+                            fontWeight = FontWeight.SemiBold,
+                            color = accent,
+                            modifier = Modifier.padding(horizontal = AppSpacing.Sm, vertical = 2.dp)
+                        )
+                    }
                 }
             }
 
-            // Metadata Grid
+            if (book.description.isNotBlank()) {
+                Text(
+                    text = book.description,
+                    fontSize = AppTypeSize.Caption,
+                    color = palette.textMuted
+                )
+            }
+
             Surface(
-                shape = RoundedCornerShape(14.dp),
+                shape = AppShapes.Medium,
                 color = palette.background,
-                border = BorderStroke(1.dp, palette.border),
+                border = BorderStroke(AppBorder.Hairline, palette.border),
+                shadowElevation = AppElevation.None,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(12.dp),
+                        .padding(AppSpacing.Md),
                     horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
                     ProfileMetric("Pages", "${book.totalPages}")
@@ -638,30 +673,35 @@ private fun BookProfileSheet(
                 }
             }
 
-            // Ebook Reader Launch Button
-            Button(
+            // Single primary action button: Read
+            MinimalPrimaryButton(
+                text = "Read Book",
                 onClick = { onOpenReader(book.lastReadPage) },
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                accentColor = IndigoPrimary,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp)
-                    .testTag("profile_open_ebook_btn")
-            ) {
-                Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Read Book", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-            }
+                    .testTag("profile_open_ebook_btn"),
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Outlined.MenuBook,
+                        contentDescription = null,
+                        modifier = Modifier.size(AppIconSize.Inline)
+                    )
+                }
+            )
 
-            // TOC Preview
             if (toc.isNotEmpty()) {
                 Surface(
-                    shape = RoundedCornerShape(14.dp),
+                    shape = AppShapes.Medium,
                     color = palette.background,
-                    border = BorderStroke(1.dp, palette.border),
+                    border = BorderStroke(AppBorder.Hairline, palette.border),
+                    shadowElevation = AppElevation.None,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Column(
+                        modifier = Modifier.padding(AppSpacing.Md),
+                        verticalArrangement = Arrangement.spacedBy(AppSpacing.Sm)
+                    ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -671,32 +711,33 @@ private fun BookProfileSheet(
                         ) {
                             Text(
                                 text = "Table of Contents (${toc.size})",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
+                                fontSize = AppTypeSize.Body,
+                                fontWeight = FontWeight.SemiBold,
                                 color = palette.textPrimary
                             )
                             Icon(
-                                imageVector = if (showTocList) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                imageVector = if (showTocList) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown,
                                 contentDescription = "Toggle TOC",
-                                tint = palette.textMuted
+                                tint = palette.textMuted,
+                                modifier = Modifier.size(AppIconSize.Inline)
                             )
                         }
                         AnimatedVisibility(visible = showTocList) {
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.Xs)) {
                                 toc.take(15).forEach { entry ->
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clip(RoundedCornerShape(8.dp))
+                                            .clip(AppShapes.Small)
                                             .clickable { onOpenReader(entry.pageNumber) }
-                                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                                            .padding(horizontal = AppSpacing.Sm, vertical = AppSpacing.Sm),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
                                             text = entry.title,
                                             fontFamily = selectFontForText(entry.title),
-                                            fontSize = 12.5.sp,
+                                            fontSize = AppTypeSize.Caption,
                                             color = palette.textPrimary,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
@@ -706,9 +747,9 @@ private fun BookProfileSheet(
                                         )
                                         Text(
                                             text = "p.${entry.pageNumber}",
-                                            fontSize = 11.sp,
+                                            fontSize = AppTypeSize.Micro,
                                             fontWeight = FontWeight.SemiBold,
-                                            color = IndigoPrimary
+                                            color = accent
                                         )
                                     }
                                 }
@@ -717,130 +758,153 @@ private fun BookProfileSheet(
                     }
                 }
             }
-
-            // Maintenance actions (Re-index & Delete)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                OutlinedButton(
-                    onClick = onReindex,
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .heightIn(min = 48.dp)
-                ) {
-                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Re-index", fontSize = 12.sp)
-                }
-
-                OutlinedButton(
-                    onClick = { showDeleteConfirm = true },
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = RoseError),
-                    border = BorderStroke(1.dp, RoseBorder),
-                    modifier = Modifier
-                        .weight(1f)
-                        .heightIn(min = 48.dp)
-                ) {
-                    Icon(Icons.Default.DeleteOutline, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Delete", fontSize = 12.sp)
-                }
-            }
         }
     }
 
-    if (showEditDialog) {
-        var editTitle by remember { mutableStateOf(book.title) }
-        var editAuthor by remember { mutableStateOf(book.author) }
-        var editSubject by remember { mutableStateOf(book.subject) }
-        var editDesc by remember { mutableStateOf(book.description) }
-
-        AlertDialog(
-            onDismissRequest = { showEditDialog = false },
-            title = { Text("Edit Book Profile", fontWeight = FontWeight.Bold, fontSize = 17.sp) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
-                        value = editTitle,
-                        onValueChange = { editTitle = it },
-                        label = { Text("Book Title") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = editAuthor,
-                        onValueChange = { editAuthor = it },
-                        label = { Text("Author") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = editSubject,
-                        onValueChange = { editSubject = it },
-                        label = { Text("Subject / Category") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = editDesc,
-                        onValueChange = { editDesc = it },
-                        label = { Text("Description / Notes") },
-                        maxLines = 3,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
+    if (showEditSheet) {
+        EditBookProfileSheet(
+            book = book,
+            onSave = { t, a, s, d ->
+                onUpdateMetadata(t, a, s, d)
+                showEditSheet = false
             },
-            confirmButton = {
-                Button(onClick = {
-                    onUpdateMetadata(editTitle, editAuthor, editSubject, editDesc)
-                    showEditDialog = false
-                }) {
-                    Text("Save")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showEditDialog = false }) { Text("Cancel") }
-            }
+            onDismiss = { showEditSheet = false }
         )
     }
 
-    if (showDeleteConfirm) {
-        AlertDialog(
-            onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("Remove Offline Book?") },
-            text = { Text("Delete '${book.title}' and its offline file, bookmarks, highlights, and notes from this device?") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showDeleteConfirm = false
-                        onDelete()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = RoseError)
-                ) {
-                    Text("Delete")
-                }
+    if (showDeleteSheet) {
+        ConfirmDeleteBookSheet(
+            bookTitle = book.title,
+            onConfirm = {
+                showDeleteSheet = false
+                onDelete()
             },
-            dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
-            }
+            onDismiss = { showDeleteSheet = false }
         )
+    }
+}
+
+@Composable
+private fun EditBookProfileSheet(
+    book: BookEntity,
+    onSave: (title: String, author: String, subject: String, description: String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var editTitle by remember { mutableStateOf(book.title) }
+    var editAuthor by remember { mutableStateOf(book.author) }
+    var editSubject by remember { mutableStateOf(book.subject) }
+    var editDesc by remember { mutableStateOf(book.description) }
+
+    MinimalBottomSheet(
+        title = "Edit Book Profile",
+        onDismiss = onDismiss
+    ) {
+        OutlinedTextField(
+            value = editTitle,
+            onValueChange = { editTitle = it },
+            label = { Text("Book Title", fontSize = AppTypeSize.Caption) },
+            singleLine = true,
+            shape = AppShapes.Medium,
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = editAuthor,
+            onValueChange = { editAuthor = it },
+            label = { Text("Author", fontSize = AppTypeSize.Caption) },
+            singleLine = true,
+            shape = AppShapes.Medium,
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = editSubject,
+            onValueChange = { editSubject = it },
+            label = { Text("Subject / Category", fontSize = AppTypeSize.Caption) },
+            singleLine = true,
+            shape = AppShapes.Medium,
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = editDesc,
+            onValueChange = { editDesc = it },
+            label = { Text("Description / Notes", fontSize = AppTypeSize.Caption) },
+            maxLines = 3,
+            shape = AppShapes.Medium,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(AppSpacing.Sm)
+        ) {
+            MinimalSecondaryButton(
+                text = "Cancel",
+                onClick = onDismiss,
+                modifier = Modifier.weight(1f)
+            )
+            MinimalPrimaryButton(
+                text = "Save",
+                onClick = { onSave(editTitle, editAuthor, editSubject, editDesc) },
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ConfirmDeleteBookSheet(
+    bookTitle: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val palette = LocalAppPalette.current
+    MinimalBottomSheet(
+        title = "Remove Offline Book?",
+        onDismiss = onDismiss
+    ) {
+        Text(
+            text = "Delete '$bookTitle' and its offline file, bookmarks, highlights, and notes from this device?",
+            fontSize = AppTypeSize.Body,
+            color = palette.textMuted
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(AppSpacing.Sm)
+        ) {
+            MinimalSecondaryButton(
+                text = "Cancel",
+                onClick = onDismiss,
+                modifier = Modifier.weight(1f)
+            )
+            MinimalPrimaryButton(
+                text = "Delete",
+                onClick = onConfirm,
+                accentColor = RoseError,
+                modifier = Modifier.weight(1f)
+            )
+        }
     }
 }
 
 @Composable
 private fun ProfileMetric(label: String, value: String) {
     val palette = LocalAppPalette.current
+    val accent = appAccentColor(palette.isDark)
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(text = value, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = IndigoPrimary)
-        Text(text = label, fontSize = 10.sp, color = palette.textMuted)
+        Text(
+            text = value,
+            fontSize = AppTypeSize.Body,
+            fontWeight = FontWeight.SemiBold,
+            color = accent
+        )
+        Text(
+            text = label,
+            fontSize = AppTypeSize.Micro,
+            color = palette.textMuted
+        )
     }
 }
 
 @Composable
-private fun DriveBooksCatalogDialog(
+private fun DriveBooksCatalogSheet(
     books: List<BookEntity>,
     driveBooks: List<DiscoveredDriveFile>,
     isRefreshing: Boolean,
@@ -851,182 +915,185 @@ private fun DriveBooksCatalogDialog(
     onDismiss: () -> Unit
 ) {
     val palette = LocalAppPalette.current
+    val accent = appAccentColor(palette.isDark)
     var folderUrlInput by remember { mutableStateOf(GoogleDriveSyncService.DEFAULT_BOOKS_DRIVE_FOLDER_URL) }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+    MinimalBottomSheet(
+        title = "Google Drive Library",
+        subtitle = "Download DOCX eBooks for offline study",
+        onDismiss = onDismiss
     ) {
-        Surface(
-            shape = RoundedCornerShape(22.dp),
-            color = palette.surface,
-            modifier = Modifier
-                .fillMaxWidth(0.94f)
-                .heightIn(max = 600.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(AppSpacing.Sm),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(
-                modifier = Modifier.padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+            OutlinedTextField(
+                value = folderUrlInput,
+                onValueChange = { folderUrlInput = it },
+                label = { Text("Drive Folder URL", fontSize = AppTypeSize.Micro) },
+                singleLine = true,
+                shape = AppShapes.Medium,
+                modifier = Modifier.weight(1f)
+            )
+            IconButton(
+                onClick = { onRefresh(folderUrlInput) },
+                enabled = !isRefreshing,
+                modifier = Modifier
+                    .size(AppSpacing.TouchMin)
+                    .clip(AppShapes.Medium)
+                    .background(accent.copy(alpha = 0.12f))
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Google Drive Book Library",
-                            fontFamily = PoppinsFontFamily,
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = palette.textPrimary
-                        )
-                        Text(
-                            text = "Download DOCX eBooks for offline study",
-                            fontSize = 11.5.sp,
-                            color = palette.textMuted
-                        )
-                    }
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Close")
-                    }
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    OutlinedTextField(
-                        value = folderUrlInput,
-                        onValueChange = { folderUrlInput = it },
-                        label = { Text("Drive Folder URL", fontSize = 11.sp) },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
+                if (isRefreshing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(AppIconSize.Inline),
+                        strokeWidth = 2.dp,
+                        color = accent
                     )
-                    IconButton(
-                        onClick = { onRefresh(folderUrlInput) },
-                        enabled = !isRefreshing,
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(IndigoLight)
-                    ) {
-                        if (isRefreshing) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(Icons.Default.Refresh, contentDescription = "Scan Folder", tint = IndigoPrimary)
-                        }
-                    }
+                } else {
+                    Icon(
+                        imageVector = Icons.Outlined.Refresh,
+                        contentDescription = "Scan Folder",
+                        tint = accent,
+                        modifier = Modifier.size(AppIconSize.Toolbar)
+                    )
                 }
+            }
+        }
 
-                if (driveBooks.isNotEmpty()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "${driveBooks.size} book(s) found",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = palette.textMuted
-                        )
-                        TextButton(onClick = onDownloadAll) {
-                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Download All", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        }
-                    }
+        if (driveBooks.isNotEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${driveBooks.size} book(s) found",
+                    fontSize = AppTypeSize.Caption,
+                    fontWeight = FontWeight.Medium,
+                    color = palette.textMuted
+                )
+                TextButton(onClick = onDownloadAll) {
+                    Icon(
+                        imageVector = Icons.Outlined.Download,
+                        contentDescription = null,
+                        tint = accent,
+                        modifier = Modifier.size(AppIconSize.Small)
+                    )
+                    Spacer(modifier = Modifier.width(AppSpacing.Xs))
+                    Text(
+                        text = "Download All",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = AppTypeSize.Caption,
+                        color = accent
+                    )
                 }
+            }
+        }
 
-                if (isRefreshing && driveBooks.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(180.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            CircularProgressIndicator(color = IndigoPrimary)
-                            Text("Scanning Google Drive folder...", fontSize = 12.sp, color = palette.textMuted)
-                        }
-                    }
-                } else if (driveBooks.isEmpty()) {
+        if (isRefreshing && driveBooks.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(160.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(AppSpacing.Sm)
+                ) {
+                    CircularProgressIndicator(color = accent)
+                    Text(
+                        text = "Scanning Google Drive folder...",
+                        fontSize = AppTypeSize.Caption,
+                        color = palette.textMuted
+                    )
+                }
+            }
+        } else if (driveBooks.isEmpty()) {
+            Surface(
+                shape = AppShapes.Medium,
+                color = palette.background,
+                shadowElevation = AppElevation.None,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(AppSpacing.Xl),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(AppSpacing.Sm)
+                ) {
+                    Text(
+                        text = "No DOCX eBooks discovered yet",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = AppTypeSize.Body,
+                        color = palette.textPrimary
+                    )
+                    Text(
+                        text = "Verify folder sharing is set to 'Anyone with the link' and tap Refresh.",
+                        fontSize = AppTypeSize.Caption,
+                        color = palette.textMuted
+                    )
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 320.dp),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.Sm)
+            ) {
+                items(driveBooks, key = { it.fileId }) { item ->
+                    val isDownloading = item.fileId in downloadingIds
+                    val isSavedOffline = books.any { it.sourceRef == "drive:${item.fileId}" }
                     Surface(
-                        shape = RoundedCornerShape(14.dp),
+                        shape = AppShapes.Medium,
                         color = palette.background,
+                        border = BorderStroke(AppBorder.Hairline, palette.border),
+                        shadowElevation = AppElevation.None,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(
-                            modifier = Modifier.padding(20.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(AppSpacing.Md),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("No DOCX eBooks discovered yet", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                            Text(
-                                text = "Verify folder sharing is set to 'Anyone with the link' and tap Refresh, or use File / Folder import from your device.",
-                                fontSize = 11.5.sp,
-                                color = palette.textMuted
-                            )
-                        }
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f, fill = false)
-                            .heightIn(max = 320.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(driveBooks, key = { it.fileId }) { item ->
-                            val isDownloading = item.fileId in downloadingIds
-                            val isSavedOffline = books.any { it.sourceRef == "drive:${item.fileId}" }
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = palette.background,
-                                border = BorderStroke(1.dp, palette.border),
-                                modifier = Modifier.fillMaxWidth()
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = item.title,
+                                    fontFamily = selectFontForText(item.title),
+                                    fontSize = AppTypeSize.Body,
+                                    fontWeight = FontWeight.Medium,
+                                    color = palette.textPrimary,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = if (isSavedOffline) "Saved offline" else "Tap to download offline",
+                                    fontSize = AppTypeSize.Micro,
+                                    color = if (isSavedOffline) EmeraldSuccess else palette.textMuted
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(AppSpacing.Sm))
+                            IconButton(
+                                onClick = { onDownloadSingle(item) },
+                                enabled = !isDownloading,
+                                modifier = Modifier.size(AppSpacing.TouchMin)
                             ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(12.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = item.title,
-                                            fontFamily = selectFontForText(item.title),
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = palette.textPrimary,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = if (isSavedOffline) "Saved offline" else "Tap to download offline",
-                                            fontSize = 11.sp,
-                                            color = if (isSavedOffline) EmeraldSuccess else palette.textMuted
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    IconButton(
-                                        onClick = { onDownloadSingle(item) },
-                                        enabled = !isDownloading,
-                                        modifier = Modifier.size(48.dp)
-                                    ) {
-                                        if (isDownloading) {
-                                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                                        } else {
-                                            Icon(
-                                                imageVector = if (isSavedOffline) Icons.Default.DownloadDone else Icons.Default.CloudDownload,
-                                                contentDescription = "Download ${item.title}",
-                                                tint = if (isSavedOffline) EmeraldSuccess else IndigoPrimary
-                                            )
-                                        }
-                                    }
+                                if (isDownloading) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(AppIconSize.Inline),
+                                        strokeWidth = 2.dp,
+                                        color = accent
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = if (isSavedOffline) Icons.Outlined.DownloadDone else Icons.Outlined.CloudDownload,
+                                        contentDescription = "Download ${item.title}",
+                                        tint = if (isSavedOffline) EmeraldSuccess else accent,
+                                        modifier = Modifier.size(AppIconSize.Toolbar)
+                                    )
                                 }
                             }
                         }

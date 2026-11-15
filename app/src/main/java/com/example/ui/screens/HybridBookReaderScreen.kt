@@ -1,25 +1,39 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.*
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -28,20 +42,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.*
 import com.example.data.search.BookSearchEngine
+import com.example.ui.components.MinimalBottomSheet
+import com.example.ui.components.MinimalChip
+import com.example.ui.components.MinimalPrimaryButton
+import com.example.ui.components.MinimalSecondaryButton
 import com.example.ui.theme.*
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
-
-private val HIGHLIGHT_PALETTE = listOf(
-    "#FDE047" to Color(0xFFFDE047), // Warm Yellow
-    "#86EFAC" to Color(0xFF86EFAC), // Mint Green
-    "#7DD3FC" to Color(0xFF7DD3FC), // Sky Blue
-    "#FDA4AF" to Color(0xFFFDA4AF)  // Soft Rose
-)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,7 +74,6 @@ fun HybridBookReaderScreen(
     onSearchInBook: suspend (bookId: String, query: String) -> List<BookPassageMatch>,
     onBack: () -> Unit
 ) {
-    val scope = rememberCoroutineScope()
     val totalPages = maxOf(book.totalPages, pages.size, 1)
 
     var currentPage by remember(initialTarget.bookId) {
@@ -85,7 +93,6 @@ fun HybridBookReaderScreen(
         )
     }
 
-    // Re-clamp when target changes inside reader
     LaunchedEffect(
         initialTarget.pageNumber,
         initialTarget.highlightQuery,
@@ -99,7 +106,6 @@ fun HybridBookReaderScreen(
         }
     }
 
-    // Persist reading position in Ebook mode
     LaunchedEffect(currentPage) {
         onUpdateReadingProgress(book.id, currentPage)
     }
@@ -108,10 +114,16 @@ fun HybridBookReaderScreen(
         onBack()
     }
 
+    var barsVisible by remember { mutableStateOf(true) }
+    LaunchedEffect(currentPage) {
+        barsVisible = true
+    }
+
+    var showOverflowMenu by remember { mutableStateOf(false) }
     var showContentsSheet by remember { mutableStateOf(false) }
     var showSearchSheet by remember { mutableStateOf(false) }
     var showReaderSettingsSheet by remember { mutableStateOf(false) }
-    var showJumpPageDialog by remember { mutableStateOf(false) }
+    var showJumpPageSheet by remember { mutableStateOf(false) }
     var annotatePrefillText by remember { mutableStateOf<String?>(null) }
     var editingNote by remember { mutableStateOf<BookNoteEntity?>(null) }
 
@@ -119,6 +131,7 @@ fun HybridBookReaderScreen(
         pages.find { it.pageNumber == currentPage }
     }
     val pageText = currentPageEntity?.textContent.orEmpty()
+    val chapterTitle = currentPageEntity?.chapterTitle.orEmpty()
     val isCurrentBookmarked = remember(bookmarks, currentPage) {
         bookmarks.any { it.pageNumber == currentPage }
     }
@@ -129,150 +142,268 @@ fun HybridBookReaderScreen(
         notes.filter { it.pageNumber == currentPage }
     }
 
-    // Resolve Ebook theme palette
-    val (bgColor, inkColor, subtleSurface, accentColor) = when (ebookPreferences.themeKey) {
-        "sepia" -> listOf(Color(0xFFFBF4E4), Color(0xFF433422), Color(0xFFF3E7CF), Color(0xFF9A5B13))
-        "mist" -> listOf(Color(0xFFF1F5F9), Color(0xFF0F172A), Color(0xFFE2E8F0), IndigoPrimary)
-        "dark" -> listOf(Color(0xFF0F172A), Color(0xFFE2E8F0), Color(0xFF1E293B), Color(0xFFA5B4FC))
-        else -> listOf(Color.White, SlateText, Color(0xFFF8FAFC), IndigoPrimary)
+    val readerTheme = remember(ebookPreferences.themeKey) {
+        ReaderThemes.resolve(ebookPreferences.themeKey)
     }
-    val isDarkTheme = ebookPreferences.themeKey == "dark"
-    val chromeBg = if (isDarkTheme) Color(0xFF151C2C) else Color.White
-    val chromeText = if (isDarkTheme) Color(0xFFF1F5F9) else SlateText
-    val chromeMuted = if (isDarkTheme) Color(0xFF94A3B8) else SlateMuted
 
-    Scaffold(
-        topBar = {
+    val scrollBarsConnection = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (available.y < -12f) {
+                    barsVisible = false
+                } else if (available.y > 12f) {
+                    barsVisible = true
+                }
+                return Offset.Zero
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(readerTheme.background)
+            .nestedScroll(scrollBarsConnection)
+    ) {
+        val isTargetPageForHighlight = activeHighlightPage == null || activeHighlightPage == currentPage
+        EbookPageContent(
+            pageNumber = currentPage,
+            chapterTitle = chapterTitle,
+            pageText = pageText,
+            ebookPrefs = ebookPreferences,
+            readerTheme = readerTheme,
+            userHighlights = currentPageHighlights,
+            pageNotes = currentPageNotes,
+            searchHighlightQuery = if (isTargetPageForHighlight) activeHighlightQuery else null,
+            highlightParagraph = if (isTargetPageForHighlight) activeHighlightParagraph else null,
+            onClearSearchHighlight = {
+                activeHighlightQuery = null
+                activeHighlightParagraph = null
+                activeHighlightPage = null
+            },
+            onParagraphClick = { para -> annotatePrefillText = para },
+            onDeleteNote = onDeleteNote,
+            onEditNote = { editingNote = it }
+        )
+
+        // Single-row minimal top bar (hides on scroll down, returns on scroll up)
+        AnimatedVisibility(
+            visible = barsVisible,
+            enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.TopCenter)
+        ) {
             Surface(
-                color = chromeBg,
-                shadowElevation = 2.dp
+                color = readerTheme.chromeBg,
+                shadowElevation = AppElevation.None,
+                tonalElevation = AppElevation.None,
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.statusBarsPadding()) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 6.dp, vertical = 6.dp),
+                            .padding(horizontal = AppSpacing.Xs, vertical = AppSpacing.Xs),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
+                        IconButton(
+                            onClick = onBack,
+                            modifier = Modifier.size(AppSpacing.TouchMin)
+                        ) {
                             Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
                                 contentDescription = "Back",
-                                tint = chromeText
+                                tint = readerTheme.chromeText,
+                                modifier = Modifier.size(AppIconSize.Toolbar)
                             )
                         }
 
-                        Column(modifier = Modifier.weight(1f)) {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = AppSpacing.Xs),
+                            verticalArrangement = Arrangement.spacedBy(1.dp)
+                        ) {
                             Text(
                                 text = book.title,
                                 fontFamily = selectFontForText(book.title),
-                                fontSize = 14.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = chromeText,
+                                fontSize = AppTypeSize.Title,
+                                fontWeight = FontWeight.SemiBold,
+                                color = readerTheme.chromeText,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            Text(
-                                text = buildString {
-                                    append("Page $currentPage of $totalPages")
-                                    if (!currentPageEntity?.chapterTitle.isNullOrBlank()) {
-                                        append(" • ${currentPageEntity?.chapterTitle}")
-                                    }
-                                },
-                                fontSize = 11.sp,
-                                color = chromeMuted,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(8.dp))
-                    }
-
-                    // Secondary Tool Row (Search, Bookmark, TOC/Notes, Reader Settings)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 2.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                            IconButton(
-                                onClick = { showContentsSheet = true },
-                                modifier = Modifier.size(48.dp).testTag("reader_contents_btn")
-                            ) {
-                                Icon(Icons.Default.Toc, contentDescription = "TOC, Bookmarks & Notes", tint = chromeText)
-                            }
-                            IconButton(
-                                onClick = { showSearchSheet = true },
-                                modifier = Modifier.size(48.dp).testTag("reader_search_btn")
-                            ) {
-                                Icon(Icons.Default.Search, contentDescription = "Search Book", tint = chromeText)
-                            }
-                            IconButton(
-                                onClick = {
-                                    val snippet = pageText.lineSequence().firstOrNull { it.isNotBlank() }?.take(120) ?: ""
-                                    val title = currentPageEntity?.chapterTitle?.takeIf { it.isNotBlank() } ?: "Page $currentPage"
-                                    onToggleBookmark(book.id, currentPage, title, snippet)
-                                },
-                                modifier = Modifier.size(48.dp).testTag("reader_bookmark_btn")
-                            ) {
-                                Icon(
-                                    imageVector = if (isCurrentBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                                    contentDescription = "Toggle Bookmark",
-                                    tint = if (isCurrentBookmarked) IndigoPrimary else chromeText
+                            if (chapterTitle.isNotBlank()) {
+                                Text(
+                                    text = chapterTitle,
+                                    fontFamily = selectFontForText(chapterTitle),
+                                    fontSize = AppTypeSize.Micro,
+                                    color = readerTheme.chromeMuted,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
 
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        IconButton(
+                            onClick = { showSearchSheet = true },
+                            modifier = Modifier
+                                .size(AppSpacing.TouchMin)
+                                .testTag("reader_search_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Search,
+                                contentDescription = "Search Book",
+                                tint = readerTheme.chromeText,
+                                modifier = Modifier.size(AppIconSize.Toolbar)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = {
+                                val snippet = pageText.lineSequence().firstOrNull { it.isNotBlank() }?.take(120) ?: ""
+                                val title = chapterTitle.takeIf { it.isNotBlank() } ?: "Page $currentPage"
+                                onToggleBookmark(book.id, currentPage, title, snippet)
+                            },
+                            modifier = Modifier
+                                .size(AppSpacing.TouchMin)
+                                .testTag("reader_bookmark_btn")
+                        ) {
+                            Icon(
+                                imageVector = if (isCurrentBookmarked) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                                contentDescription = "Toggle Bookmark",
+                                tint = if (isCurrentBookmarked) readerTheme.accent else readerTheme.chromeText,
+                                modifier = Modifier.size(AppIconSize.Toolbar)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = { showReaderSettingsSheet = true },
+                            modifier = Modifier
+                                .size(AppSpacing.TouchMin)
+                                .testTag("reader_typography_btn")
+                        ) {
+                            Text(
+                                text = "Aa",
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = AppTypeSize.Title,
+                                fontWeight = FontWeight.SemiBold,
+                                color = readerTheme.chromeText
+                            )
+                        }
+
+                        Box {
                             IconButton(
-                                onClick = {
-                                    annotatePrefillText = activeHighlightQuery
-                                        ?: pageText.trim().take(180)
-                                },
-                                modifier = Modifier.size(48.dp).testTag("reader_annotate_btn")
+                                onClick = { showOverflowMenu = true },
+                                modifier = Modifier
+                                    .size(AppSpacing.TouchMin)
+                                    .testTag("reader_more_btn")
                             ) {
-                                Icon(Icons.Default.EditNote, contentDescription = "Add Highlight or Note", tint = chromeText)
+                                Icon(
+                                    imageVector = Icons.Outlined.MoreVert,
+                                    contentDescription = "More Reading Options",
+                                    tint = readerTheme.chromeText,
+                                    modifier = Modifier.size(AppIconSize.Toolbar)
+                                )
                             }
 
-                            IconButton(
-                                onClick = { showReaderSettingsSheet = true },
-                                modifier = Modifier.size(48.dp).testTag("reader_typography_btn")
+                            DropdownMenu(
+                                expanded = showOverflowMenu,
+                                onDismissRequest = { showOverflowMenu = false },
+                                containerColor = readerTheme.chromeBg
                             ) {
-                                Icon(Icons.Default.TextFields, contentDescription = "Ebook Appearance", tint = IndigoPrimary)
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = "Contents & Notes",
+                                            fontFamily = PoppinsFontFamily,
+                                            fontSize = AppTypeSize.Body,
+                                            color = readerTheme.chromeText
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Toc,
+                                            contentDescription = null,
+                                            tint = readerTheme.chromeText,
+                                            modifier = Modifier.size(AppIconSize.Inline)
+                                        )
+                                    },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        showContentsSheet = true
+                                    },
+                                    modifier = Modifier.testTag("reader_contents_btn")
+                                )
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = "Add Highlight or Note",
+                                            fontFamily = PoppinsFontFamily,
+                                            fontSize = AppTypeSize.Body,
+                                            color = readerTheme.chromeText
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Outlined.EditNote,
+                                            contentDescription = null,
+                                            tint = readerTheme.chromeText,
+                                            modifier = Modifier.size(AppIconSize.Inline)
+                                        )
+                                    },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        annotatePrefillText = activeHighlightQuery ?: pageText.trim().take(180)
+                                    },
+                                    modifier = Modifier.testTag("reader_annotate_btn")
+                                )
                             }
                         }
                     }
+                    HorizontalDivider(
+                        thickness = AppBorder.Hairline,
+                        color = readerTheme.chromeBorder
+                    )
                 }
             }
-        },
-        bottomBar = {
+        }
+
+        // Lightweight bottom bar (hairline top divider, no shadow, compact arrows/slider, plain page text)
+        AnimatedVisibility(
+            visible = barsVisible,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter)
+        ) {
             Surface(
-                color = chromeBg,
-                shadowElevation = 4.dp
+                color = readerTheme.chromeBg,
+                shadowElevation = AppElevation.None,
+                tonalElevation = AppElevation.None,
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    HorizontalDivider(
+                        thickness = AppBorder.Hairline,
+                        color = readerTheme.chromeBorder
+                    )
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .padding(horizontal = AppSpacing.Sm, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         IconButton(
                             onClick = { if (currentPage > 1) currentPage-- },
                             enabled = currentPage > 1,
-                            modifier = Modifier.size(48.dp)
+                            modifier = Modifier.size(AppSpacing.TouchMin)
                         ) {
                             Icon(
-                                Icons.AutoMirrored.Filled.ArrowBack,
+                                imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
                                 contentDescription = "Previous Page",
-                                tint = if (currentPage > 1) chromeText else chromeMuted.copy(alpha = 0.4f)
+                                tint = if (currentPage > 1) readerTheme.chromeText else readerTheme.chromeMuted.copy(alpha = 0.4f),
+                                modifier = Modifier.size(AppIconSize.Inline)
                             )
                         }
 
@@ -283,95 +414,68 @@ fun HybridBookReaderScreen(
                                 valueRange = 1f..totalPages.toFloat(),
                                 modifier = Modifier
                                     .weight(1f)
-                                    .padding(horizontal = 8.dp),
+                                    .padding(horizontal = AppSpacing.Sm),
                                 colors = SliderDefaults.colors(
-                                    thumbColor = IndigoPrimary,
-                                    activeTrackColor = IndigoPrimary
+                                    thumbColor = readerTheme.accent,
+                                    activeTrackColor = readerTheme.accent,
+                                    inactiveTrackColor = readerTheme.chromeBorder
                                 )
                             )
                         } else {
                             Spacer(modifier = Modifier.weight(1f))
                         }
 
-                        Surface(
-                            onClick = { showJumpPageDialog = true },
-                            shape = RoundedCornerShape(8.dp),
-                            color = IndigoLight,
-                            modifier = Modifier.padding(horizontal = 4.dp)
+                        Box(
+                            modifier = Modifier
+                                .minimumInteractiveComponentSize()
+                                .clip(AppShapes.Small)
+                                .clickable { showJumpPageSheet = true }
+                                .padding(horizontal = AppSpacing.Sm, vertical = AppSpacing.Xs),
+                            contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = "$currentPage/$totalPages",
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = IndigoPrimary,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                fontFamily = PoppinsFontFamily,
+                                fontSize = AppTypeSize.Caption,
+                                fontWeight = FontWeight.Medium,
+                                color = readerTheme.chromeMuted
                             )
                         }
 
                         IconButton(
                             onClick = { if (currentPage < totalPages) currentPage++ },
                             enabled = currentPage < totalPages,
-                            modifier = Modifier.size(48.dp)
+                            modifier = Modifier.size(AppSpacing.TouchMin)
                         ) {
                             Icon(
-                                Icons.AutoMirrored.Filled.ArrowForward,
+                                imageVector = Icons.AutoMirrored.Outlined.ArrowForward,
                                 contentDescription = "Next Page",
-                                tint = if (currentPage < totalPages) chromeText else chromeMuted.copy(alpha = 0.4f)
+                                tint = if (currentPage < totalPages) readerTheme.chromeText else readerTheme.chromeMuted.copy(alpha = 0.4f),
+                                modifier = Modifier.size(AppIconSize.Inline)
                             )
                         }
                     }
                 }
             }
-        },
-        containerColor = bgColor
-    ) { paddingValues ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-        ) {
-            val isTargetPageForHighlight = activeHighlightPage == null || activeHighlightPage == currentPage
-            EbookPageContent(
-                pageNumber = currentPage,
-                chapterTitle = currentPageEntity?.chapterTitle.orEmpty(),
-                pageText = pageText,
-                ebookPrefs = ebookPreferences,
-                bgColor = bgColor,
-                inkColor = inkColor,
-                subtleSurface = subtleSurface,
-                accentColor = accentColor,
-                userHighlights = currentPageHighlights,
-                pageNotes = currentPageNotes,
-                searchHighlightQuery = if (isTargetPageForHighlight) activeHighlightQuery else null,
-                highlightParagraph = if (isTargetPageForHighlight) activeHighlightParagraph else null,
-                onClearSearchHighlight = {
-                    activeHighlightQuery = null
-                    activeHighlightParagraph = null
-                    activeHighlightPage = null
-                },
-                onParagraphClick = { para -> annotatePrefillText = para },
-                onDeleteNote = onDeleteNote,
-                onEditNote = { editingNote = it }
-            )
         }
     }
 
-    // Ebook Reader Appearance Settings Sheet
     if (showReaderSettingsSheet) {
         EbookSettingsSheet(
             prefs = ebookPreferences,
+            readerTheme = readerTheme,
             onChange = onUpdateEbookPreferences,
             onDismiss = { showReaderSettingsSheet = false }
         )
     }
 
-    // Contents Sheet: TOC, Bookmarks, Highlights, Notes
     if (showContentsSheet) {
         BookContentsSheet(
             tocEntries = tocEntries,
             bookmarks = bookmarks,
             highlights = highlights,
             notes = notes,
+            readerTheme = readerTheme,
             onJumpToPage = { page, highlightSnippet ->
                 currentPage = page.coerceIn(1, totalPages)
                 if (!highlightSnippet.isNullOrBlank()) {
@@ -388,10 +492,10 @@ fun HybridBookReaderScreen(
         )
     }
 
-    // In-Book Search Dialog
     if (showSearchSheet) {
         InBookSearchSheet(
             bookTitle = book.title,
+            readerTheme = readerTheme,
             onSearch = { query -> onSearchInBook(book.id, query) },
             onSelectResult = { match ->
                 currentPage = match.pageNumber.coerceIn(1, totalPages)
@@ -406,133 +510,44 @@ fun HybridBookReaderScreen(
         )
     }
 
-    // Jump to Page Dialog
-    if (showJumpPageDialog) {
-        var pageInput by remember { mutableStateOf(currentPage.toString()) }
-        AlertDialog(
-            onDismissRequest = { showJumpPageDialog = false },
-            title = { Text("Jump to Page", fontWeight = FontWeight.Bold) },
-            text = {
-                OutlinedTextField(
-                    value = pageInput,
-                    onValueChange = { v -> if (v.all { it.isDigit() }) pageInput = v },
-                    label = { Text("Page (1 - $totalPages)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
+    if (showJumpPageSheet) {
+        JumpToPageSheet(
+            currentPage = currentPage,
+            totalPages = totalPages,
+            readerTheme = readerTheme,
+            onJump = { page ->
+                currentPage = page.coerceIn(1, totalPages)
+                showJumpPageSheet = false
             },
-            confirmButton = {
-                Button(onClick = {
-                    val p = pageInput.toIntOrNull()
-                    if (p != null) {
-                        currentPage = p.coerceIn(1, totalPages)
-                    }
-                    showJumpPageDialog = false
-                }) {
-                    Text("Go")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showJumpPageDialog = false }) { Text("Cancel") }
-            }
+            onDismiss = { showJumpPageSheet = false }
         )
     }
 
-    // Add Highlight or Note Dialog
     if (annotatePrefillText != null || editingNote != null) {
-        val initialSnippet = editingNote?.selectedText ?: annotatePrefillText.orEmpty()
-        var snippetInput by remember { mutableStateOf(initialSnippet) }
-        var noteInput by remember { mutableStateOf(editingNote?.noteText.orEmpty()) }
-        var selectedColorHex by remember { mutableStateOf(HIGHLIGHT_PALETTE.first().first) }
-        var saveAsHighlight by remember { mutableStateOf(editingNote == null) }
-
-        AlertDialog(
-            onDismissRequest = {
+        AnnotateNoteSheet(
+            currentPage = currentPage,
+            editingNote = editingNote,
+            prefillText = annotatePrefillText.orEmpty(),
+            readerTheme = readerTheme,
+            onSave = { snippet, noteText, saveHighlight, colorHex ->
+                if (editingNote != null) {
+                    if (noteText.isNotBlank()) {
+                        onSaveNote(book.id, currentPage, noteText, snippet, editingNote?.id)
+                    }
+                } else {
+                    if (saveHighlight && snippet.isNotBlank()) {
+                        onAddHighlight(book.id, currentPage, snippet, colorHex)
+                    }
+                    if (noteText.isNotBlank()) {
+                        onSaveNote(book.id, currentPage, noteText, snippet, null)
+                    }
+                }
                 annotatePrefillText = null
                 editingNote = null
             },
-            title = {
-                Text(
-                    text = if (editingNote != null) "Edit Note (Page $currentPage)" else "Highlight & Note (Page $currentPage)",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 17.sp
-                )
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
-                        value = snippetInput,
-                        onValueChange = { snippetInput = it },
-                        label = { Text("Passage / Selected Text") },
-                        maxLines = 4,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    if (editingNote == null) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Checkbox(checked = saveAsHighlight, onCheckedChange = { saveAsHighlight = it })
-                            Text("Save Highlight", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                            Spacer(modifier = Modifier.weight(1f))
-                            HIGHLIGHT_PALETTE.forEach { (hex, col) ->
-                                Box(
-                                    modifier = Modifier
-                                        .size(26.dp)
-                                        .clip(CircleShape)
-                                        .background(col)
-                                        .border(
-                                            width = if (selectedColorHex == hex) 2.5.dp else 1.dp,
-                                            color = if (selectedColorHex == hex) IndigoPrimary else SlateBorder,
-                                            shape = CircleShape
-                                        )
-                                        .clickable {
-                                            selectedColorHex = hex
-                                            saveAsHighlight = true
-                                        }
-                                )
-                            }
-                        }
-                    }
-
-                    OutlinedTextField(
-                        value = noteInput,
-                        onValueChange = { noteInput = it },
-                        label = { Text("Your Note (optional if highlighting)") },
-                        maxLines = 4,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (editingNote != null) {
-                            if (noteInput.isNotBlank()) {
-                                onSaveNote(book.id, currentPage, noteInput, snippetInput, editingNote?.id)
-                            }
-                        } else {
-                            if (saveAsHighlight && snippetInput.isNotBlank()) {
-                                onAddHighlight(book.id, currentPage, snippetInput, selectedColorHex)
-                            }
-                            if (noteInput.isNotBlank()) {
-                                onSaveNote(book.id, currentPage, noteInput, snippetInput, null)
-                            }
-                        }
-                        annotatePrefillText = null
-                        editingNote = null
-                    },
-                    enabled = (saveAsHighlight && snippetInput.isNotBlank()) || noteInput.isNotBlank()
-                ) {
-                    Text("Save")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    annotatePrefillText = null
-                    editingNote = null
-                }) { Text("Cancel") }
+            onDismiss = {
+                annotatePrefillText = null
+                editingNote = null
             }
         )
     }
@@ -544,10 +559,7 @@ private fun EbookPageContent(
     chapterTitle: String,
     pageText: String,
     ebookPrefs: EbookReaderPreferences,
-    bgColor: Color,
-    inkColor: Color,
-    subtleSurface: Color,
-    accentColor: Color,
+    readerTheme: ReaderThemePalette,
     userHighlights: List<BookHighlightEntity>,
     pageNotes: List<BookNoteEntity>,
     searchHighlightQuery: String?,
@@ -558,6 +570,14 @@ private fun EbookPageContent(
     onEditNote: (BookNoteEntity) -> Unit
 ) {
     val resolvedFont = resolveEbookFontFamily(ebookPrefs.fontFamilyKey, pageText)
+    val isBengali = remember(pageText) { isBengaliText(pageText) }
+    val effectiveLineSpacing = if (isBengali) {
+        maxOf(ebookPrefs.lineSpacingMultiplier, 1.85f)
+    } else {
+        ebookPrefs.lineSpacingMultiplier
+    }
+    val paragraphGap = ((ebookPrefs.fontSizeSp * 0.65f).roundToInt().coerceAtLeast(12)).dp
+
     val paragraphs = remember(pageText, pageNumber) {
         val split = pageText.split(Regex("\n{2,}")).map { it.trim() }.filter { it.isNotBlank() }
         if (split.isNotEmpty()) split else listOf(pageText.ifBlank { "No extractable text on Page $pageNumber." })
@@ -583,218 +603,270 @@ private fun EbookPageContent(
         }
     }
 
-    LazyColumn(
-        state = listState,
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(bgColor),
-        contentPadding = PaddingValues(
-            horizontal = ebookPrefs.horizontalMarginDp.dp,
-            vertical = 18.dp
-        ),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+            .background(readerTheme.background),
+        contentAlignment = Alignment.TopCenter
     ) {
-        if (showHighlightBanner) {
-            item(key = "highlight_banner") {
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = accentColor.copy(alpha = 0.08f),
-                    border = BorderStroke(1.dp, accentColor.copy(alpha = 0.22f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .widthIn(max = AppSpacing.MaxReaderWidth)
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding(),
+            contentPadding = PaddingValues(
+                start = ebookPrefs.horizontalMarginDp.dp,
+                end = ebookPrefs.horizontalMarginDp.dp,
+                top = 68.dp,
+                bottom = 76.dp
+            ),
+            verticalArrangement = Arrangement.spacedBy(paragraphGap)
+        ) {
+            if (showHighlightBanner) {
+                item(key = "highlight_banner") {
+                    Surface(
+                        shape = AppShapes.Small,
+                        color = readerTheme.accent.copy(alpha = 0.08f),
+                        border = BorderStroke(AppBorder.Hairline, readerTheme.accent.copy(alpha = 0.28f)),
+                        shadowElevation = AppElevation.None,
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.padding(horizontal = AppSpacing.Md, vertical = AppSpacing.Sm),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.FindInPage,
-                                contentDescription = null,
-                                tint = accentColor,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Text(
-                                text = "Matched line highlighted • Page $pageNumber",
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = accentColor
-                            )
-                        }
-                        IconButton(onClick = onClearSearchHighlight, modifier = Modifier.size(28.dp)) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Clear highlight",
-                                tint = accentColor,
-                                modifier = Modifier.size(16.dp)
-                            )
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(AppSpacing.Sm)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.FindInPage,
+                                    contentDescription = null,
+                                    tint = readerTheme.accent,
+                                    modifier = Modifier.size(AppIconSize.Inline)
+                                )
+                                Text(
+                                    text = "Matched line highlighted",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = AppTypeSize.Caption,
+                                    fontWeight = FontWeight.Medium,
+                                    color = readerTheme.accent
+                                )
+                            }
+                            IconButton(
+                                onClick = onClearSearchHighlight,
+                                modifier = Modifier.size(AppSpacing.TouchMin)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Close,
+                                    contentDescription = "Clear highlight",
+                                    tint = readerTheme.accent,
+                                    modifier = Modifier.size(AppIconSize.Inline)
+                                )
+                            }
                         }
                     }
                 }
             }
-        }
 
-        if (chapterTitle.isNotBlank()) {
-            item(key = "chapter_title") {
-                Text(
-                    text = chapterTitle,
-                    fontFamily = selectFontForText(chapterTitle),
-                    fontSize = (ebookPrefs.fontSizeSp + 2f).sp,
-                    fontWeight = FontWeight.Bold,
-                    color = accentColor
-                )
-            }
-        }
-
-        itemsIndexed(paragraphs) { idx, para ->
-            val isMatchedParagraph = idx == matchedParaIndex
-            val bestLineForThisPara = if (isMatchedParagraph) matchedBestLine else ""
-            val annotated = remember(para, userHighlights, bestLineForThisPara, accentColor, inkColor) {
-                buildEbookParagraphText(
-                    text = para,
-                    userHighlights = userHighlights,
-                    bestLine = bestLineForThisPara,
-                    accentColor = accentColor,
-                    inkColor = inkColor
-                )
+            if (chapterTitle.isNotBlank()) {
+                item(key = "chapter_title") {
+                    Text(
+                        text = chapterTitle,
+                        fontFamily = selectFontForText(chapterTitle),
+                        fontSize = (ebookPrefs.fontSizeSp + 2f).sp,
+                        fontWeight = FontWeight.Bold,
+                        color = readerTheme.accent,
+                        modifier = Modifier.padding(bottom = AppSpacing.Xs)
+                    )
+                }
             }
 
-            SelectionContainer {
-                if (isMatchedParagraph) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(IntrinsicSize.Min)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(accentColor.copy(alpha = 0.055f))
-                            .clickable { onParagraphClick(para) }
-                    ) {
-                        Box(
+            itemsIndexed(paragraphs) { idx, para ->
+                val isMatchedParagraph = idx == matchedParaIndex
+                val bestLineForThisPara = if (isMatchedParagraph) matchedBestLine else ""
+                val annotated = remember(para, userHighlights, bestLineForThisPara, readerTheme) {
+                    buildEbookParagraphText(
+                        text = para,
+                        userHighlights = userHighlights,
+                        bestLine = bestLineForThisPara,
+                        accentColor = readerTheme.accent,
+                        inkColor = readerTheme.ink
+                    )
+                }
+
+                SelectionContainer {
+                    if (isMatchedParagraph) {
+                        Row(
                             modifier = Modifier
-                                .width(3.dp)
-                                .fillMaxHeight()
-                                .background(accentColor.copy(alpha = 0.82f))
-                        )
+                                .fillMaxWidth()
+                                .height(IntrinsicSize.Min)
+                                .clip(AppShapes.Medium)
+                                .background(readerTheme.accent.copy(alpha = 0.06f))
+                                .clickable { onParagraphClick(para) }
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(3.dp)
+                                    .fillMaxHeight()
+                                    .background(readerTheme.accent.copy(alpha = 0.85f))
+                            )
+                            Text(
+                                text = annotated,
+                                fontFamily = resolvedFont,
+                                fontSize = ebookPrefs.fontSizeSp.sp,
+                                lineHeight = (ebookPrefs.fontSizeSp * effectiveLineSpacing).sp,
+                                color = readerTheme.ink,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(horizontal = AppSpacing.Md, vertical = AppSpacing.Sm)
+                            )
+                        }
+                    } else {
                         Text(
                             text = annotated,
                             fontFamily = resolvedFont,
                             fontSize = ebookPrefs.fontSizeSp.sp,
-                            lineHeight = (ebookPrefs.fontSizeSp * ebookPrefs.lineSpacingMultiplier).sp,
-                            color = inkColor,
+                            lineHeight = (ebookPrefs.fontSizeSp * effectiveLineSpacing).sp,
+                            color = readerTheme.ink,
                             modifier = Modifier
-                                .weight(1f)
-                                .padding(horizontal = 12.dp, vertical = 10.dp)
+                                .fillMaxWidth()
+                                .clip(AppShapes.Small)
+                                .clickable { onParagraphClick(para) }
+                                .padding(vertical = 2.dp)
                         )
                     }
-                } else {
-                    Text(
-                        text = annotated,
-                        fontFamily = resolvedFont,
-                        fontSize = ebookPrefs.fontSizeSp.sp,
-                        lineHeight = (ebookPrefs.fontSizeSp * ebookPrefs.lineSpacingMultiplier).sp,
-                        color = inkColor,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { onParagraphClick(para) }
-                            .padding(vertical = 2.dp)
-                    )
                 }
             }
-        }
 
-        if (pageNotes.isNotEmpty()) {
-            item(key = "notes_divider") {
-                HorizontalDivider(color = inkColor.copy(alpha = 0.12f))
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "Page Notes (${pageNotes.size})",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = accentColor
-                )
-            }
-            items(pageNotes, key = { it.id }) { note ->
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = subtleSurface,
-                    border = BorderStroke(1.dp, inkColor.copy(alpha = 0.12f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        if (note.selectedText.isNotBlank()) {
+            if (pageNotes.isNotEmpty()) {
+                item(key = "notes_divider") {
+                    HorizontalDivider(
+                        thickness = AppBorder.Hairline,
+                        color = readerTheme.chromeBorder
+                    )
+                    Spacer(modifier = Modifier.height(AppSpacing.Sm))
+                    Text(
+                        text = "Page Notes (${pageNotes.size})",
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = AppTypeSize.Caption,
+                        fontWeight = FontWeight.SemiBold,
+                        color = readerTheme.accent
+                    )
+                }
+                items(pageNotes, key = { it.id }) { note ->
+                    Surface(
+                        shape = AppShapes.Medium,
+                        color = readerTheme.subtleSurface,
+                        border = BorderStroke(AppBorder.Hairline, readerTheme.chromeBorder),
+                        shadowElevation = AppElevation.None,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(AppSpacing.Md),
+                            verticalArrangement = Arrangement.spacedBy(AppSpacing.Xs)
+                        ) {
+                            if (note.selectedText.isNotBlank()) {
+                                Text(
+                                    text = "\"${note.selectedText}\"",
+                                    fontFamily = selectFontForText(note.selectedText),
+                                    fontSize = AppTypeSize.Micro,
+                                    color = readerTheme.chromeMuted,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                             Text(
-                                text = "\"${note.selectedText}\"",
-                                fontSize = 11.5.sp,
-                                color = inkColor.copy(alpha = 0.7f),
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
+                                text = note.noteText,
+                                fontFamily = selectFontForText(note.noteText),
+                                fontSize = AppTypeSize.Body,
+                                fontWeight = FontWeight.Medium,
+                                color = readerTheme.ink
                             )
-                        }
-                        Text(
-                            text = note.noteText,
-                            fontFamily = selectFontForText(note.noteText),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = inkColor
-                        )
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                            TextButton(onClick = { onEditNote(note) }) { Text("Edit", fontSize = 11.sp) }
-                            TextButton(onClick = { onDeleteNote(note.id) }) {
-                                Text("Delete", fontSize = 11.sp, color = RoseError)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                TextButton(onClick = { onEditNote(note) }) {
+                                    Text("Edit", fontSize = AppTypeSize.Caption, color = readerTheme.accent)
+                                }
+                                TextButton(onClick = { onDeleteNote(note.id) }) {
+                                    Text("Delete", fontSize = AppTypeSize.Caption, color = RoseError)
+                                }
                             }
                         }
                     }
                 }
             }
         }
-
-        item(key = "bottom_spacer") {
-            Spacer(modifier = Modifier.height(24.dp))
-        }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun EbookSettingsSheet(
     prefs: EbookReaderPreferences,
+    readerTheme: ReaderThemePalette,
     onChange: (EbookReaderPreferences) -> Unit,
     onDismiss: () -> Unit
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Color.White) {
+    MinimalBottomSheet(
+        title = "Reading Settings",
+        onDismiss = onDismiss,
+        containerColor = readerTheme.chromeBg,
+        titleColor = readerTheme.chromeText,
+        mutedColor = readerTheme.chromeMuted,
+        borderColor = readerTheme.chromeBorder
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.Lg)
         ) {
-            Text("Ebook Reader Settings", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = SlateText)
-
-            // Font Size
-            Column {
+            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.Xs)) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Font Size", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    Text("${prefs.fontSizeSp.toInt()} sp", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = IndigoPrimary)
+                    Text(
+                        text = "Font Size",
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = AppTypeSize.Body,
+                        fontWeight = FontWeight.Medium,
+                        color = readerTheme.chromeText
+                    )
+                    Text(
+                        text = "${prefs.fontSizeSp.toInt()} sp",
+                        fontFamily = PoppinsFontFamily,
+                        fontSize = AppTypeSize.Body,
+                        fontWeight = FontWeight.SemiBold,
+                        color = readerTheme.accent
+                    )
                 }
                 Slider(
                     value = prefs.fontSizeSp,
                     onValueChange = { onChange(prefs.copy(fontSizeSp = it.roundToInt().toFloat())) },
-                    valueRange = 12f..28f
+                    valueRange = 12f..28f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = readerTheme.accent,
+                        activeTrackColor = readerTheme.accent,
+                        inactiveTrackColor = readerTheme.chromeBorder
+                    )
                 )
             }
 
-            // Font Style
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Font Style", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.Sm)) {
+                Text(
+                    text = "Font Style",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = AppTypeSize.Body,
+                    fontWeight = FontWeight.Medium,
+                    color = readerTheme.chromeText
+                )
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.Sm)
                 ) {
                     listOf(
                         "auto" to "Auto",
@@ -805,67 +877,100 @@ private fun EbookSettingsSheet(
                         "sans" to "Sans",
                         "mono" to "Mono"
                     ).forEach { (key, label) ->
-                        FilterChip(
+                        MinimalChip(
+                            label = label,
                             selected = prefs.fontFamilyKey == key,
                             onClick = { onChange(prefs.copy(fontFamilyKey = key)) },
-                            label = { Text(label, fontSize = 12.sp) }
+                            accentColor = readerTheme.accent,
+                            surfaceColor = readerTheme.subtleSurface,
+                            textColor = readerTheme.chromeText,
+                            borderColor = readerTheme.chromeBorder
                         )
                     }
                 }
             }
 
-            // Line Spacing
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Line Spacing", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(1.25f to "Tight", 1.55f to "Normal", 1.8f to "Relaxed", 2.05f to "Wide").forEach { (valF, label) ->
-                        FilterChip(
+            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.Sm)) {
+                Text(
+                    text = "Line Spacing",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = AppTypeSize.Body,
+                    fontWeight = FontWeight.Medium,
+                    color = readerTheme.chromeText
+                )
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.Sm)
+                ) {
+                    listOf(
+                        1.25f to "Tight",
+                        1.55f to "Normal",
+                        1.8f to "Relaxed",
+                        2.05f to "Wide"
+                    ).forEach { (valF, label) ->
+                        MinimalChip(
+                            label = label,
                             selected = kotlin.math.abs(prefs.lineSpacingMultiplier - valF) < 0.05f,
                             onClick = { onChange(prefs.copy(lineSpacingMultiplier = valF)) },
-                            label = { Text(label, fontSize = 12.sp) }
+                            accentColor = readerTheme.accent,
+                            surfaceColor = readerTheme.subtleSurface,
+                            textColor = readerTheme.chromeText,
+                            borderColor = readerTheme.chromeBorder
                         )
                     }
                 }
             }
 
-            // Margins
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Page Margins", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(12f to "Narrow", 20f to "Medium", 32f to "Wide").forEach { (valM, label) ->
-                        FilterChip(
+            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.Sm)) {
+                Text(
+                    text = "Page Margins",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = AppTypeSize.Body,
+                    fontWeight = FontWeight.Medium,
+                    color = readerTheme.chromeText
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(AppSpacing.Sm)) {
+                    listOf(
+                        12f to "Narrow",
+                        20f to "Medium",
+                        32f to "Wide"
+                    ).forEach { (valM, label) ->
+                        MinimalChip(
+                            label = label,
                             selected = kotlin.math.abs(prefs.horizontalMarginDp - valM) < 1f,
                             onClick = { onChange(prefs.copy(horizontalMarginDp = valM)) },
-                            label = { Text(label, fontSize = 12.sp) }
+                            accentColor = readerTheme.accent,
+                            surfaceColor = readerTheme.subtleSurface,
+                            textColor = readerTheme.chromeText,
+                            borderColor = readerTheme.chromeBorder
                         )
                     }
                 }
             }
 
-            // Background Themes
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Background Theme", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    listOf(
-                        Triple("paper", "Paper", Color.White to SlateText),
-                        Triple("sepia", "Sepia", Color(0xFFFBF4E4) to Color(0xFF433422)),
-                        Triple("mist", "Mist", Color(0xFFF1F5F9) to SlateText),
-                        Triple("dark", "Night", Color(0xFF0F172A) to Color.White)
-                    ).forEach { (key, label, colorsPair) ->
-                        val selected = prefs.themeKey == key
-                        Surface(
-                            onClick = { onChange(prefs.copy(themeKey = key)) },
-                            shape = RoundedCornerShape(12.dp),
-                            color = colorsPair.first,
-                            border = BorderStroke(if (selected) 2.dp else 1.dp, if (selected) IndigoPrimary else SlateBorder),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = colorsPair.second)
-                            }
-                        }
+            Column(verticalArrangement = Arrangement.spacedBy(AppSpacing.Sm)) {
+                Text(
+                    text = "Theme",
+                    fontFamily = PoppinsFontFamily,
+                    fontSize = AppTypeSize.Body,
+                    fontWeight = FontWeight.Medium,
+                    color = readerTheme.chromeText
+                )
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.Sm)
+                ) {
+                    ReaderThemes.All.forEach { themeOption ->
+                        MinimalChip(
+                            label = themeOption.label,
+                            selected = prefs.themeKey == themeOption.key,
+                            onClick = { onChange(prefs.copy(themeKey = themeOption.key)) },
+                            accentColor = readerTheme.accent,
+                            surfaceColor = readerTheme.subtleSurface,
+                            textColor = readerTheme.chromeText,
+                            borderColor = readerTheme.chromeBorder,
+                            leadingDotColor = themeOption.background
+                        )
                     }
                 }
             }
@@ -873,13 +978,13 @@ private fun EbookSettingsSheet(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BookContentsSheet(
     tocEntries: List<BookTocEntity>,
     bookmarks: List<BookBookmarkEntity>,
     highlights: List<BookHighlightEntity>,
     notes: List<BookNoteEntity>,
+    readerTheme: ReaderThemePalette,
     onJumpToPage: (page: Int, highlightSnippet: String?) -> Unit,
     onDeleteBookmark: (String) -> Unit,
     onDeleteHighlight: (String) -> Unit,
@@ -894,151 +999,262 @@ private fun BookContentsSheet(
         "Notes (${notes.size})"
     )
 
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Color.White) {
-        Column(
+    MinimalBottomSheet(
+        title = "Contents & Notes",
+        onDismiss = onDismiss,
+        containerColor = readerTheme.chromeBg,
+        titleColor = readerTheme.chromeText,
+        mutedColor = readerTheme.chromeMuted,
+        borderColor = readerTheme.chromeBorder
+    ) {
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 320.dp, max = 560.dp)
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(AppSpacing.Sm)
         ) {
-            ScrollableTabRow(selectedTabIndex = selectedTab, containerColor = Color.White) {
-                tabs.forEachIndexed { idx, title ->
-                    Tab(
-                        selected = selectedTab == idx,
-                        onClick = { selectedTab = idx },
-                        text = { Text(title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
-                    )
-                }
+            tabs.forEachIndexed { idx, label ->
+                MinimalChip(
+                    label = label,
+                    selected = selectedTab == idx,
+                    onClick = { selectedTab = idx },
+                    accentColor = readerTheme.accent,
+                    surfaceColor = readerTheme.subtleSurface,
+                    textColor = readerTheme.chromeText,
+                    borderColor = readerTheme.chromeBorder
+                )
             }
+        }
 
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                when (selectedTab) {
-                    0 -> {
-                        if (tocEntries.isEmpty()) {
-                            item { Text("No Table of Contents entries extracted.", color = SlateMuted, fontSize = 13.sp, modifier = Modifier.padding(16.dp)) }
-                        } else {
-                            items(tocEntries, key = { it.id }) { entry ->
-                                Surface(
-                                    onClick = { onJumpToPage(entry.pageNumber, null) },
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = SlateBg,
-                                    modifier = Modifier.fillMaxWidth()
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 240.dp, max = 460.dp),
+            verticalArrangement = Arrangement.spacedBy(AppSpacing.Sm)
+        ) {
+            when (selectedTab) {
+                0 -> {
+                    if (tocEntries.isEmpty()) {
+                        item {
+                            Text(
+                                text = "No Table of Contents entries extracted.",
+                                color = readerTheme.chromeMuted,
+                                fontSize = AppTypeSize.Body,
+                                modifier = Modifier.padding(vertical = AppSpacing.Lg)
+                            )
+                        }
+                    } else {
+                        items(tocEntries, key = { it.id }) { entry ->
+                            Surface(
+                                onClick = { onJumpToPage(entry.pageNumber, null) },
+                                shape = AppShapes.Medium,
+                                color = readerTheme.subtleSurface,
+                                shadowElevation = AppElevation.None,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(AppSpacing.Md),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Row(
-                                        modifier = Modifier.padding(12.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
+                                    Text(
+                                        text = entry.title,
+                                        fontFamily = selectFontForText(entry.title),
+                                        fontSize = AppTypeSize.Body,
+                                        fontWeight = if (entry.level == 1) FontWeight.SemiBold else FontWeight.Normal,
+                                        color = readerTheme.chromeText,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(start = ((entry.level - 1) * 12).dp)
+                                    )
+                                    Text(
+                                        text = "p.${entry.pageNumber}",
+                                        fontSize = AppTypeSize.Micro,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = readerTheme.accent
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                1 -> {
+                    if (bookmarks.isEmpty()) {
+                        item {
+                            Text(
+                                text = "No bookmarks saved yet.",
+                                color = readerTheme.chromeMuted,
+                                fontSize = AppTypeSize.Body,
+                                modifier = Modifier.padding(vertical = AppSpacing.Lg)
+                            )
+                        }
+                    } else {
+                        items(bookmarks, key = { it.id }) { bm ->
+                            Surface(
+                                onClick = { onJumpToPage(bm.pageNumber, null) },
+                                shape = AppShapes.Medium,
+                                color = readerTheme.subtleSurface,
+                                shadowElevation = AppElevation.None,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(AppSpacing.Md),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Page ${bm.pageNumber} • ${bm.title}",
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = AppTypeSize.Body,
+                                            color = readerTheme.chromeText
+                                        )
+                                        if (bm.snippet.isNotBlank()) {
+                                            Text(
+                                                text = bm.snippet,
+                                                fontSize = AppTypeSize.Caption,
+                                                color = readerTheme.chromeMuted,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                    IconButton(
+                                        onClick = { onDeleteBookmark(bm.id) },
+                                        modifier = Modifier.size(AppSpacing.TouchMin)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.DeleteOutline,
+                                            contentDescription = "Remove Bookmark",
+                                            tint = RoseError,
+                                            modifier = Modifier.size(AppIconSize.Inline)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                2 -> {
+                    if (highlights.isEmpty()) {
+                        item {
+                            Text(
+                                text = "No highlights saved yet. Tap any paragraph to highlight.",
+                                color = readerTheme.chromeMuted,
+                                fontSize = AppTypeSize.Body,
+                                modifier = Modifier.padding(vertical = AppSpacing.Lg)
+                            )
+                        }
+                    } else {
+                        items(highlights, key = { it.id }) { hl ->
+                            Surface(
+                                onClick = { onJumpToPage(hl.pageNumber, hl.selectedText) },
+                                shape = AppShapes.Medium,
+                                color = readerTheme.subtleSurface,
+                                shadowElevation = AppElevation.None,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(AppSpacing.Md),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(AppSpacing.Md)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(12.dp)
+                                            .clip(AppShapes.Pill)
+                                            .background(ReaderThemes.parseHighlightColor(hl.colorHex))
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Page ${hl.pageNumber}",
+                                            fontSize = AppTypeSize.Micro,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = readerTheme.accent
+                                        )
+                                        Text(
+                                            text = hl.selectedText,
+                                            fontSize = AppTypeSize.Caption,
+                                            color = readerTheme.chromeText,
+                                            maxLines = 3,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { onDeleteHighlight(hl.id) },
+                                        modifier = Modifier.size(AppSpacing.TouchMin)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.DeleteOutline,
+                                            contentDescription = "Delete Highlight",
+                                            tint = RoseError,
+                                            modifier = Modifier.size(AppIconSize.Inline)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                else -> {
+                    if (notes.isEmpty()) {
+                        item {
+                            Text(
+                                text = "No notes saved yet.",
+                                color = readerTheme.chromeMuted,
+                                fontSize = AppTypeSize.Body,
+                                modifier = Modifier.padding(vertical = AppSpacing.Lg)
+                            )
+                        }
+                    } else {
+                        items(notes, key = { it.id }) { note ->
+                            Surface(
+                                onClick = { onJumpToPage(note.pageNumber, note.selectedText.ifBlank { null }) },
+                                shape = AppShapes.Medium,
+                                color = readerTheme.subtleSurface,
+                                shadowElevation = AppElevation.None,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(AppSpacing.Md),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(2.dp)
                                     ) {
                                         Text(
-                                            text = entry.title,
-                                            fontFamily = selectFontForText(entry.title),
-                                            fontSize = 13.sp,
-                                            fontWeight = if (entry.level == 1) FontWeight.Bold else FontWeight.Medium,
-                                            color = SlateText,
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .padding(start = ((entry.level - 1) * 12).dp)
+                                            text = "Page ${note.pageNumber}",
+                                            fontSize = AppTypeSize.Micro,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = readerTheme.accent
                                         )
-                                        Text("Page ${entry.pageNumber}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndigoPrimary)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    1 -> {
-                        if (bookmarks.isEmpty()) {
-                            item { Text("No bookmarks saved yet.", color = SlateMuted, fontSize = 13.sp, modifier = Modifier.padding(16.dp)) }
-                        } else {
-                            items(bookmarks, key = { it.id }) { bm ->
-                                Surface(
-                                    onClick = { onJumpToPage(bm.pageNumber, null) },
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = SlateBg,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(12.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text("Page ${bm.pageNumber} • ${bm.title}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                            if (bm.snippet.isNotBlank()) {
-                                                Text(bm.snippet, fontSize = 11.5.sp, color = SlateMuted, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                            }
-                                        }
-                                        IconButton(onClick = { onDeleteBookmark(bm.id) }) {
-                                            Icon(Icons.Default.DeleteOutline, contentDescription = "Remove Bookmark", tint = RoseError)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    2 -> {
-                        if (highlights.isEmpty()) {
-                            item { Text("No highlights saved yet. Tap any paragraph to highlight.", color = SlateMuted, fontSize = 13.sp, modifier = Modifier.padding(16.dp)) }
-                        } else {
-                            items(highlights, key = { it.id }) { hl ->
-                                Surface(
-                                    onClick = { onJumpToPage(hl.pageNumber, hl.selectedText) },
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = SlateBg,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(12.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(14.dp)
-                                                .clip(CircleShape)
-                                                .background(parseHexColor(hl.colorHex))
+                                        Text(
+                                            text = note.noteText,
+                                            fontSize = AppTypeSize.Body,
+                                            fontWeight = FontWeight.Medium,
+                                            color = readerTheme.chromeText
                                         )
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text("Page ${hl.pageNumber}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndigoPrimary)
-                                            Text(hl.selectedText, fontSize = 12.5.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                                        }
-                                        IconButton(onClick = { onDeleteHighlight(hl.id) }) {
-                                            Icon(Icons.Default.DeleteOutline, contentDescription = "Delete Highlight", tint = RoseError)
+                                        if (note.selectedText.isNotBlank()) {
+                                            Text(
+                                                text = "\"${note.selectedText}\"",
+                                                fontSize = AppTypeSize.Micro,
+                                                color = readerTheme.chromeMuted,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
                                         }
                                     }
-                                }
-                            }
-                        }
-                    }
-                    else -> {
-                        if (notes.isEmpty()) {
-                            item { Text("No notes saved yet.", color = SlateMuted, fontSize = 13.sp, modifier = Modifier.padding(16.dp)) }
-                        } else {
-                            items(notes, key = { it.id }) { note ->
-                                Surface(
-                                    onClick = { onJumpToPage(note.pageNumber, note.selectedText.ifBlank { null }) },
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = SlateBg,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(12.dp),
-                                        verticalAlignment = Alignment.CenterVertically
+                                    IconButton(
+                                        onClick = { onDeleteNote(note.id) },
+                                        modifier = Modifier.size(AppSpacing.TouchMin)
                                     ) {
-                                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                            Text("Page ${note.pageNumber}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = IndigoPrimary)
-                                            Text(note.noteText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                                            if (note.selectedText.isNotBlank()) {
-                                                Text("\"${note.selectedText}\"", fontSize = 11.sp, color = SlateMuted, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                            }
-                                        }
-                                        IconButton(onClick = { onDeleteNote(note.id) }) {
-                                            Icon(Icons.Default.DeleteOutline, contentDescription = "Delete Note", tint = RoseError)
-                                        }
+                                        Icon(
+                                            imageVector = Icons.Outlined.DeleteOutline,
+                                            contentDescription = "Delete Note",
+                                            tint = RoseError,
+                                            modifier = Modifier.size(AppIconSize.Inline)
+                                        )
                                     }
                                 }
                             }
@@ -1053,6 +1269,7 @@ private fun BookContentsSheet(
 @Composable
 private fun InBookSearchSheet(
     bookTitle: String,
+    readerTheme: ReaderThemePalette,
     onSearch: suspend (String) -> List<BookPassageMatch>,
     onSelectResult: (BookPassageMatch) -> Unit,
     onDismiss: () -> Unit
@@ -1062,139 +1279,144 @@ private fun InBookSearchSheet(
     var isSearching by remember { mutableStateOf(false) }
     var results by remember { mutableStateOf<List<BookPassageMatch>>(emptyList()) }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+    MinimalBottomSheet(
+        title = "Search Inside Book",
+        subtitle = bookTitle,
+        onDismiss = onDismiss,
+        containerColor = readerTheme.chromeBg,
+        titleColor = readerTheme.chromeText,
+        mutedColor = readerTheme.chromeMuted,
+        borderColor = readerTheme.chromeBorder
     ) {
-        Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = Color.White,
-            modifier = Modifier
-                .fillMaxWidth(0.94f)
-                .heightIn(max = 580.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(AppSpacing.Sm),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                placeholder = { Text("Keywords or phrase...", fontSize = AppTypeSize.Caption) },
+                singleLine = true,
+                shape = AppShapes.Medium,
+                colors = readerTextFieldColors(readerTheme),
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("inbook_search_input")
+            )
+            MinimalPrimaryButton(
+                text = "Find",
+                onClick = {
+                    scope.launch {
+                        isSearching = true
+                        results = onSearch(query)
+                        isSearching = false
+                    }
+                },
+                enabled = query.trim().length >= 2 && !isSearching,
+                accentColor = IndigoPrimary,
+                modifier = Modifier.testTag("inbook_search_go_btn")
+            )
+        }
+
+        if (isSearching) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(120.dp),
+                contentAlignment = Alignment.Center
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Search Inside Book",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = SlateText
-                    )
-                    IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Close") }
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    OutlinedTextField(
-                        value = query,
-                        onValueChange = { query = it },
-                        placeholder = { Text("Search keywords or phrase in $bookTitle...", fontSize = 12.5.sp) },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f).testTag("inbook_search_input")
-                    )
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                isSearching = true
-                                results = onSearch(query)
-                                isSearching = false
-                            }
-                        },
-                        enabled = query.trim().length >= 2 && !isSearching,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.height(52.dp).testTag("inbook_search_go_btn")
+                CircularProgressIndicator(color = readerTheme.accent)
+            }
+        } else if (results.isEmpty() && query.trim().length >= 2) {
+            Text(
+                text = "Tap Find to search, or try different keywords.",
+                fontSize = AppTypeSize.Caption,
+                color = readerTheme.chromeMuted,
+                modifier = Modifier.padding(vertical = AppSpacing.Md)
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 360.dp),
+                verticalArrangement = Arrangement.spacedBy(AppSpacing.Sm)
+            ) {
+                items(results) { match ->
+                    Surface(
+                        onClick = { onSelectResult(match) },
+                        shape = AppShapes.Medium,
+                        color = readerTheme.subtleSurface,
+                        border = BorderStroke(AppBorder.Hairline, readerTheme.chromeBorder),
+                        shadowElevation = AppElevation.None,
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Find")
-                    }
-                }
-
-                if (isSearching) {
-                    Box(modifier = Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = IndigoPrimary)
-                    }
-                } else if (results.isEmpty() && query.trim().length >= 2) {
-                    Text(
-                        text = "Tap Find to search, or try different keywords.",
-                        fontSize = 12.5.sp,
-                        color = SlateMuted,
-                        modifier = Modifier.padding(vertical = 12.dp)
-                    )
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(results) { match ->
-                            Surface(
-                                onClick = { onSelectResult(match) },
-                                shape = RoundedCornerShape(12.dp),
-                                color = SlateBg,
-                                border = BorderStroke(1.dp, SlateBorder),
-                                modifier = Modifier.fillMaxWidth()
+                        Column(
+                            modifier = Modifier.padding(AppSpacing.Md),
+                            verticalArrangement = Arrangement.spacedBy(AppSpacing.Xs)
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(AppSpacing.Sm),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        Surface(shape = RoundedCornerShape(6.dp), color = IndigoLight) {
-                                            Text(
-                                                text = "Page ${match.pageNumber}",
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = IndigoPrimary,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                            )
-                                        }
-                                        if (match.chapterTitle.isNotBlank()) {
-                                            Text(match.chapterTitle, fontSize = 11.sp, color = SlateMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        }
-                                    }
-                                    val previewBestLine = remember(match.passageSnippet, match.bestLine, query) {
-                                        match.bestLine.ifBlank {
-                                            BookSearchEngine.findBestMatchingLine(match.passageSnippet, query)
-                                        }
-                                    }
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(IntrinsicSize.Min)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(IndigoPrimary.copy(alpha = 0.04f))
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .width(2.5.dp)
-                                                .fillMaxHeight()
-                                                .background(IndigoPrimary.copy(alpha = 0.7f))
-                                        )
-                                        Text(
-                                            text = buildEbookParagraphText(
-                                                text = match.passageSnippet,
-                                                userHighlights = emptyList(),
-                                                bestLine = previewBestLine,
-                                                accentColor = IndigoPrimary,
-                                                inkColor = SlateText
-                                            ),
-                                            fontFamily = selectFontForText(match.passageSnippet),
-                                            fontSize = 12.5.sp,
-                                            color = SlateText.copy(alpha = 0.82f),
-                                            maxLines = 4,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .padding(horizontal = 10.dp, vertical = 8.dp)
-                                        )
-                                    }
+                                Surface(
+                                    shape = AppShapes.Small,
+                                    color = readerTheme.accent.copy(alpha = 0.12f)
+                                ) {
+                                    Text(
+                                        text = "Page ${match.pageNumber}",
+                                        fontSize = AppTypeSize.Micro,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = readerTheme.accent,
+                                        modifier = Modifier.padding(horizontal = AppSpacing.Sm, vertical = 2.dp)
+                                    )
                                 }
+                                if (match.chapterTitle.isNotBlank()) {
+                                    Text(
+                                        text = match.chapterTitle,
+                                        fontSize = AppTypeSize.Micro,
+                                        color = readerTheme.chromeMuted,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+
+                            val previewBestLine = remember(match.passageSnippet, match.bestLine, query) {
+                                match.bestLine.ifBlank {
+                                    BookSearchEngine.findBestMatchingLine(match.passageSnippet, query)
+                                }
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(IntrinsicSize.Min)
+                                    .clip(AppShapes.Small)
+                                    .background(readerTheme.accent.copy(alpha = 0.05f))
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(2.5.dp)
+                                        .fillMaxHeight()
+                                        .background(readerTheme.accent.copy(alpha = 0.7f))
+                                )
+                                Text(
+                                    text = buildEbookParagraphText(
+                                        text = match.passageSnippet,
+                                        userHighlights = emptyList(),
+                                        bestLine = previewBestLine,
+                                        accentColor = readerTheme.accent,
+                                        inkColor = readerTheme.chromeText
+                                    ),
+                                    fontFamily = selectFontForText(match.passageSnippet),
+                                    fontSize = AppTypeSize.Caption,
+                                    color = readerTheme.chromeText.copy(alpha = 0.85f),
+                                    maxLines = 4,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(horizontal = AppSpacing.Md, vertical = AppSpacing.Sm)
+                                )
                             }
                         }
                     }
@@ -1203,6 +1425,178 @@ private fun InBookSearchSheet(
         }
     }
 }
+
+@Composable
+private fun JumpToPageSheet(
+    currentPage: Int,
+    totalPages: Int,
+    readerTheme: ReaderThemePalette,
+    onJump: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var pageInput by remember { mutableStateOf(currentPage.toString()) }
+
+    MinimalBottomSheet(
+        title = "Jump to Page",
+        subtitle = "Page 1 - $totalPages",
+        onDismiss = onDismiss,
+        containerColor = readerTheme.chromeBg,
+        titleColor = readerTheme.chromeText,
+        mutedColor = readerTheme.chromeMuted,
+        borderColor = readerTheme.chromeBorder
+    ) {
+        OutlinedTextField(
+            value = pageInput,
+            onValueChange = { v -> if (v.all { it.isDigit() }) pageInput = v },
+            label = { Text("Page Number", fontSize = AppTypeSize.Caption) },
+            singleLine = true,
+            shape = AppShapes.Medium,
+            colors = readerTextFieldColors(readerTheme),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(AppSpacing.Sm)
+        ) {
+            MinimalSecondaryButton(
+                text = "Cancel",
+                onClick = onDismiss,
+                textColor = readerTheme.chromeMuted,
+                borderColor = readerTheme.chromeBorder,
+                modifier = Modifier.weight(1f)
+            )
+            MinimalPrimaryButton(
+                text = "Go",
+                onClick = {
+                    val p = pageInput.toIntOrNull()
+                    if (p != null) onJump(p) else onDismiss()
+                },
+                accentColor = IndigoPrimary,
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun AnnotateNoteSheet(
+    currentPage: Int,
+    editingNote: BookNoteEntity?,
+    prefillText: String,
+    readerTheme: ReaderThemePalette,
+    onSave: (snippet: String, noteText: String, saveHighlight: Boolean, colorHex: String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val initialSnippet = editingNote?.selectedText ?: prefillText
+    var snippetInput by remember { mutableStateOf(initialSnippet) }
+    var noteInput by remember { mutableStateOf(editingNote?.noteText.orEmpty()) }
+    var selectedColorHex by remember { mutableStateOf(ReaderThemes.HighlightSwatches.first().hex) }
+    var saveAsHighlight by remember { mutableStateOf(editingNote == null) }
+
+    MinimalBottomSheet(
+        title = if (editingNote != null) "Edit Note" else "Highlight & Note",
+        subtitle = "Page $currentPage",
+        onDismiss = onDismiss,
+        containerColor = readerTheme.chromeBg,
+        titleColor = readerTheme.chromeText,
+        mutedColor = readerTheme.chromeMuted,
+        borderColor = readerTheme.chromeBorder
+    ) {
+        OutlinedTextField(
+            value = snippetInput,
+            onValueChange = { snippetInput = it },
+            label = { Text("Passage / Selected Text", fontSize = AppTypeSize.Caption) },
+            maxLines = 4,
+            shape = AppShapes.Medium,
+            colors = readerTextFieldColors(readerTheme),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        if (editingNote == null) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(AppSpacing.Sm)
+            ) {
+                Checkbox(
+                    checked = saveAsHighlight,
+                    onCheckedChange = { saveAsHighlight = it },
+                    colors = CheckboxDefaults.colors(
+                        checkedColor = readerTheme.accent,
+                        checkmarkColor = readerTheme.chromeBg,
+                        uncheckedColor = readerTheme.chromeMuted
+                    )
+                )
+                Text(
+                    text = "Highlight",
+                    fontSize = AppTypeSize.Body,
+                    fontWeight = FontWeight.Medium,
+                    color = readerTheme.chromeText
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                ReaderThemes.HighlightSwatches.forEach { swatch ->
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(AppShapes.Pill)
+                            .background(swatch.color)
+                            .border(
+                                width = if (selectedColorHex == swatch.hex) 2.dp else AppBorder.Hairline,
+                                color = if (selectedColorHex == swatch.hex) readerTheme.accent else readerTheme.chromeBorder,
+                                shape = AppShapes.Pill
+                            )
+                            .clickable {
+                                selectedColorHex = swatch.hex
+                                saveAsHighlight = true
+                            }
+                    )
+                }
+            }
+        }
+
+        OutlinedTextField(
+            value = noteInput,
+            onValueChange = { noteInput = it },
+            label = { Text("Your Note (optional if highlighting)", fontSize = AppTypeSize.Caption) },
+            maxLines = 4,
+            shape = AppShapes.Medium,
+            colors = readerTextFieldColors(readerTheme),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(AppSpacing.Sm)
+        ) {
+            MinimalSecondaryButton(
+                text = "Cancel",
+                onClick = onDismiss,
+                textColor = readerTheme.chromeMuted,
+                borderColor = readerTheme.chromeBorder,
+                modifier = Modifier.weight(1f)
+            )
+            MinimalPrimaryButton(
+                text = "Save",
+                onClick = { onSave(snippetInput, noteInput, saveAsHighlight, selectedColorHex) },
+                enabled = (saveAsHighlight && snippetInput.isNotBlank()) || noteInput.isNotBlank(),
+                accentColor = IndigoPrimary,
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun readerTextFieldColors(readerTheme: ReaderThemePalette) = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = readerTheme.chromeText,
+    unfocusedTextColor = readerTheme.chromeText,
+    cursorColor = readerTheme.accent,
+    focusedBorderColor = readerTheme.accent,
+    unfocusedBorderColor = readerTheme.chromeBorder,
+    focusedLabelColor = readerTheme.accent,
+    unfocusedLabelColor = readerTheme.chromeMuted,
+    focusedPlaceholderColor = readerTheme.chromeMuted,
+    unfocusedPlaceholderColor = readerTheme.chromeMuted
+)
 
 private fun resolveEbookFontFamily(key: String, sampleText: String): FontFamily {
     return when (key) {
@@ -1213,14 +1607,6 @@ private fun resolveEbookFontFamily(key: String, sampleText: String): FontFamily 
         "sans" -> FontFamily.SansSerif
         "mono" -> FontFamily.Monospace
         else -> selectArticleFontForText(sampleText)
-    }
-}
-
-private fun parseHexColor(hex: String): Color {
-    return try {
-        Color(android.graphics.Color.parseColor(hex))
-    } catch (_: Exception) {
-        Color(0xFFFDE047)
     }
 }
 
@@ -1241,7 +1627,6 @@ private fun findMatchedParagraphAndLine(
     val cleanLineQuery = searchQuery?.trim().orEmpty()
     if (cleanParaQuery.isBlank() && cleanLineQuery.isBlank()) return -1 to ""
 
-    // 1. Match paragraph directly using highlightParagraph
     var matchedIdx = -1
     if (cleanParaQuery.length >= 4) {
         val normParaQ = normalizeWhitespace(cleanParaQuery)
@@ -1252,7 +1637,6 @@ private fun findMatchedParagraphAndLine(
         }
     }
 
-    // 2. Match paragraph directly using searchQuery (bestLine / free-text query)
     if (matchedIdx < 0 && cleanLineQuery.length >= 2) {
         val normLineQ = normalizeWhitespace(cleanLineQuery)
         matchedIdx = paragraphs.indexOfFirst { para ->
@@ -1261,7 +1645,6 @@ private fun findMatchedParagraphAndLine(
         }
     }
 
-    // 3. Fallback token overlap for multi-word in-book search queries
     if (matchedIdx < 0 && cleanLineQuery.length >= 2) {
         val tokens = BookSearchEngine.tokenize(cleanLineQuery).filter { it.length >= 2 }.distinct()
         if (tokens.isNotEmpty()) {
@@ -1300,7 +1683,6 @@ private fun buildEbookParagraphText(
     append(text)
     val lower = text.lowercase()
 
-    // 1. Persisted user highlights
     for (hl in userHighlights) {
         val target = hl.selectedText.trim()
         if (target.length < 2) continue
@@ -1309,7 +1691,7 @@ private fun buildEbookParagraphText(
             val end = (idx + target.length).coerceAtMost(text.length)
             addStyle(
                 SpanStyle(
-                    background = parseHexColor(hl.colorHex).copy(alpha = 0.55f),
+                    background = ReaderThemes.parseHighlightColor(hl.colorHex).copy(alpha = 0.55f),
                     fontWeight = FontWeight.Medium
                 ),
                 idx,
@@ -1318,7 +1700,6 @@ private fun buildEbookParagraphText(
         }
     }
 
-    // 2. Single highest-matching line highlight (no per-word yellow clutter)
     val lineClean = bestLine.trim()
     if (lineClean.length >= 2) {
         val fullIdx = lower.indexOf(lineClean.lowercase())

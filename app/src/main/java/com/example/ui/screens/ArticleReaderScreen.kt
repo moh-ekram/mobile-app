@@ -63,6 +63,12 @@ import android.content.Context
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.text.font.FontSynthesis
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalUriHandler
+import coil.compose.AsyncImage
+import com.example.data.pdf.ArticleContentBlock
+import java.net.URI
 import org.json.JSONObject
 import org.json.JSONArray
 import kotlinx.coroutines.launch
@@ -100,11 +106,7 @@ fun ArticleReaderScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var showAddDialog by remember { mutableStateOf(false) }
-    var initialEditorTab by remember { mutableIntStateOf(0) }
-    var showSyncDialog by remember { mutableStateOf(false) }
     var showReaderSettingsDialog by remember { mutableStateOf(false) }
-    var showBookStudioDialog by remember { mutableStateOf(false) }
 
     BackHandler {
         if (activeArticle != null) {
@@ -134,14 +136,8 @@ fun ArticleReaderScreen(
                     },
                     actions = {
                         IconButton(
-                            onClick = { showBookStudioDialog = true },
-                            modifier = Modifier.testTag("topbar_book_studio_button")
-                        ) {
-                            Icon(Icons.Default.AutoStories, contentDescription = "Book & PDF Studio", tint = IndigoPrimary)
-                        }
-                        IconButton(
-                            onClick = { showSyncDialog = true },
-                            enabled = !isSyncing
+                            onClick = { showReaderSettingsDialog = true },
+                            modifier = Modifier.testTag("articles_settings_button")
                         ) {
                             if (isSyncing) {
                                 CircularProgressIndicator(
@@ -150,23 +146,8 @@ fun ArticleReaderScreen(
                                     color = IndigoPrimary
                                 )
                             } else {
-                                Icon(Icons.Default.Sync, contentDescription = "Sync Articles", tint = IndigoPrimary)
+                                Icon(Icons.Default.Settings, contentDescription = "Articles Settings", tint = SlateText)
                             }
-                        }
-                        IconButton(onClick = {
-                            initialEditorTab = 1
-                            showAddDialog = true
-                        }) {
-                            Icon(Icons.Default.Language, contentDescription = "Import from Web URL", tint = IndigoPrimary)
-                        }
-                        IconButton(onClick = {
-                            initialEditorTab = 0
-                            showAddDialog = true
-                        }) {
-                            Icon(Icons.Default.Add, contentDescription = "Add Article", tint = IndigoPrimary)
-                        }
-                        IconButton(onClick = { showReaderSettingsDialog = true }) {
-                            Icon(Icons.Default.Settings, contentDescription = "Reader Settings", tint = SlateText)
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
@@ -196,15 +177,9 @@ fun ArticleReaderScreen(
             onSaveBookGroup = onSaveBookGroup,
             onDeleteBookGroup = onDeleteBookGroup,
             onAddSampleData = onAddSampleData,
-            showAddDialogFromParent = showAddDialog,
-            initialAddDialogTabFromParent = initialEditorTab,
-            onDismissAddDialog = { showAddDialog = false },
-            showSyncDialogFromParent = showSyncDialog,
-            onDismissSyncDialog = { showSyncDialog = false },
             showReaderSettingsFromParent = showReaderSettingsDialog,
             onDismissReaderSettings = { showReaderSettingsDialog = false },
-            showBookStudioFromParent = showBookStudioDialog,
-            onDismissBookStudio = { showBookStudioDialog = false },
+            showInlineSettingsButton = false,
             modifier = if (activeArticle == null) Modifier.padding(innerPadding) else Modifier.statusBarsPadding()
         )
     }
@@ -249,6 +224,7 @@ fun ArticleReaderView(
     onDismissReaderSettings: () -> Unit = {},
     showBookStudioFromParent: Boolean = false,
     onDismissBookStudio: () -> Unit = {},
+    showInlineSettingsButton: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -957,117 +933,34 @@ fun ArticleReaderView(
                                 }
                             }
 
-                            // Right: Minimal, Iconized Toolbar (Select, Book PDF Studio, Sync, URL, Add, Settings)
-                            Surface(
-                                color = Color.White,
-                                shape = RoundedCornerShape(8.dp),
-                                border = BorderStroke(1.dp, SlateBorder)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(horizontal = 2.dp, vertical = 2.dp)
+                            // Right: Single minimal Settings button only when TopAppBar settings isn't shown
+                            if (showInlineSettingsButton) {
+                                Surface(
+                                    color = Color.White,
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = BorderStroke(1.dp, SlateBorder),
+                                    modifier = Modifier
+                                        .minimumInteractiveComponentSize()
+                                        .testTag("inline_articles_settings_button")
                                 ) {
                                     IconButton(
-                                        onClick = {
-                                            if (isSelectionMode) {
-                                                isSelectionMode = false
-                                                selectedBookArticleIds = emptyList()
-                                            } else {
-                                                isSelectionMode = true
-                                            }
-                                        },
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .testTag("toggle_article_select_mode")
-                                    ) {
-                                        Icon(
-                                            if (isSelectionMode) Icons.Default.Close else Icons.Default.Checklist,
-                                            contentDescription = if (isSelectionMode) "Exit Selection Mode" else "Select Articles for Book",
-                                            modifier = Modifier.size(16.dp),
-                                            tint = if (isSelectionMode) IndigoPrimary else SlateText
-                                        )
-                                    }
-
-                                    IconButton(
-                                        onClick = {
-                                            studioInitialSelectedIds = selectedBookArticleIds
-                                            showLocalBookStudio = true
-                                        },
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .testTag("open_book_studio_button")
-                                    ) {
-                                        Icon(
-                                            Icons.Default.AutoStories,
-                                            contentDescription = "Book & PDF Generator",
-                                            modifier = Modifier.size(16.dp),
-                                            tint = IndigoPrimary
-                                        )
-                                    }
-
-                                    IconButton(
-                                        onClick = {
-                                            if (syncUrl.isNotBlank()) onSync(syncUrl) else showSyncDialog = true
-                                        },
-                                        enabled = !isSyncing,
-                                        modifier = Modifier.size(30.dp)
+                                        onClick = { showLocalReaderSettings = true },
+                                        modifier = Modifier.size(34.dp)
                                     ) {
                                         if (isSyncing) {
                                             CircularProgressIndicator(
-                                                modifier = Modifier.size(13.dp),
+                                                modifier = Modifier.size(15.dp),
                                                 strokeWidth = 2.dp,
                                                 color = IndigoPrimary
                                             )
                                         } else {
                                             Icon(
-                                                Icons.Default.Sync,
-                                                contentDescription = "Sync Articles",
-                                                modifier = Modifier.size(16.dp),
-                                                tint = IndigoPrimary
+                                                Icons.Default.Settings,
+                                                contentDescription = "Articles Settings",
+                                                modifier = Modifier.size(17.dp),
+                                                tint = SlateText
                                             )
                                         }
-                                    }
-
-                                    IconButton(
-                                        onClick = {
-                                            localAddDialogTab = 1
-                                            showAddDialog = true
-                                        },
-                                        modifier = Modifier.size(30.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Language,
-                                            contentDescription = "Import from Web URL",
-                                            modifier = Modifier.size(16.dp),
-                                            tint = IndigoPrimary
-                                        )
-                                    }
-
-                                    IconButton(
-                                        onClick = {
-                                            localAddDialogTab = 0
-                                            showAddDialog = true
-                                        },
-                                        modifier = Modifier.size(30.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Add,
-                                            contentDescription = "Add Article",
-                                            modifier = Modifier.size(18.dp),
-                                            tint = IndigoPrimary
-                                        )
-                                    }
-
-                                    IconButton(
-                                        onClick = { showLocalReaderSettings = true },
-                                        modifier = Modifier.size(30.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Settings,
-                                            contentDescription = "Reader Display Settings",
-                                            modifier = Modifier.size(16.dp),
-                                            tint = SlateText
-                                        )
                                     }
                                 }
                             }
@@ -1420,48 +1313,205 @@ fun ArticleReaderView(
                 }
             }
         } else {
-            // Minimal, clean e-reader view matching design reference (No edit/delete icons)
+            // Editorial PDF-inspired paper reading layout with cover/inline images and interactive vocabulary highlights
+            val uriHandler = LocalUriHandler.current
             val currentIndex = articles.indexOfFirst { it.id == currentArticle.id }.coerceAtLeast(0)
             val pageBg = if (isReaderNightMode) Color(0xFF0F172A) else Color(0xFFF1F5F9)
-            val cardBg = if (isReaderNightMode) Color(0xFF1E293B) else Color(0xFFFCFAF7)
+            val paperBg = if (isReaderNightMode) Color(0xFF1E293B) else Color.White
+            val toolbarBg = if (isReaderNightMode) Color(0xFF1E293B) else Color.White
             val textColor = if (isReaderNightMode) Color(0xFFE2E8F0) else Color(0xFF1E293B)
-            val subtleMuted = if (isReaderNightMode) Color(0xFF64748B) else Color(0xFF94A3B8)
-            val cardBorderColor = if (isReaderNightMode) Color(0xFF334155) else Color(0xFFCBD5E1)
+            val subtleMuted = if (isReaderNightMode) Color(0xFF94A3B8) else Color(0xFF64748B)
+            val hairlineColor = if (isReaderNightMode) Color(0xFF334155) else Color(0xFFE2E8F0)
+            val paperBorderColor = if (isReaderNightMode) Color(0xFF334155) else Color(0xFFCBD5E1)
+            val accentBlue = if (isReaderNightMode) Color(0xFF818CF8) else Color(0xFF6366F1)
+
+            val selectedLatinFont = when (readerFontFamily) {
+                "monospace" -> FontFamily.Monospace
+                "sans" -> PoppinsFontFamily
+                else -> TinosFontFamily
+            }
+
+            val readableContent = remember(currentArticle.content) {
+                ArticleRichContentParser.toCleanReaderText(currentArticle.content)
+            }
+            val parsedBlocks = remember(currentArticle.content) {
+                ArticleRichContentParser.parseBlocks(currentArticle.content)
+            }
+            val websiteDisplay = remember(currentArticle) {
+                ArticleRichContentParser.deriveWebsiteName(currentArticle)
+            }
+            val dateDisplay = remember(currentArticle) {
+                ArticleRichContentParser.derivePublishedDate(currentArticle)
+            }
+            val authorDisplay = remember(currentArticle.author) {
+                currentArticle.author.trim().takeIf {
+                    it.isNotBlank() && !it.equals("Anonymous Author", ignoreCase = true)
+                } ?: "Editorial Desk"
+            }
+            val faviconUrlCandidate = remember(currentArticle.faviconUrl, currentArticle.sourceUrl) {
+                currentArticle.faviconUrl.ifBlank {
+                    val host = try { URI(currentArticle.sourceUrl).host } catch (_: Exception) { null }
+                    if (!host.isNullOrBlank()) "https://www.google.com/s2/favicons?domain=$host&sz=64" else ""
+                }
+            }
+            val blockImageUrls = remember(parsedBlocks) {
+                parsedBlocks.filterIsInstance<ArticleContentBlock.ImageBlock>().map { it.url }.toSet()
+            }
+            val coverImageCandidate = remember(currentArticle.coverImageUrl, blockImageUrls) {
+                currentArticle.coverImageUrl.takeIf { it.isNotBlank() && it !in blockImageUrls }
+            }
+
+            val wordCount = remember(readableContent) {
+                readableContent.split(Regex("""\s+""")).count { it.isNotBlank() }
+            }
+            val estReadingMinutes = (wordCount / 180).coerceAtLeast(1)
+            val isExtraBold = (readerHighlightBold == "extra_bold")
+
+            val tokenToWordsMap = remember(currentArticle.id, currentArticle.content, place1MultiMap, place2MultiMap, place3MultiMap, readerMatchMode, readerMinWordLength) {
+                mutableMapOf<String, List<VocabularyWordEntity>>()
+            }
+
+            val renderedBlocks = remember(
+                parsedBlocks,
+                place1MultiMap,
+                place2MultiMap,
+                place3MultiMap,
+                readerMatchMode,
+                readerMinWordLength,
+                isExtraBold,
+                isReaderNightMode,
+                selectedLatinFont
+            ) {
+                tokenToWordsMap.clear()
+                val seenKeys = mutableSetOf<String>()
+                parsedBlocks.map { block ->
+                    val blockAnnotated = when (block) {
+                        is ArticleContentBlock.Heading -> buildPlaceHighlightedAnnotatedString(
+                            content = block.text,
+                            place1MultiMap = place1MultiMap,
+                            place2MultiMap = place2MultiMap,
+                            place3MultiMap = place3MultiMap,
+                            matchMode = readerMatchMode,
+                            minWordLengthSetting = readerMinWordLength,
+                            isExtraBold = isExtraBold,
+                            isNightMode = isReaderNightMode,
+                            latinFontFamily = selectedLatinFont,
+                            baseFontWeight = FontWeight.Bold,
+                            seenKeys = seenKeys,
+                            parseInlineLinks = true,
+                            tokenToWordsMap = tokenToWordsMap
+                        )
+                        is ArticleContentBlock.BulletItem -> buildPlaceHighlightedAnnotatedString(
+                            content = block.text,
+                            place1MultiMap = place1MultiMap,
+                            place2MultiMap = place2MultiMap,
+                            place3MultiMap = place3MultiMap,
+                            matchMode = readerMatchMode,
+                            minWordLengthSetting = readerMinWordLength,
+                            isExtraBold = isExtraBold,
+                            isNightMode = isReaderNightMode,
+                            latinFontFamily = selectedLatinFont,
+                            baseFontWeight = FontWeight.Normal,
+                            seenKeys = seenKeys,
+                            parseInlineLinks = true,
+                            tokenToWordsMap = tokenToWordsMap
+                        )
+                        is ArticleContentBlock.Blockquote -> buildPlaceHighlightedAnnotatedString(
+                            content = block.text,
+                            place1MultiMap = place1MultiMap,
+                            place2MultiMap = place2MultiMap,
+                            place3MultiMap = place3MultiMap,
+                            matchMode = readerMatchMode,
+                            minWordLengthSetting = readerMinWordLength,
+                            isExtraBold = isExtraBold,
+                            isNightMode = isReaderNightMode,
+                            latinFontFamily = selectedLatinFont,
+                            baseFontWeight = FontWeight.Normal,
+                            seenKeys = seenKeys,
+                            parseInlineLinks = true,
+                            tokenToWordsMap = tokenToWordsMap
+                        )
+                        is ArticleContentBlock.Paragraph -> buildPlaceHighlightedAnnotatedString(
+                            content = block.text,
+                            place1MultiMap = place1MultiMap,
+                            place2MultiMap = place2MultiMap,
+                            place3MultiMap = place3MultiMap,
+                            matchMode = readerMatchMode,
+                            minWordLengthSetting = readerMinWordLength,
+                            isExtraBold = isExtraBold,
+                            isNightMode = isReaderNightMode,
+                            latinFontFamily = selectedLatinFont,
+                            baseFontWeight = FontWeight.Normal,
+                            seenKeys = seenKeys,
+                            parseInlineLinks = true,
+                            tokenToWordsMap = tokenToWordsMap
+                        )
+                        is ArticleContentBlock.ImageBlock -> AnnotatedString("")
+                    }
+                    block to blockAnnotated
+                }
+            }
+
+            fun handleRichTextTap(annotated: AnnotatedString, offset: Int) {
+                val vocabAnn = annotated.getStringAnnotations(
+                    tag = "VOCAB_MATCH",
+                    start = offset,
+                    end = offset
+                ).firstOrNull()
+                if (vocabAnn != null) {
+                    val key = vocabAnn.item.lowercase(Locale.ROOT)
+                    val matchedList = tokenToWordsMap[key]
+                        ?: place1MultiMap[key]
+                        ?: place2MultiMap[key]
+                        ?: place3MultiMap[key]
+                        ?: emptyList()
+                    if (matchedList.isNotEmpty()) {
+                        matchedWordsForPopup = matchedList
+                        popupWordIndex = 0
+                    }
+                    return
+                }
+                annotated.getStringAnnotations(
+                    tag = "LINK_URL",
+                    start = offset,
+                    end = offset
+                ).firstOrNull()?.let { linkAnn ->
+                    try {
+                        uriHandler.openUri(linkAnn.item)
+                    } catch (_: Exception) {}
+                }
+            }
 
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(pageBg)
-                    .padding(horizontal = 8.dp, vertical = 6.dp)
             ) {
-                Card(
-                    shape = RoundedCornerShape(24.dp),
-                    colors = CardDefaults.cardColors(containerColor = cardBg),
-                    border = BorderStroke(1.5.dp, cardBorderColor),
+                Column(
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(top = 10.dp, bottom = 12.dp, start = 14.dp, end = 14.dp)
-                    ) {
-                        // Header: Minimal, Iconized Back Button, Compact Chapter Pill, Quick Actions
+                // Top Reader Toolbar
+                Surface(
+                    color = toolbarBg,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(bottom = 8.dp),
+                                .padding(horizontal = 6.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             IconButton(
                                 onClick = { onSelectArticle(null) },
-                                modifier = Modifier.size(32.dp)
+                                modifier = Modifier.minimumInteractiveComponentSize()
                             ) {
                                 Icon(
                                     Icons.AutoMirrored.Filled.ArrowBack,
                                     contentDescription = "Back",
                                     tint = subtleMuted,
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
 
@@ -1479,13 +1529,13 @@ fun ArticleReaderView(
                                     if (articles.size > 1 && currentIndex > 0) {
                                         IconButton(
                                             onClick = { onSelectArticle(articles[currentIndex - 1]) },
-                                            modifier = Modifier.size(24.dp)
+                                            modifier = Modifier.size(28.dp)
                                         ) {
                                             Icon(
                                                 Icons.AutoMirrored.Filled.ArrowBack,
                                                 contentDescription = "Previous article",
                                                 tint = if (isReaderNightMode) Color(0xFFCBD5E1) else SlateText,
-                                                modifier = Modifier.size(13.dp)
+                                                modifier = Modifier.size(14.dp)
                                             )
                                         }
                                     } else {
@@ -1504,13 +1554,13 @@ fun ArticleReaderView(
                                     if (articles.size > 1 && currentIndex < articles.size - 1) {
                                         IconButton(
                                             onClick = { onSelectArticle(articles[currentIndex + 1]) },
-                                            modifier = Modifier.size(24.dp)
+                                            modifier = Modifier.size(28.dp)
                                         ) {
                                             Icon(
                                                 Icons.AutoMirrored.Filled.ArrowForward,
                                                 contentDescription = "Next article",
                                                 tint = if (isReaderNightMode) Color(0xFFCBD5E1) else SlateText,
-                                                modifier = Modifier.size(13.dp)
+                                                modifier = Modifier.size(14.dp)
                                             )
                                         }
                                     } else {
@@ -1519,265 +1569,393 @@ fun ArticleReaderView(
                                 }
                             }
 
-                            // Right: Minimal Quick Action Icons (TTS Audio, Theme Toggle, Reader Settings)
+                            // Quick Action Icons (TTS, Night Mode, Word Match Filter, Reader Settings)
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                horizontalArrangement = Arrangement.spacedBy(0.dp)
                             ) {
-                                // TTS Audio toggle
                                 IconButton(
                                     onClick = {
                                         if (isSpeaking) {
                                             tts?.stop()
                                             isSpeaking = false
                                         } else {
-                                            tts?.speak(currentArticle.content, TextToSpeech.QUEUE_FLUSH, null, "article_tts")
+                                            tts?.speak(readableContent, TextToSpeech.QUEUE_FLUSH, null, "article_tts")
                                             isSpeaking = true
                                         }
                                     },
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier.minimumInteractiveComponentSize()
                                 ) {
                                     Icon(
                                         if (isSpeaking) Icons.Default.VolumeUp else Icons.Default.Headphones,
                                         contentDescription = "Listen to Article",
                                         tint = if (isSpeaking) IndigoPrimary else subtleMuted,
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier.size(19.dp)
                                     )
                                 }
 
-                                // Dark / Light Mode Toggle
                                 IconButton(
                                     onClick = {
                                         isReaderNightMode = !isReaderNightMode
                                         readerPrefs.edit().putBoolean("reader_night_mode", isReaderNightMode).apply()
                                     },
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier.minimumInteractiveComponentSize()
                                 ) {
                                     Icon(
                                         if (isReaderNightMode) Icons.Default.WbSunny else Icons.Default.NightlightRound,
                                         contentDescription = "Toggle Theme",
                                         tint = if (isReaderNightMode) Color(0xFFFDE047) else subtleMuted,
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier.size(19.dp)
                                     )
                                 }
 
-                                // Word Match Filter
                                 IconButton(
                                     onClick = { showWordMatchFilterDialog = true },
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier.minimumInteractiveComponentSize()
                                 ) {
                                     Icon(
                                         Icons.Default.FilterAlt,
                                         contentDescription = "Word Match Filter",
                                         tint = if (readerMatchMode == "partial" || readerMinWordLength != "3") IndigoPrimary else subtleMuted,
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier.size(19.dp)
                                     )
                                 }
 
-                                // Reading Controls Sheet
                                 IconButton(
                                     onClick = { showReadingControlsSheet = true },
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier.minimumInteractiveComponentSize()
                                 ) {
                                     Icon(
                                         Icons.Default.Tune,
                                         contentDescription = "Reader Settings",
                                         tint = subtleMuted,
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier.size(19.dp)
                                     )
                                 }
                             }
                         }
+                        HorizontalDivider(thickness = 0.6.dp, color = hairlineColor)
+                    }
+                }
 
-                        // Reading Content with Interactive Words
-                        val readableContent = remember(currentArticle.content) {
-                            ArticleRichContentParser.toCleanReaderText(currentArticle.content)
-                        }
-                        val isBengaliArticle = isBengaliText(readableContent)
-                        val selectedFont = if (isBengaliArticle) AikyaFontFamily else when (readerFontFamily) {
-                            "serif" -> FontFamily.Serif
-                            "monospace" -> FontFamily.Monospace
-                            "sans" -> FontFamily.SansSerif
-                            else -> FontFamily.Serif
-                        }
-                        val isExtraBold = (readerHighlightBold == "extra_bold")
-
-                        val tokenToWordsMap = remember(readableContent, place1MultiMap, place2MultiMap, place3MultiMap, readerMatchMode, readerMinWordLength) {
-                            mutableMapOf<String, List<VocabularyWordEntity>>()
-                        }
-
-                        val annotatedText = remember(readableContent, place1MultiMap, place2MultiMap, place3MultiMap, readerMatchMode, readerMinWordLength, isExtraBold, isReaderNightMode) {
-                            tokenToWordsMap.clear()
-                            buildPlaceHighlightedAnnotatedString(
-                                content = readableContent,
-                                place1MultiMap = place1MultiMap,
-                                place2MultiMap = place2MultiMap,
-                                place3MultiMap = place3MultiMap,
-                                matchMode = readerMatchMode,
-                                minWordLengthSetting = readerMinWordLength,
-                                isExtraBold = isExtraBold,
-                                isNightMode = isReaderNightMode,
-                                tokenToWordsMap = tokenToWordsMap
-                            )
-                        }
-
-                        // Content LazyColumn
-                        LazyColumn(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxWidth()
-                                .padding(horizontal = readerPaddingDp.dp.coerceAtLeast(6.dp)),
-                            contentPadding = PaddingValues(top = 6.dp, bottom = 16.dp)
-                        ) {
-                            // Article Title and Metadata Header
-                            item {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(bottom = 12.dp)
+                // Crisp PDF-Style Paper Sheet
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 10.dp)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = paperBg,
+                        shadowElevation = 4.dp,
+                        border = BorderStroke(0.8.dp, paperBorderColor),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        val contentHPad = readerPaddingDp.coerceIn(12, 28).dp
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            // Subtle Editorial Running Header
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = contentHPad, end = contentHPad, top = 12.dp, bottom = 4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    val isTitleBengali = isBengaliText(currentArticle.title)
                                     Text(
-                                        text = currentArticle.title,
-                                        fontFamily = if (isTitleBengali) AikyaFontFamily else PoppinsFontFamily,
-                                        fontSize = (readerFontSize * 1.45f).coerceAtLeast(22f).sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = textColor,
-                                        lineHeight = ((readerFontSize * 1.45f).coerceAtLeast(22f) * 1.25f).sp
+                                        text = websiteDisplay,
+                                        fontFamily = selectedLatinFont,
+                                        fontSize = 10.5.sp,
+                                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                                        color = subtleMuted,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
                                     )
+                                    Text(
+                                        text = "${estReadingMinutes}m • $wordCount w",
+                                        fontFamily = selectedLatinFont,
+                                        fontSize = 10.5.sp,
+                                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                                        color = subtleMuted
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(5.dp))
+                                HorizontalDivider(thickness = 0.6.dp, color = hairlineColor)
+                            }
 
-                                    // Minimal Iconized Metadata Row (Reading time, words, author)
-                                    val wordCount = currentArticle.content.split(Regex("""\s+""")).count { it.isNotBlank() }
-                                    val estReadingMinutes = (wordCount / 180).coerceAtLeast(1)
-                                    val displayAuthor = currentArticle.author.trim()
-                                    val hasValidAuthor = displayAuthor.isNotBlank() && !displayAuthor.equals("Anonymous Author", ignoreCase = true)
-
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
+                            // Scrollable Rich Article Content
+                            LazyColumn(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth(),
+                                contentPadding = PaddingValues(
+                                    start = contentHPad,
+                                    end = contentHPad,
+                                    top = 10.dp,
+                                    bottom = 16.dp
+                                ),
+                                verticalArrangement = Arrangement.spacedBy(9.dp)
+                            ) {
+                                // Article Header: Title + Website Favicon Badge + Metadata + Indigo Accent Bar
+                                item(key = "article_header") {
+                                    Column(modifier = Modifier.fillMaxWidth()) {
                                         Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                            verticalAlignment = Alignment.Top
                                         ) {
-                                            Icon(
-                                                Icons.Default.Schedule,
-                                                contentDescription = null,
-                                                tint = subtleMuted,
-                                                modifier = Modifier.size(13.dp)
-                                            )
+                                            val isTitleBengali = isBengaliText(currentArticle.title)
                                             Text(
-                                                text = "${estReadingMinutes}m",
-                                                fontFamily = PoppinsFontFamily,
-                                                fontSize = 11.5.sp,
-                                                color = subtleMuted
+                                                text = currentArticle.title,
+                                                fontFamily = if (isTitleBengali) AikyaFontFamily else selectedLatinFont,
+                                                fontSize = (readerFontSize * 1.32f).coerceIn(19f, 26f).sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = textColor,
+                                                lineHeight = ((readerFontSize * 1.32f).coerceIn(19f, 26f) * 1.24f).sp,
+                                                modifier = Modifier.weight(1f)
                                             )
-                                        }
 
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(3.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Default.TextFields,
-                                                contentDescription = null,
-                                                tint = subtleMuted,
-                                                modifier = Modifier.size(13.dp)
-                                            )
-                                            Text(
-                                                text = "$wordCount w",
-                                                fontFamily = PoppinsFontFamily,
-                                                fontSize = 11.5.sp,
-                                                color = subtleMuted
-                                            )
-                                        }
-
-                                        if (hasValidAuthor) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                            // Website Favicon / Monogram Badge (PDF layout match)
+                                            val monogram = websiteDisplay.firstOrNull()?.uppercaseChar()?.toString() ?: "A"
+                                            var faviconLoadFailed by remember(faviconUrlCandidate) { mutableStateOf(false) }
+                                            Surface(
+                                                shape = RoundedCornerShape(6.dp),
+                                                color = if (isReaderNightMode) Color(0xFF312E81) else Color(0xFFEEF2FF),
+                                                border = BorderStroke(
+                                                    0.8.dp,
+                                                    if (isReaderNightMode) Color(0xFF4338CA) else Color(0xFFC7D2FE)
+                                                ),
+                                                modifier = Modifier
+                                                    .padding(top = 2.dp)
+                                                    .size(28.dp)
                                             ) {
-                                                Icon(
-                                                    Icons.Default.Person,
-                                                    contentDescription = null,
-                                                    tint = subtleMuted,
-                                                    modifier = Modifier.size(13.dp)
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    if (faviconUrlCandidate.isNotBlank() && !faviconLoadFailed) {
+                                                        AsyncImage(
+                                                            model = faviconUrlCandidate,
+                                                            contentDescription = "$websiteDisplay icon",
+                                                            contentScale = ContentScale.Fit,
+                                                            onError = { faviconLoadFailed = true },
+                                                            modifier = Modifier
+                                                                .size(18.dp)
+                                                                .clip(RoundedCornerShape(3.dp))
+                                                        )
+                                                    } else {
+                                                        Text(
+                                                            text = monogram,
+                                                            fontFamily = selectedLatinFont,
+                                                            fontWeight = FontWeight.Bold,
+                                                            fontSize = 13.sp,
+                                                            color = if (isReaderNightMode) Color(0xFFA5B4FC) else Color(0xFF4338CA)
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        val metaText = listOfNotNull(
+                                            authorDisplay.takeIf { it.isNotBlank() },
+                                            dateDisplay.takeIf { it.isNotBlank() },
+                                            websiteDisplay.takeIf { it.isNotBlank() }
+                                        ).joinToString("  •  ")
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Text(
+                                            text = metaText,
+                                            fontFamily = if (isBengaliText(metaText)) AikyaFontFamily else selectedLatinFont,
+                                            fontSize = (readerFontSize * 0.72f).coerceIn(10.5f, 13f).sp,
+                                            color = subtleMuted
+                                        )
+
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .width(72.dp)
+                                                .height(1.5.dp)
+                                                .background(accentBlue)
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                    }
+                                }
+
+                                // Cover Image from Article / Link
+                                if (coverImageCandidate != null) {
+                                    item(key = "article_cover_image") {
+                                        ArticleReaderImageCard(
+                                            url = coverImageCandidate,
+                                            caption = "",
+                                            captionFontFamily = selectedLatinFont,
+                                            captionColor = subtleMuted,
+                                            borderColor = hairlineColor
+                                        )
+                                    }
+                                }
+
+                                // Rich Structured Blocks (Headings, Images, Blockquotes, Bullets, Paragraphs)
+                                if (renderedBlocks.isEmpty()) {
+                                    item(key = "empty_fallback") {
+                                        val fallbackAnnotated = buildPlaceHighlightedAnnotatedString(
+                                            content = readableContent,
+                                            place1MultiMap = place1MultiMap,
+                                            place2MultiMap = place2MultiMap,
+                                            place3MultiMap = place3MultiMap,
+                                            matchMode = readerMatchMode,
+                                            minWordLengthSetting = readerMinWordLength,
+                                            isExtraBold = isExtraBold,
+                                            isNightMode = isReaderNightMode,
+                                            latinFontFamily = selectedLatinFont,
+                                            parseInlineLinks = false,
+                                            tokenToWordsMap = tokenToWordsMap
+                                        )
+                                        ClickableText(
+                                            text = fallbackAnnotated,
+                                            style = TextStyle(
+                                                fontSize = readerFontSize.sp,
+                                                lineHeight = (readerFontSize * readerLineSpacing).sp,
+                                                color = textColor,
+                                                fontFamily = if (isBengaliText(readableContent)) AikyaFontFamily else selectedLatinFont,
+                                                textAlign = if (readerJustify) TextAlign.Justify else TextAlign.Start
+                                            ),
+                                            onClick = { offset -> handleRichTextTap(fallbackAnnotated, offset) },
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+                                } else {
+                                    items(
+                                        count = renderedBlocks.size,
+                                        key = { idx -> "block_$idx" }
+                                    ) { idx ->
+                                        val (block, blockAnnotated) = renderedBlocks[idx]
+                                        when (block) {
+                                            is ArticleContentBlock.Heading -> {
+                                                val hFactor = if (block.level <= 2) 1.18f else 1.08f
+                                                val hSize = (readerFontSize * hFactor).sp
+                                                ClickableText(
+                                                    text = blockAnnotated,
+                                                    style = TextStyle(
+                                                        fontSize = hSize,
+                                                        lineHeight = (readerFontSize * hFactor * 1.26f).sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = textColor,
+                                                        fontFamily = if (isBengaliText(block.text)) AikyaFontFamily else selectedLatinFont
+                                                    ),
+                                                    onClick = { offset -> handleRichTextTap(blockAnnotated, offset) },
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(top = 4.dp)
                                                 )
-                                                Text(
-                                                    text = displayAuthor,
-                                                    fontFamily = PoppinsFontFamily,
-                                                    fontSize = 11.5.sp,
-                                                    color = subtleMuted,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
+                                            }
+
+                                            is ArticleContentBlock.BulletItem -> {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(start = 6.dp),
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                    verticalAlignment = Alignment.Top
+                                                ) {
+                                                    Text(
+                                                        text = block.marker,
+                                                        fontFamily = selectedLatinFont,
+                                                        fontSize = readerFontSize.sp,
+                                                        lineHeight = (readerFontSize * readerLineSpacing).sp,
+                                                        color = textColor
+                                                    )
+                                                    ClickableText(
+                                                        text = blockAnnotated,
+                                                        style = TextStyle(
+                                                            fontSize = readerFontSize.sp,
+                                                            lineHeight = (readerFontSize * readerLineSpacing).sp,
+                                                            color = textColor,
+                                                            fontFamily = if (isBengaliText(block.text)) AikyaFontFamily else selectedLatinFont
+                                                        ),
+                                                        onClick = { offset -> handleRichTextTap(blockAnnotated, offset) },
+                                                        modifier = Modifier.weight(1f)
+                                                    )
+                                                }
+                                            }
+
+                                            is ArticleContentBlock.Blockquote -> {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .height(IntrinsicSize.Min)
+                                                        .padding(vertical = 2.dp),
+                                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .width(2.5.dp)
+                                                            .fillMaxHeight()
+                                                            .background(accentBlue, RoundedCornerShape(2.dp))
+                                                    )
+                                                    ClickableText(
+                                                        text = blockAnnotated,
+                                                        style = TextStyle(
+                                                            fontSize = (readerFontSize * 0.96f).sp,
+                                                            lineHeight = (readerFontSize * 0.96f * readerLineSpacing).sp,
+                                                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                                                            color = subtleMuted,
+                                                            fontFamily = if (isBengaliText(block.text)) AikyaFontFamily else selectedLatinFont
+                                                        ),
+                                                        onClick = { offset -> handleRichTextTap(blockAnnotated, offset) },
+                                                        modifier = Modifier.weight(1f)
+                                                    )
+                                                }
+                                            }
+
+                                            is ArticleContentBlock.ImageBlock -> {
+                                                ArticleReaderImageCard(
+                                                    url = block.url,
+                                                    caption = block.caption,
+                                                    captionFontFamily = if (isBengaliText(block.caption)) AikyaFontFamily else selectedLatinFont,
+                                                    captionColor = subtleMuted,
+                                                    borderColor = hairlineColor
+                                                )
+                                            }
+
+                                            is ArticleContentBlock.Paragraph -> {
+                                                ClickableText(
+                                                    text = blockAnnotated,
+                                                    style = TextStyle(
+                                                        fontSize = readerFontSize.sp,
+                                                        lineHeight = (readerFontSize * readerLineSpacing).sp,
+                                                        color = textColor,
+                                                        fontFamily = if (isBengaliText(block.text)) AikyaFontFamily else selectedLatinFont,
+                                                        textAlign = if (readerJustify) TextAlign.Justify else TextAlign.Start
+                                                    ),
+                                                    onClick = { offset -> handleRichTextTap(blockAnnotated, offset) },
+                                                    modifier = Modifier.fillMaxWidth()
                                                 )
                                             }
                                         }
                                     }
-
-                                    Spacer(modifier = Modifier.height(10.dp))
-                                    HorizontalDivider(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        thickness = 1.dp,
-                                        color = if (isReaderNightMode) Color(0xFF334155) else Color(0xFFE2E8F0)
-                                    )
-                                    Spacer(modifier = Modifier.height(8.dp))
                                 }
                             }
 
-                            // Clean Article Body (No broken drop-cap Row side-by-side that broke wrapping!)
-                            item {
-                                ClickableText(
-                                    text = annotatedText,
-                                    style = TextStyle(
-                                        fontSize = readerFontSize.sp,
-                                        lineHeight = (readerFontSize * readerLineSpacing).sp,
-                                        color = textColor,
-                                        fontFamily = selectedFont,
-                                        textAlign = if (readerJustify) TextAlign.Justify else TextAlign.Start
-                                    ),
-                                    onClick = { offset ->
-                                        annotatedText.getStringAnnotations(
-                                            tag = "VOCAB_MATCH",
-                                            start = offset,
-                                            end = offset
-                                        ).firstOrNull()?.let { annotation ->
-                                            val key = annotation.item.lowercase(Locale.ROOT)
-                                            val matchedList = tokenToWordsMap[key]
-                                                ?: place1MultiMap[key]
-                                                ?: place2MultiMap[key]
-                                                ?: place3MultiMap[key]
-                                                ?: emptyList()
-                                            if (matchedList.isNotEmpty()) {
-                                                matchedWordsForPopup = matchedList
-                                                popupWordIndex = 0
-                                            }
-                                        }
-                                    },
-                                    modifier = Modifier.fillMaxWidth()
+                            // Subtle Centered Paper Page Footer
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { showReadingControlsSheet = true }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "Page ${currentIndex + 1} of ${articles.size}",
+                                    fontFamily = selectedLatinFont,
+                                    fontSize = 11.5.sp,
+                                    color = subtleMuted,
+                                    letterSpacing = 0.4.sp
                                 )
                             }
                         }
-
-                        // Footer: Subtle Centered Page Indicator
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { showReadingControlsSheet = true }
-                                .padding(top = 4.dp, bottom = 2.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "Page ${currentIndex + 1} of ${articles.size}",
-                                fontFamily = FontFamily.Serif,
-                                fontSize = 12.sp,
-                                color = subtleMuted,
-                                letterSpacing = 0.5.sp
-                            )
-                        }
                     }
                 }
+            }
 
                 // Touch outside to dismiss popup modal (touches on main screen close popup)
                 if (selectedWordForDetails != null) {
@@ -2832,7 +3010,7 @@ fun ArticleReaderView(
         }
     }
 
-    // Reader Display Settings Dialog (English, Minimalist layout, font size, padding, alignment)
+    // Unified Articles & Reader Settings Dialog
     if (isReaderSettingsVisible) {
         ReaderSettingsDialog(
             fontSize = readerFontSize,
@@ -2841,6 +3019,41 @@ fun ArticleReaderView(
             fontFamily = readerFontFamily,
             highlightBold = readerHighlightBold,
             isJustified = readerJustify,
+            isSelectionMode = isSelectionMode,
+            isSyncing = isSyncing,
+            onAddManual = {
+                showLocalReaderSettings = false
+                onDismissReaderSettings()
+                localAddDialogTab = 0
+                showAddDialog = true
+            },
+            onImportWebUrl = {
+                showLocalReaderSettings = false
+                onDismissReaderSettings()
+                localAddDialogTab = 1
+                showAddDialog = true
+            },
+            onOpenSync = {
+                showLocalReaderSettings = false
+                onDismissReaderSettings()
+                showSyncDialog = true
+            },
+            onToggleSelectionMode = {
+                showLocalReaderSettings = false
+                onDismissReaderSettings()
+                if (isSelectionMode) {
+                    isSelectionMode = false
+                    selectedBookArticleIds = emptyList()
+                } else {
+                    isSelectionMode = true
+                }
+            },
+            onOpenBookStudio = {
+                showLocalReaderSettings = false
+                onDismissReaderSettings()
+                studioInitialSelectedIds = selectedBookArticleIds
+                showLocalBookStudio = true
+            },
             onSave = { newSize, newPadding, newSpacing, newFont, newBold, newJust ->
                 readerFontSize = newSize
                 readerPaddingDp = newPadding
@@ -2920,6 +3133,10 @@ private fun buildPlaceHighlightedAnnotatedString(
     minWordLengthSetting: String = "3", // "3", "4", "5", "5+"
     isExtraBold: Boolean = false,
     isNightMode: Boolean = false,
+    latinFontFamily: FontFamily = TinosFontFamily,
+    baseFontWeight: FontWeight = FontWeight.Normal,
+    seenKeys: MutableSet<String> = mutableSetOf(),
+    parseInlineLinks: Boolean = false,
     tokenToWordsMap: MutableMap<String, List<VocabularyWordEntity>> = mutableMapOf()
 ): AnnotatedString {
     val minLen = when (minWordLengthSetting) {
@@ -2930,7 +3147,6 @@ private fun buildPlaceHighlightedAnnotatedString(
         else -> 3
     }
 
-    // Pre-filter eligible keys for substring matching sorted by descending length
     val eligiblePlace1 = if (matchMode == "partial") {
         place1MultiMap.keys.filter { it.length >= minLen }.sortedByDescending { it.length }
     } else emptyList()
@@ -2948,7 +3164,6 @@ private fun buildPlaceHighlightedAnnotatedString(
     fun findMatch(cleanToken: String): ReaderTokenMatch? {
         if (cleanToken.length < minLen) return null
         return matchMemo.getOrPut(cleanToken) {
-            // 1. Exact match check across Place 1, Place 2, Place 3
             if (place1MultiMap.containsKey(cleanToken)) {
                 ReaderTokenMatch(1, place1MultiMap[cleanToken] ?: emptyList())
             } else if (place2MultiMap.containsKey(cleanToken)) {
@@ -2956,7 +3171,6 @@ private fun buildPlaceHighlightedAnnotatedString(
             } else if (place3MultiMap.containsKey(cleanToken)) {
                 ReaderTokenMatch(3, place3MultiMap[cleanToken] ?: emptyList())
             } else if (matchMode == "partial") {
-                // 2. Partial / Substring match: Place 1 -> Place 2 -> Place 3
                 val p1Key = eligiblePlace1.firstOrNull { k ->
                     cleanToken.contains(k) || k.contains(cleanToken)
                 }
@@ -2983,56 +3197,116 @@ private fun buildPlaceHighlightedAnnotatedString(
         }
     }
 
+    val segments = if (parseInlineLinks) {
+        ArticleRichContentParser.parseInlineSegments(content)
+    } else {
+        listOf(com.example.data.pdf.InlineRichSegment(content, null))
+    }
+
     return buildAnnotatedString {
         val regex = Regex("""[\w\u0980-\u09FF]+|[^\w\s\u0980-\u09FF]+|\s+""")
-        val matches = regex.findAll(content)
-
         val targetWeight = if (isExtraBold) FontWeight.Black else FontWeight.ExtraBold
         val place1Color = if (isNightMode) Color(0xFF60A5FA) else Color(0xFF1D4ED8)
         val place2Color = if (isNightMode) Color(0xFF34D399) else Color(0xFF047857)
         val place3Color = if (isNightMode) Color(0xFFFBBF24) else Color(0xFFD97706)
+        val linkColor = if (isNightMode) Color(0xFF60A5FA) else Color(0xFF2563EB)
 
-        // Set to ensure a word is only highlighted ONCE per article
-        val seenKeys = mutableSetOf<String>()
+        for (seg in segments) {
+            val isLink = seg.url != null
+            if (isLink) {
+                pushStringAnnotation(tag = "LINK_URL", annotation = seg.url!!)
+            }
 
-        for (m in matches) {
-            val token = m.value
-            val cleanToken = token.trim().lowercase(Locale.ROOT)
-            val matchInfo = findMatch(cleanToken)
-            val isAlreadySeen = seenKeys.contains(cleanToken)
+            val matches = regex.findAll(seg.text)
+            for (m in matches) {
+                val token = m.value
+                val cleanToken = token.trim().lowercase(Locale.ROOT)
+                val matchInfo = findMatch(cleanToken)
+                val isAlreadySeen = seenKeys.contains(cleanToken)
 
-            if (matchInfo != null && !isAlreadySeen) {
-                seenKeys.add(cleanToken)
-                tokenToWordsMap[cleanToken] = matchInfo.words
-                val isBengali = isBengaliText(token)
-                val highlightColor = when (matchInfo.place) {
-                    1 -> place1Color
-                    2 -> place2Color
-                    else -> place3Color
-                }
-                pushStringAnnotation(tag = "VOCAB_MATCH", annotation = cleanToken)
-                withStyle(
-                    SpanStyle(
-                        color = highlightColor,
-                        fontWeight = targetWeight,
-                        fontFamily = if (isBengali) AikyaFontFamily else PoppinsFontFamily,
-                        fontSynthesis = FontSynthesis.All
-                    )
-                ) {
-                    append(token)
-                }
-                pop()
-            } else {
-                val isBengali = isBengaliText(token)
-                withStyle(
-                    SpanStyle(
-                        fontFamily = if (isBengali) AikyaFontFamily else PoppinsFontFamily,
-                        fontWeight = FontWeight.Normal
-                    )
-                ) {
-                    append(token)
+                if (matchInfo != null && !isAlreadySeen) {
+                    seenKeys.add(cleanToken)
+                    tokenToWordsMap[cleanToken] = matchInfo.words
+                    val isBengali = isBengaliText(token)
+                    val highlightColor = when (matchInfo.place) {
+                        1 -> place1Color
+                        2 -> place2Color
+                        else -> place3Color
+                    }
+                    pushStringAnnotation(tag = "VOCAB_MATCH", annotation = cleanToken)
+                    withStyle(
+                        SpanStyle(
+                            color = highlightColor,
+                            fontWeight = targetWeight,
+                            fontFamily = if (isBengali) AikyaFontFamily else latinFontFamily,
+                            textDecoration = if (isLink) TextDecoration.Underline else TextDecoration.None,
+                            fontSynthesis = FontSynthesis.All
+                        )
+                    ) {
+                        append(token)
+                    }
+                    pop()
+                } else {
+                    val isBengali = isBengaliText(token)
+                    withStyle(
+                        SpanStyle(
+                            fontFamily = if (isBengali) AikyaFontFamily else latinFontFamily,
+                            fontWeight = baseFontWeight,
+                            color = if (isLink) linkColor else Color.Unspecified,
+                            textDecoration = if (isLink) TextDecoration.Underline else TextDecoration.None
+                        )
+                    ) {
+                        append(token)
+                    }
                 }
             }
+
+            if (isLink) {
+                pop()
+            }
+        }
+    }
+}
+
+@Composable
+private fun ArticleReaderImageCard(
+    url: String,
+    caption: String,
+    captionFontFamily: FontFamily,
+    captionColor: Color,
+    borderColor: Color
+) {
+    var loadFailed by remember(url) { mutableStateOf(false) }
+    if (loadFailed || url.isBlank()) return
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        AsyncImage(
+            model = url,
+            contentDescription = caption.ifBlank { "Article image" },
+            contentScale = ContentScale.FillWidth,
+            onError = { loadFailed = true },
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 260.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .border(0.7.dp, borderColor, RoundedCornerShape(4.dp))
+        )
+        if (caption.isNotBlank()) {
+            Spacer(modifier = Modifier.height(5.dp))
+            Text(
+                text = caption,
+                fontFamily = captionFontFamily,
+                fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                fontSize = 11.sp,
+                color = captionColor,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(0.92f)
+            )
         }
     }
 }
@@ -3574,6 +3848,13 @@ private fun ReaderSettingsDialog(
     fontFamily: String,
     highlightBold: String,
     isJustified: Boolean,
+    isSelectionMode: Boolean = false,
+    isSyncing: Boolean = false,
+    onAddManual: () -> Unit = {},
+    onImportWebUrl: () -> Unit = {},
+    onOpenSync: () -> Unit = {},
+    onToggleSelectionMode: () -> Unit = {},
+    onOpenBookStudio: () -> Unit = {},
     onSave: (fontSize: Float, paddingDp: Int, lineSpacing: Float, fontFamily: String, highlightBold: String, isJustified: Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -3591,8 +3872,8 @@ private fun ReaderSettingsDialog(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 28.dp, vertical = 24.dp)
-                .widthIn(max = 400.dp),
+                .padding(horizontal = 24.dp, vertical = 24.dp)
+                .widthIn(max = 420.dp),
             shape = RoundedCornerShape(24.dp),
             color = Color.White,
             shadowElevation = 16.dp,
@@ -3623,7 +3904,7 @@ private fun ReaderSettingsDialog(
                             Icon(Icons.Default.Tune, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(17.dp))
                         }
                         Text(
-                            text = "Reader Settings",
+                            text = "Articles & Reader",
                             fontFamily = PoppinsFontFamily,
                             fontWeight = FontWeight.Bold,
                             fontSize = 17.sp,
@@ -3633,7 +3914,7 @@ private fun ReaderSettingsDialog(
                     IconButton(
                         onClick = onDismiss,
                         modifier = Modifier
-                            .size(30.dp)
+                            .size(32.dp)
                             .clip(CircleShape)
                             .background(SlateLight)
                     ) {
@@ -3647,10 +3928,77 @@ private fun ReaderSettingsDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f, fill = false)
-                        .heightIn(max = 390.dp)
+                        .heightIn(max = 430.dp)
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
+                    // Minimal Article Library Actions
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "Library Actions",
+                            fontFamily = PoppinsFontFamily,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = SlateText
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            MinimalSettingsActionChip(
+                                icon = Icons.Default.Add,
+                                label = "New",
+                                onClick = onAddManual,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("settings_add_article")
+                            )
+                            MinimalSettingsActionChip(
+                                icon = Icons.Default.Language,
+                                label = "Web URL",
+                                onClick = onImportWebUrl,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("settings_import_url")
+                            )
+                            MinimalSettingsActionChip(
+                                icon = Icons.Default.Sync,
+                                label = if (isSyncing) "Syncing" else "Sync",
+                                onClick = onOpenSync,
+                                isActive = isSyncing,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("settings_sync_articles")
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            MinimalSettingsActionChip(
+                                icon = if (isSelectionMode) Icons.Default.Close else Icons.Default.Checklist,
+                                label = if (isSelectionMode) "Exit Select" else "Select",
+                                onClick = onToggleSelectionMode,
+                                isActive = isSelectionMode,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("settings_toggle_select")
+                            )
+                            MinimalSettingsActionChip(
+                                icon = Icons.Default.AutoStories,
+                                label = "Book PDF",
+                                onClick = onOpenBookStudio,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("settings_book_studio")
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = SlateBorder.copy(alpha = 0.55f))
+
                 // Font Size Control
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(
@@ -3913,6 +4261,51 @@ private fun ReaderSettingsDialog(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun MinimalSettingsActionChip(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    isActive: Boolean = false,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(12.dp),
+        color = if (isActive) IndigoLight else Color(0xFFF8FAFC),
+        border = BorderStroke(
+            width = if (isActive) 1.5.dp else 1.dp,
+            color = if (isActive) IndigoPrimary else SlateBorder
+        ),
+        modifier = modifier.heightIn(min = 48.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = if (isActive) IndigoPrimary else SlateText,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = label,
+                fontFamily = PoppinsFontFamily,
+                fontSize = 11.5.sp,
+                fontWeight = if (isActive) FontWeight.Bold else FontWeight.SemiBold,
+                color = if (isActive) IndigoPrimary else SlateText,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }

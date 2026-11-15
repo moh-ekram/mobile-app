@@ -153,6 +153,132 @@ object ArticleRichContentParser {
         return runs
     }
 
+    private val emailRegex = Regex("""[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}""")
+
+    private val shareAndUiLabels = setOf(
+        "email", "e-mail", "email this", "email article", "share via email",
+        "facebook", "flipboard", "twitter", "x", "linkedin", "whatsapp",
+        "telegram", "reddit", "pinterest", "threads", "bluesky", "mastodon",
+        "instagram", "youtube", "tiktok", "snapchat", "pocket", "tumblr",
+        "copy link", "copy url", "share", "share this", "share article",
+        "print", "print article", "sms", "text", "gift article",
+        "save article", "bookmark", "subscribe", "newsletter", "sign in",
+        "log in", "comments", "view comments", "leave a comment",
+        "back to top", "read more", "get app", "download app"
+    )
+
+    private val noiseParagraphPrefixes = listOf(
+        "tags:", "topics:", "keywords:", "filed under:", "categories:",
+        "more on:", "related topics:", "related stories:",
+        "share this article", "share this story", "share via email",
+        "follow us on", "join us on", "sign up for our", "sign up for the",
+        "subscribe to our", "get our daily", "get the latest",
+        "email the author", "email us at", "send news tips", "contact the newsroom",
+        "npr does not offer or accept money for coverage",
+        "all rights reserved", "copyright ©"
+    )
+
+    private fun stripMarkdownLinkWrapper(text: String): Pair<String, String?> {
+        val m = markdownLinkRegex.matchEntire(text.trim())
+        return if (m != null) {
+            m.groupValues[1].trim() to m.groupValues[2].trim()
+        } else {
+            text.trim() to null
+        }
+    }
+
+    private fun isShareOrTagUrl(url: String): Boolean {
+        val lower = url.lowercase()
+        return lower.startsWith("mailto:") ||
+            lower.contains("/tag/") ||
+            lower.contains("/tags/") ||
+            lower.contains("/topic/") ||
+            lower.contains("/topics/") ||
+            lower.contains("facebook.com/sharer") ||
+            lower.contains("facebook.com/dialog/share") ||
+            lower.contains("twitter.com/intent") ||
+            lower.contains("twitter.com/share") ||
+            lower.contains("x.com/intent") ||
+            lower.contains("flipboard.com/bookmarklet") ||
+            lower.contains("linkedin.com/share") ||
+            lower.contains("linkedin.com/sharing") ||
+            lower.contains("api.whatsapp.com") ||
+            lower.contains("t.me/share") ||
+            lower.contains("reddit.com/submit")
+    }
+
+    fun isShareOrSocialItem(rawItemText: String): Boolean {
+        val (label, url) = stripMarkdownLinkWrapper(rawItemText)
+        if (url != null && isShareOrTagUrl(url)) return true
+        val norm = label.lowercase().replace(Regex("""[^\p{L}\p{N}\s-]"""), "").trim()
+        if (norm in shareAndUiLabels) return true
+        if (emailRegex.containsMatchIn(label) && label.length <= 80) return true
+        return false
+    }
+
+    fun isNoiseParagraph(rawText: String): Boolean {
+        val plain = cleanInlineMarkup(rawText).trim()
+        if (plain.isBlank()) return true
+        val lower = plain.lowercase()
+        if (noiseParagraphPrefixes.any { lower.startsWith(it) }) return true
+        if (lower.contains("npr does not offer or accept money for coverage")) return true
+        if ((lower.startsWith("©") || lower.startsWith("copyright")) && plain.length < 160) return true
+        // Short standalone email/contact blurbs ("Questions? Tips? Email foo@bar.com")
+        if (emailRegex.containsMatchIn(plain) && plain.length <= 130 &&
+            (lower.contains("email") || lower.contains("contact") || lower.contains("tip") || lower.contains("reach ") || plain.split(Regex("""\s+""")).size <= 5)
+        ) {
+            return true
+        }
+        // Standalone share / tag-only paragraph (single link or single share label)
+        if (plain.length <= 80 && isShareOrSocialItem(rawText)) return true
+        return false
+    }
+
+    private fun isShortPlainTagOrLabel(rawItemText: String): Boolean {
+        val (label, _) = stripMarkdownLinkWrapper(rawItemText)
+        val trimmed = label.trim()
+        if (trimmed.isEmpty() || trimmed.length > 40) return false
+        if (trimmed.endsWith('.') || trimmed.endsWith('!') || trimmed.endsWith('?')) return false
+        return trimmed.split(Regex("""\s+""")).size <= 3
+    }
+
+    private fun filterBoilerplateBlocks(blocks: List<ArticleContentBlock>): List<ArticleContentBlock> {
+        val out = mutableListOf<ArticleContentBlock>()
+        var i = 0
+        while (i < blocks.size) {
+            val block = blocks[i]
+            if (block is ArticleContentBlock.BulletItem) {
+                // Collect contiguous bullet run to detect tag/share lists as a unit
+                val run = mutableListOf<ArticleContentBlock.BulletItem>()
+                while (i < blocks.size && blocks[i] is ArticleContentBlock.BulletItem) {
+                    run.add(blocks[i] as ArticleContentBlock.BulletItem)
+                    i++
+                }
+                val shareHits = run.count { isShareOrSocialItem(it.text) }
+                val allShortTagsOrShare = run.all { isShareOrSocialItem(it.text) || isShortPlainTagOrLabel(it.text) }
+                if (shareHits >= 1 && allShortTagsOrShare) {
+                    // Drop entire tag + share bullet list (e.g. trump / Facebook / Flipboard / Email)
+                    continue
+                }
+                for (item in run) {
+                    if (!isShareOrSocialItem(item.text)) {
+                        out.add(item)
+                    }
+                }
+            } else {
+                val keep = when (block) {
+                    is ArticleContentBlock.Paragraph -> !isNoiseParagraph(block.text)
+                    is ArticleContentBlock.Heading -> !isNoiseParagraph(block.text) && block.text.lowercase() !in shareAndUiLabels
+                    is ArticleContentBlock.Blockquote -> !isNoiseParagraph(block.text)
+                    else -> true
+                }
+                if (keep) out.add(block)
+                i++
+            }
+        }
+        return out
+    }
+
     /**
      * Parses raw article content into structured headings, lists, quotes, images, and paragraphs.
      */
@@ -243,7 +369,7 @@ object ArticleRichContentParser {
         }
         flushParagraph()
 
-        return blocks
+        return filterBoilerplateBlocks(blocks)
     }
 
     /**
@@ -351,6 +477,17 @@ object ArticlePdfBookGenerator {
     private const val CONTENT_BOTTOM = 788f
     private const val FOOTER_Y = 818f
 
+    data class PdfFontOption(val key: String, val label: String)
+
+    val pdfFontOptions = listOf(
+        PdfFontOption("aikya_tinos", "Aikya · Tinos"),
+        PdfFontOption("aikya_poppins", "Aikya · Poppins"),
+        PdfFontOption("aikya_serif", "Aikya · Serif"),
+        PdfFontOption("aikya_sans", "Aikya · Sans"),
+        PdfFontOption("aikya_mono", "Aikya · Mono"),
+        PdfFontOption("system_serif", "Bangla · Serif")
+    )
+
     private val imageHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(4, TimeUnit.SECONDS)
@@ -378,34 +515,77 @@ object ArticlePdfBookGenerator {
         }
     }
 
-    private class FontSet(context: Context) {
-        val tinosRegular: Typeface
-        val tinosBold: Typeface
-        val tinosItalic: Typeface
+    private class FontSet(context: Context, fontFamilyKey: String) {
+        val latinRegular: Typeface
+        val latinBold: Typeface
+        val latinItalic: Typeface
         val bengaliRegular: Typeface
         val bengaliBold: Typeface
+        val preferSystemBengali: Boolean = (fontFamilyKey == "system_serif")
+        val hasNativeBoldLatin: Boolean
 
         init {
             val loadedTinos = ResourcesCompat.getFont(context, R.font.tinos) ?: Typeface.SERIF
+            val loadedPoppinsReg = ResourcesCompat.getFont(context, R.font.poppins_regular) ?: Typeface.SANS_SERIF
+            val loadedPoppinsBold = ResourcesCompat.getFont(context, R.font.poppins_bold) ?: Typeface.create(loadedPoppinsReg, Typeface.BOLD)
             val loadedAikyaReg = ResourcesCompat.getFont(context, R.font.aikya_regular) ?: Typeface.DEFAULT
-            val loadedAikyaBold = ResourcesCompat.getFont(context, R.font.aikya_bold) ?: loadedAikyaReg
 
-            tinosRegular = buildCompositeTypeface(context, R.font.tinos, R.font.aikya_regular, R.font.kalpurush)
-                ?: loadedTinos
-            tinosBold = Typeface.create(tinosRegular, Typeface.BOLD)
-            tinosItalic = Typeface.create(tinosRegular, Typeface.ITALIC)
+            when (fontFamilyKey) {
+                "aikya_poppins" -> {
+                    latinRegular = buildCompositeTypeface(context, R.font.poppins_regular, R.font.aikya_regular) ?: loadedPoppinsReg
+                    latinBold = buildCompositeTypeface(context, R.font.poppins_bold, R.font.aikya_regular) ?: loadedPoppinsBold
+                    latinItalic = Typeface.create(latinRegular, Typeface.ITALIC)
+                    hasNativeBoldLatin = true
+                }
+                "aikya_serif" -> {
+                    latinRegular = Typeface.SERIF
+                    latinBold = Typeface.create(Typeface.SERIF, Typeface.BOLD)
+                    latinItalic = Typeface.create(Typeface.SERIF, Typeface.ITALIC)
+                    hasNativeBoldLatin = true
+                }
+                "aikya_sans" -> {
+                    latinRegular = Typeface.SANS_SERIF
+                    latinBold = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                    latinItalic = Typeface.create(Typeface.SANS_SERIF, Typeface.ITALIC)
+                    hasNativeBoldLatin = true
+                }
+                "aikya_mono" -> {
+                    latinRegular = Typeface.MONOSPACE
+                    latinBold = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+                    latinItalic = Typeface.create(Typeface.MONOSPACE, Typeface.ITALIC)
+                    hasNativeBoldLatin = true
+                }
+                "system_serif" -> {
+                    latinRegular = Typeface.SERIF
+                    latinBold = Typeface.create(Typeface.SERIF, Typeface.BOLD)
+                    latinItalic = Typeface.create(Typeface.SERIF, Typeface.ITALIC)
+                    hasNativeBoldLatin = true
+                }
+                else -> { // "aikya_tinos"
+                    latinRegular = buildCompositeTypeface(context, R.font.tinos, R.font.aikya_regular) ?: loadedTinos
+                    latinBold = Typeface.create(latinRegular, Typeface.BOLD)
+                    latinItalic = Typeface.create(latinRegular, Typeface.ITALIC)
+                    hasNativeBoldLatin = false
+                }
+            }
 
-            bengaliRegular = buildCompositeTypeface(context, R.font.aikya_regular, R.font.kalpurush, R.font.tinos)
-                ?: loadedAikyaReg
-            bengaliBold = buildCompositeTypeface(context, R.font.aikya_bold, R.font.kalpurush, R.font.tinos)
-                ?: Typeface.create(loadedAikyaBold, Typeface.BOLD)
+            if (preferSystemBengali) {
+                bengaliRegular = Typeface.SERIF
+                bengaliBold = Typeface.create(Typeface.SERIF, Typeface.BOLD)
+            } else {
+                val latinRes = if (fontFamilyKey == "aikya_poppins") R.font.poppins_regular else R.font.tinos
+                val aikyaComposite = buildCompositeTypeface(context, R.font.aikya_regular, latinRes) ?: loadedAikyaReg
+                // Always use aikya_regular for Bengali bold too (aikya_bold & kalpurush TTFs lack Bengali glyphs);
+                // BilingualTypefaceSpan applies isFakeBoldText = true cleanly so Bangla titles match the body font.
+                bengaliRegular = aikyaComposite
+                bengaliBold = aikyaComposite
+            }
         }
 
         private fun buildCompositeTypeface(
             context: Context,
             primaryRes: Int,
-            secondaryRes: Int,
-            tertiaryRes: Int
+            secondaryRes: Int
         ): Typeface? {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
             return try {
@@ -413,8 +593,6 @@ object ArticlePdfBookGenerator {
                 val builder = Typeface.CustomFallbackBuilder(primaryFamily)
                 val secFamily = FontFamily.Builder(Font.Builder(context.resources, secondaryRes).build()).build()
                 builder.addCustomFallback(secFamily)
-                val terFamily = FontFamily.Builder(Font.Builder(context.resources, tertiaryRes).build()).build()
-                builder.addCustomFallback(terFamily)
                 builder.build()
             } catch (_: Exception) {
                 null
@@ -485,6 +663,8 @@ object ArticlePdfBookGenerator {
         bookTitle: String,
         bookSubtitle: String,
         articles: List<ArticleEntity>,
+        fontFamilyKey: String = "aikya_tinos",
+        bodyFontSizePt: Float = 10.8f,
         onProgress: (stage: String) -> Unit = {}
     ): Result<GeneratedBookPdfResult> = withContext(Dispatchers.IO) {
         try {
@@ -493,7 +673,8 @@ object ArticlePdfBookGenerator {
             }
 
             onProgress("Loading typography & article assets...")
-            val fonts = FontSet(context)
+            val fonts = FontSet(context, fontFamilyKey)
+            val effectiveBodyPt = bodyFontSizePt.coerceIn(8.5f, 15.5f)
             val prepared = prepareArticles(articles) { loaded, total ->
                 onProgress("Preparing article $loaded of $total...")
             }
@@ -511,7 +692,7 @@ object ArticlePdfBookGenerator {
                     startPage = 100 + idx
                 )
             }
-            val tocPageCount = measureTocPages(bookTitle, bookSubtitle, estimatedEntries, fonts).size.coerceAtLeast(1)
+            val tocPageCount = measureTocPages(bookTitle, bookSubtitle, estimatedEntries, fonts, effectiveBodyPt).size.coerceAtLeast(1)
 
             // Layout all articles continuously starting right after TOC pages (no inter-article page breaks)
             val articlePages = mutableListOf<MutableList<PageDrawOp>>()
@@ -519,6 +700,7 @@ object ArticlePdfBookGenerator {
             layoutArticlesContinuously(
                 preparedArticles = prepared,
                 fonts = fonts,
+                bodyFontSizePt = effectiveBodyPt,
                 firstArticlePageNumber = tocPageCount + 1,
                 outPages = articlePages,
                 outTocEntries = resolvedTocEntries
@@ -530,6 +712,7 @@ object ArticlePdfBookGenerator {
                 bookSubtitle = bookSubtitle,
                 entries = resolvedTocEntries,
                 fonts = fonts,
+                bodyFontSizePt = effectiveBodyPt,
                 expectedPageCount = tocPageCount
             )
 
@@ -537,13 +720,13 @@ object ArticlePdfBookGenerator {
             val pageDelta = tocPages.size - tocPageCount
             val finalTocEntries = if (pageDelta != 0) {
                 val adjusted = resolvedTocEntries.map { it.copy(startPage = it.startPage + pageDelta) }
-                buildTocPages(bookTitle, bookSubtitle, adjusted, fonts, tocPages.size)
+                buildTocPages(bookTitle, bookSubtitle, adjusted, fonts, effectiveBodyPt, tocPages.size)
                 adjusted
             } else {
                 resolvedTocEntries
             }
             val finalTocPages = if (pageDelta != 0) {
-                buildTocPages(bookTitle, bookSubtitle, finalTocEntries, fonts, tocPages.size)
+                buildTocPages(bookTitle, bookSubtitle, finalTocEntries, fonts, effectiveBodyPt, tocPages.size)
             } else {
                 tocPages
             }
@@ -733,11 +916,11 @@ object ArticlePdfBookGenerator {
                 val tf = when {
                     run.isBengali && isBold -> fonts.bengaliBold
                     run.isBengali -> fonts.bengaliRegular
-                    isBold -> fonts.tinosBold
-                    isItalic -> fonts.tinosItalic
-                    else -> fonts.tinosRegular
+                    isBold -> fonts.latinBold
+                    isItalic -> fonts.latinItalic
+                    else -> fonts.latinRegular
                 }
-                val needsFakeBold = isBold && (run.isBengali || tf === fonts.tinosRegular)
+                val needsFakeBold = isBold && (if (run.isBengali) !fonts.preferSystemBengali else !fonts.hasNativeBoldLatin)
                 builder.setSpan(
                     BilingualTypefaceSpan(
                         typeface = tf,
@@ -773,9 +956,10 @@ object ArticlePdfBookGenerator {
         bookTitle: String,
         bookSubtitle: String,
         entries: List<TocEntryInfo>,
-        fonts: FontSet
+        fonts: FontSet,
+        bodyFontSizePt: Float
     ): List<MutableList<PageDrawOp>> {
-        return buildTocPages(bookTitle, bookSubtitle, entries, fonts, null)
+        return buildTocPages(bookTitle, bookSubtitle, entries, fonts, bodyFontSizePt, null)
     }
 
     private fun buildTocPages(
@@ -783,19 +967,21 @@ object ArticlePdfBookGenerator {
         bookSubtitle: String,
         entries: List<TocEntryInfo>,
         fonts: FontSet,
+        bodyFontSizePt: Float,
         expectedPageCount: Int?
     ): List<MutableList<PageDrawOp>> {
         val pages = mutableListOf<MutableList<PageDrawOp>>()
         var currentPage = mutableListOf<PageDrawOp>()
         pages.add(currentPage)
 
+        val scale = (bodyFontSizePt.coerceIn(8.5f, 15.5f) / 10.8f)
         var y = CONTENT_TOP + 8f
 
         // Book Title
         val bookTitlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(15, 23, 42)
-            textSize = 24f
-            typeface = fonts.tinosBold
+            textSize = (24f * scale).coerceIn(20f, 28f)
+            typeface = fonts.latinBold
         }
         val cleanBookTitle = bookTitle.trim().ifBlank { "Compiled Reading Book" }
         val bookTitleSpannable = buildBilingualSpannable(cleanBookTitle, fonts, isBold = true)
@@ -806,8 +992,8 @@ object ArticlePdfBookGenerator {
         if (bookSubtitle.isNotBlank()) {
             val subtitlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.rgb(71, 85, 105)
-                textSize = 11.5f
-                typeface = fonts.tinosItalic
+                textSize = (11.5f * scale).coerceIn(10f, 14f)
+                typeface = fonts.latinItalic
             }
             val subSpannable = buildBilingualSpannable(bookSubtitle.trim(), fonts, isItalic = true)
             val subLayout = createStaticLayout(subSpannable, subtitlePaint, CONTENT_WIDTH.toInt(), 1.25f)
@@ -819,7 +1005,7 @@ object ArticlePdfBookGenerator {
         val bookMetaPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(100, 116, 139)
             textSize = 9.5f
-            typeface = fonts.tinosRegular
+            typeface = fonts.latinRegular
         }
         val metaLine = "${entries.size} Articles  •  Compiled on $todayStr  •  A4 Edition"
         val metaSpannable = buildBilingualSpannable(metaLine, fonts)
@@ -833,8 +1019,8 @@ object ArticlePdfBookGenerator {
         // TOC Section Heading
         val tocHeadingPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(30, 41, 59)
-            textSize = 14f
-            typeface = fonts.tinosBold
+            textSize = (14f * scale).coerceIn(12f, 17f)
+            typeface = fonts.latinBold
         }
         val tocHeadingSpannable = buildBilingualSpannable("Table of Contents", fonts, isBold = true)
         val tocHeadingLayout = createStaticLayout(tocHeadingSpannable, tocHeadingPaint, CONTENT_WIDTH.toInt(), 1.2f)
@@ -843,18 +1029,18 @@ object ArticlePdfBookGenerator {
 
         val entryTitlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(15, 23, 42)
-            textSize = 11.5f
-            typeface = fonts.tinosBold
+            textSize = (11.5f * scale).coerceIn(10f, 14.5f)
+            typeface = fonts.latinBold
         }
         val entrySubPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(100, 116, 139)
-            textSize = 9f
-            typeface = fonts.tinosRegular
+            textSize = (9f * scale).coerceIn(8f, 11.5f)
+            typeface = fonts.latinRegular
         }
         val pageNumPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(59, 68, 226)
-            textSize = 11f
-            typeface = fonts.tinosBold
+            textSize = (11f * scale).coerceIn(10f, 14f)
+            typeface = fonts.latinBold
         }
 
         val numColWidth = 26f
@@ -910,6 +1096,7 @@ object ArticlePdfBookGenerator {
     private fun layoutArticlesContinuously(
         preparedArticles: List<PreparedArticle>,
         fonts: FontSet,
+        bodyFontSizePt: Float,
         firstArticlePageNumber: Int,
         outPages: MutableList<MutableList<PageDrawOp>>,
         outTocEntries: MutableList<TocEntryInfo>
@@ -926,40 +1113,43 @@ object ArticlePdfBookGenerator {
             y = CONTENT_TOP
         }
 
+        val base = bodyFontSizePt.coerceIn(8.5f, 15.5f)
+        val scale = base / 10.8f
+
         val titlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(15, 23, 42)
-            textSize = 17.5f
-            typeface = fonts.tinosBold
+            textSize = (17.5f * scale).coerceIn(14f, 24f)
+            typeface = fonts.latinBold
         }
         val metaPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(100, 116, 139)
-            textSize = 9.2f
-            typeface = fonts.tinosRegular
+            textSize = (9.2f * scale).coerceIn(8f, 12f)
+            typeface = fonts.latinRegular
         }
         val heading2Paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(30, 41, 59)
-            textSize = 13f
-            typeface = fonts.tinosBold
+            textSize = (13f * scale).coerceIn(11f, 19f)
+            typeface = fonts.latinBold
         }
         val heading3Paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(51, 65, 85)
-            textSize = 11.5f
-            typeface = fonts.tinosBold
+            textSize = (11.5f * scale).coerceIn(10f, 17f)
+            typeface = fonts.latinBold
         }
         val bodyPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(30, 41, 59)
-            textSize = 10.8f
-            typeface = fonts.tinosRegular
+            textSize = base
+            typeface = fonts.latinRegular
         }
         val quotePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(71, 85, 105)
-            textSize = 10.4f
-            typeface = fonts.tinosItalic
+            textSize = (base * 0.96f)
+            typeface = fonts.latinItalic
         }
         val captionPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(100, 116, 139)
-            textSize = 8.8f
-            typeface = fonts.tinosItalic
+            textSize = (8.8f * scale).coerceIn(7.8f, 11.5f)
+            typeface = fonts.latinItalic
         }
 
         val titleAreaWidth = (CONTENT_WIDTH - 34f).toInt() // Reserve space for right-side website icon
@@ -1203,7 +1393,7 @@ object ArticlePdfBookGenerator {
             val headerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.rgb(148, 163, 184)
                 textSize = 8.5f
-                typeface = fonts.tinosItalic
+                typeface = fonts.latinItalic
             }
             val headerTitle = bookTitle.trim().ifBlank { "Reading Book" }.take(64)
             canvas.drawText(headerTitle, MARGIN_LEFT, HEADER_Y, headerPaint)
@@ -1234,7 +1424,7 @@ object ArticlePdfBookGenerator {
         val badgeTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(67, 56, 202)
             textSize = 11f
-            typeface = fonts.tinosBold
+            typeface = fonts.latinBold
             textAlign = Paint.Align.CENTER
         }
 
@@ -1321,7 +1511,7 @@ object ArticlePdfBookGenerator {
         val footerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.rgb(100, 116, 139)
             textSize = 9.5f
-            typeface = fonts.tinosRegular
+            typeface = fonts.latinRegular
             textAlign = Paint.Align.CENTER
         }
         canvas.drawText("Page $pageNumber of $totalPages", A4_WIDTH / 2f, FOOTER_Y, footerPaint)

@@ -10,13 +10,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,10 +30,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -753,35 +751,43 @@ fun PdfBookPreviewDialog(
 
     var currentPageIndex by remember { mutableIntStateOf(0) }
     var zoomScale by remember { mutableFloatStateOf(1f) }
-    var panOffset by remember { mutableStateOf(Offset.Zero) }
 
-    var renderedPageBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var isRenderingPage by remember { mutableStateOf(false) }
+    var pdfFontFamilyKey by remember { mutableStateOf("aikya_tinos") }
+    var pdfFontSizePt by remember { mutableFloatStateOf(11f) }
+    var showFontMenu by remember { mutableStateOf(false) }
+
+    val pageListState = rememberLazyListState()
+    val horizontalScrollState = rememberScrollState()
+    val renderedPages = remember(generatedResult?.pdfFile?.absolutePath) { mutableStateMapOf<Int, Bitmap>() }
 
     var isDownloading by remember { mutableStateOf(false) }
     var downloadedInfo by remember { mutableStateOf<DownloadedPdfInfo?>(null) }
     var downloadError by remember { mutableStateOf<String?>(null) }
 
-    // Compile the real PDF on launch
-    LaunchedEffect(bookTitle, bookSubtitle, articles) {
+    // Compile the real PDF on launch or whenever font settings change
+    LaunchedEffect(bookTitle, bookSubtitle, articles, pdfFontFamilyKey, pdfFontSizePt) {
         isGenerating = true
         generationError = null
         downloadedInfo = null
         downloadError = null
-        currentPageIndex = 0
-        zoomScale = 1f
-        panOffset = Offset.Zero
 
         val result = ArticlePdfBookGenerator.generateBookPdf(
             context = context,
             bookTitle = bookTitle,
             bookSubtitle = bookSubtitle,
             articles = articles,
+            fontFamilyKey = pdfFontFamilyKey,
+            bodyFontSizePt = pdfFontSizePt,
             onProgress = { stage -> generationStage = stage }
         )
         isGenerating = false
         result.fold(
-            onSuccess = { generatedResult = it },
+            onSuccess = { res ->
+                generatedResult = res
+                val clamped = currentPageIndex.coerceIn(0, (res.pageCount - 1).coerceAtLeast(0))
+                currentPageIndex = clamped
+                pageListState.scrollToItem(clamped)
+            },
             onFailure = { err -> generationError = err.message ?: "Failed to build PDF preview." }
         )
     }
@@ -810,32 +816,30 @@ fun PdfBookPreviewDialog(
         }
     }
 
-    // Render current page bitmap off the UI thread whenever page changes
-    LaunchedEffect(rendererHolder, currentPageIndex) {
-        val holder = rendererHolder ?: return@LaunchedEffect
-        val total = holder.second.pageCount
-        if (currentPageIndex !in 0 until total) return@LaunchedEffect
-
-        isRenderingPage = true
-        val bmp = withContext(Dispatchers.IO) {
-            try {
-                synchronized(holder.second) {
-                    val page = holder.second.openPage(currentPageIndex)
-                    // 2x A4 resolution (1190 x 1684) gives crisp serif & Bengali glyphs in preview
-                    val width = 1190
-                    val height = 1684
-                    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                    bitmap.eraseColor(android.graphics.Color.WHITE)
-                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                    page.close()
-                    bitmap
-                }
-            } catch (_: Exception) {
-                null
+    // Sync active page indicator as user scrolls vertically through PDF pages
+    LaunchedEffect(pageListState, generatedResult?.pageCount) {
+        snapshotFlow {
+            val info = pageListState.layoutInfo
+            val visible = info.visibleItemsInfo
+            if (visible.isEmpty()) {
+                0
+            } else {
+                val viewportCenter = (info.viewportStartOffset + info.viewportEndOffset) / 2
+                visible.minByOrNull { item ->
+                    val itemCenter = item.offset + item.size / 2
+                    kotlin.math.abs(itemCenter - viewportCenter)
+                }?.index ?: pageListState.firstVisibleItemIndex
             }
+        }.collect { visibleIdx ->
+            currentPageIndex = visibleIdx
         }
-        renderedPageBitmap = bmp
-        isRenderingPage = false
+    }
+
+    // Reset horizontal pan when returning to default zoom
+    LaunchedEffect(zoomScale) {
+        if (zoomScale <= 1.05f) {
+            horizontalScrollState.scrollTo(0)
+        }
     }
 
     Dialog(
@@ -851,58 +855,35 @@ fun PdfBookPreviewDialog(
             shadowElevation = 16.dp
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                // Top Header Bar
-                Surface(
-                    color = Color.White,
-                    shadowElevation = 2.dp
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = bookTitle.ifBlank { "Live A4 Book Preview" },
-                                fontFamily = selectArticleFontForText(bookTitle),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 15.sp,
-                                color = SlateText,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            val subtitleInfo = generatedResult?.let { res ->
-                                "Page ${currentPageIndex + 1} of ${res.pageCount} • A4 (${res.tocEntries.size} articles)"
-                            } ?: generationStage
-                            Text(
-                                text = subtitleInfo,
-                                fontFamily = PoppinsFontFamily,
-                                fontSize = 11.sp,
-                                color = SlateMuted
-                            )
-                        }
-
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            if (generatedResult != null) {
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = if (zoomScale > 1.05f) IndigoLight else SlateLight,
-                                    modifier = Modifier.clickable {
-                                        zoomScale = if (zoomScale > 1.05f) 1f else 1.75f
-                                        panOffset = Offset.Zero
-                                    }
-                                ) {
-                                    Text(
-                                        text = "${(zoomScale * 100).toInt()}%",
-                                        fontFamily = PoppinsFontFamily,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = if (zoomScale > 1.05f) IndigoPrimary else SlateText,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
-                                    )
-                                }
+                // Top Header & Minimal Font Control Bar
+                Surface(color = Color.White) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = bookTitle.ifBlank { "Live A4 Book Preview" },
+                                    fontFamily = selectArticleFontForText(bookTitle),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    color = SlateText,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                val subtitleInfo = generatedResult?.let { res ->
+                                    "Page ${currentPageIndex + 1} of ${res.pageCount} • A4 (${res.tocEntries.size} articles)"
+                                } ?: generationStage
+                                Text(
+                                    text = subtitleInfo,
+                                    fontFamily = PoppinsFontFamily,
+                                    fontSize = 11.sp,
+                                    color = SlateMuted
+                                )
                             }
 
                             IconButton(
@@ -914,65 +895,210 @@ fun PdfBookPreviewDialog(
                                 Icon(Icons.Default.Close, contentDescription = "Close Preview", tint = SlateText, modifier = Modifier.size(20.dp))
                             }
                         }
-                    }
-                }
 
-                // Quick Jump TOC Strip
-                val tocEntries = generatedResult?.tocEntries ?: emptyList()
-                if (tocEntries.isNotEmpty()) {
-                    LazyRow(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color.White)
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        item {
-                            val isTocActive = currentPageIndex < (generatedResult?.tocPageCount ?: 1)
-                            FilterChip(
-                                selected = isTocActive,
-                                onClick = { currentPageIndex = 0 },
-                                label = {
+                        // Minimal Top Font Controlling System (Font Name + Font Size)
+                        val selectedFontLabel = remember(pdfFontFamilyKey) {
+                            ArticlePdfBookGenerator.pdfFontOptions.firstOrNull { it.key == pdfFontFamilyKey }?.label ?: "Aikya · Tinos"
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Box {
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .clickable(enabled = !isGenerating) { showFontMenu = true }
+                                        .minimumInteractiveComponentSize()
+                                        .padding(horizontal = 4.dp)
+                                        .testTag("pdf_font_family_btn"),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
                                     Text(
-                                        "TOC (p.1)",
+                                        text = "Aa",
                                         fontFamily = PoppinsFontFamily,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.SemiBold
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        color = IndigoPrimary
                                     )
-                                },
-                                modifier = Modifier.defaultMinSize(minHeight = 36.dp)
-                            )
-                        }
-                        items(tocEntries) { entry ->
-                            val targetPageIdx = (entry.startPage - 1).coerceIn(0, (generatedResult?.pageCount ?: 1) - 1)
-                            val isActive = currentPageIndex == targetPageIdx
-                            FilterChip(
-                                selected = isActive,
-                                onClick = { currentPageIndex = targetPageIdx },
-                                label = {
                                     Text(
-                                        "${entry.index}. ${entry.title.take(18)}${if (entry.title.length > 18) "…" else ""} • p.${entry.startPage}",
-                                        fontFamily = selectArticleFontForText(entry.title),
-                                        fontSize = 11.sp,
-                                        maxLines = 1
+                                        text = selectedFontLabel,
+                                        fontFamily = PoppinsFontFamily,
+                                        fontWeight = FontWeight.Medium,
+                                        fontSize = 12.sp,
+                                        color = SlateText
                                     )
-                                },
-                                modifier = Modifier.defaultMinSize(minHeight = 36.dp)
-                            )
+                                    Icon(
+                                        Icons.Default.KeyboardArrowDown,
+                                        contentDescription = "Choose PDF Font",
+                                        tint = SlateMuted,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+
+                                DropdownMenu(
+                                    expanded = showFontMenu,
+                                    onDismissRequest = { showFontMenu = false },
+                                    containerColor = Color.White
+                                ) {
+                                    ArticlePdfBookGenerator.pdfFontOptions.forEach { option ->
+                                        val isChosen = option.key == pdfFontFamilyKey
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    text = option.label,
+                                                    fontFamily = PoppinsFontFamily,
+                                                    fontWeight = if (isChosen) FontWeight.SemiBold else FontWeight.Normal,
+                                                    fontSize = 13.sp,
+                                                    color = if (isChosen) IndigoPrimary else SlateText
+                                                )
+                                            },
+                                            trailingIcon = if (isChosen) {
+                                                { Icon(Icons.Default.Check, contentDescription = null, tint = IndigoPrimary, modifier = Modifier.size(16.dp)) }
+                                            } else null,
+                                            onClick = {
+                                                showFontMenu = false
+                                                if (pdfFontFamilyKey != option.key) {
+                                                    pdfFontFamilyKey = option.key
+                                                }
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(0.dp)
+                            ) {
+                                IconButton(
+                                    onClick = { pdfFontSizePt = (pdfFontSizePt - 1f).coerceAtLeast(9f) },
+                                    enabled = pdfFontSizePt > 9f && !isGenerating,
+                                    modifier = Modifier
+                                        .minimumInteractiveComponentSize()
+                                        .testTag("pdf_font_size_minus")
+                                ) {
+                                    Icon(
+                                        Icons.Default.Remove,
+                                        contentDescription = "Decrease PDF Font Size",
+                                        tint = if (pdfFontSizePt > 9f) SlateText else SlateMuted.copy(alpha = 0.4f),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+
+                                Text(
+                                    text = "${pdfFontSizePt.toInt()}pt",
+                                    fontFamily = PoppinsFontFamily,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 12.sp,
+                                    color = SlateText
+                                )
+
+                                IconButton(
+                                    onClick = { pdfFontSizePt = (pdfFontSizePt + 1f).coerceAtMost(15f) },
+                                    enabled = pdfFontSizePt < 15f && !isGenerating,
+                                    modifier = Modifier
+                                        .minimumInteractiveComponentSize()
+                                        .testTag("pdf_font_size_plus")
+                                ) {
+                                    Icon(
+                                        Icons.Default.Add,
+                                        contentDescription = "Increase PDF Font Size",
+                                        tint = if (pdfFontSizePt < 15f) SlateText else SlateMuted.copy(alpha = 0.4f),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
                         }
+
+                        // Minimal Boxless Quick-Jump Article List Strip
+                        val tocEntries = generatedResult?.tocEntries ?: emptyList()
+                        if (tocEntries.isNotEmpty()) {
+                            LazyRow(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Color.White),
+                                contentPadding = PaddingValues(horizontal = 14.dp),
+                                horizontalArrangement = Arrangement.spacedBy(18.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                item {
+                                    val isTocActive = currentPageIndex < (generatedResult?.tocPageCount ?: 1)
+                                    Column(
+                                        modifier = Modifier
+                                            .width(IntrinsicSize.Max)
+                                            .clickable {
+                                                scope.launch { pageListState.animateScrollToItem(0) }
+                                            }
+                                            .padding(top = 6.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Text(
+                                            text = "TOC · p.1",
+                                            fontFamily = PoppinsFontFamily,
+                                            fontSize = 12.sp,
+                                            fontWeight = if (isTocActive) FontWeight.SemiBold else FontWeight.Normal,
+                                            color = if (isTocActive) IndigoPrimary else SlateMuted,
+                                            maxLines = 1
+                                        )
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(2.dp)
+                                                .background(if (isTocActive) IndigoPrimary else Color.Transparent)
+                                        )
+                                    }
+                                }
+
+                                items(tocEntries) { entry ->
+                                    val targetPageIdx = (entry.startPage - 1).coerceIn(0, (generatedResult?.pageCount ?: 1) - 1)
+                                    val isActive = currentPageIndex == targetPageIdx
+                                    Column(
+                                        modifier = Modifier
+                                            .width(IntrinsicSize.Max)
+                                            .clickable {
+                                                scope.launch { pageListState.animateScrollToItem(targetPageIdx) }
+                                            }
+                                            .padding(top = 6.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        Text(
+                                            text = "${entry.index}. ${entry.title.take(20)}${if (entry.title.length > 20) "…" else ""} · p.${entry.startPage}",
+                                            fontFamily = selectArticleFontForText(entry.title),
+                                            fontSize = 12.sp,
+                                            fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
+                                            color = if (isActive) IndigoPrimary else SlateMuted,
+                                            maxLines = 1
+                                        )
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(2.dp)
+                                                .background(if (isActive) IndigoPrimary else Color.Transparent)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        HorizontalDivider(thickness = 0.5.dp, color = SlateBorder.copy(alpha = 0.55f))
                     }
-                    HorizontalDivider(color = SlateBorder.copy(alpha = 0.5f))
                 }
 
-                // Live Page Preview Area
-                Box(
+                // Live Continuously-Scrollable A4 Page Preview Area
+                BoxWithConstraints(
                     modifier = Modifier
                         .weight(1f)
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                        .fillMaxWidth(),
                     contentAlignment = Alignment.Center
                 ) {
+                    val viewportWidth = maxWidth
                     when {
                         isGenerating -> {
                             Column(
@@ -1007,66 +1133,96 @@ fun PdfBookPreviewDialog(
                             }
                         }
 
-                        renderedPageBitmap != null -> {
-                            val bmp = renderedPageBitmap!!
+                        rendererHolder != null -> {
+                            val holder = rendererHolder!!
+                            val pageTotal = holder.second.pageCount
+                            val pageAspect = ArticlePdfBookGenerator.A4_WIDTH.toFloat() / ArticlePdfBookGenerator.A4_HEIGHT.toFloat()
+
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .then(if (zoomScale > 1.05f) Modifier.horizontalScroll(horizontalScrollState) else Modifier)
                                     .pointerInput(Unit) {
                                         detectTapGestures(
                                             onDoubleTap = {
-                                                if (zoomScale > 1.05f) {
-                                                    zoomScale = 1f
-                                                    panOffset = Offset.Zero
-                                                } else {
-                                                    zoomScale = 1.85f
-                                                }
+                                                zoomScale = if (zoomScale > 1.05f) 1f else 1.75f
                                             }
                                         )
                                     }
-                                    .pointerInput(Unit) {
-                                        detectTransformGestures { _, pan, zoom, _ ->
-                                            val newZoom = (zoomScale * zoom).coerceIn(1f, 3f)
-                                            zoomScale = newZoom
-                                            if (newZoom > 1.02f) {
-                                                panOffset = Offset(
-                                                    x = (panOffset.x + pan.x).coerceIn(-600f, 600f),
-                                                    y = (panOffset.y + pan.y).coerceIn(-800f, 800f)
-                                                )
-                                            } else {
-                                                panOffset = Offset.Zero
+                            ) {
+                                LazyColumn(
+                                    state = pageListState,
+                                    modifier = Modifier
+                                        .width(viewportWidth * zoomScale)
+                                        .fillMaxHeight()
+                                        .testTag("pdf_preview_scroll_list"),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    items(count = pageTotal, key = { it }) { pageIdx ->
+                                        LaunchedEffect(holder, pageIdx) {
+                                            if (!renderedPages.containsKey(pageIdx)) {
+                                                val bmp = withContext(Dispatchers.IO) {
+                                                    try {
+                                                        synchronized(holder.second) {
+                                                            if (pageIdx !in 0 until holder.second.pageCount) return@synchronized null
+                                                            val page = holder.second.openPage(pageIdx)
+                                                            val width = 1190
+                                                            val height = 1684
+                                                            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                                                            bitmap.eraseColor(android.graphics.Color.WHITE)
+                                                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                                            page.close()
+                                                            bitmap
+                                                        }
+                                                    } catch (_: Exception) {
+                                                        null
+                                                    }
+                                                }
+                                                if (bmp != null) {
+                                                    renderedPages[pageIdx] = bmp
+                                                    // Keep cache bounded on large PDFs without touching visible pages
+                                                    if (renderedPages.size > 10) {
+                                                        val furthestKey = renderedPages.keys.maxByOrNull { kotlin.math.abs(it - currentPageIndex) }
+                                                        if (furthestKey != null && furthestKey != pageIdx) {
+                                                            renderedPages.remove(furthestKey)
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .aspectRatio(ArticlePdfBookGenerator.A4_WIDTH.toFloat() / ArticlePdfBookGenerator.A4_HEIGHT.toFloat())
-                                        .fillMaxHeight()
-                                        .shadow(6.dp, RoundedCornerShape(4.dp))
-                                        .background(Color.White, RoundedCornerShape(4.dp))
-                                        .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(4.dp))
-                                ) {
-                                    Image(
-                                        bitmap = bmp.asImageBitmap(),
-                                        contentDescription = "A4 PDF Page ${currentPageIndex + 1}",
-                                        contentScale = ContentScale.Fit,
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .graphicsLayer(
-                                                scaleX = zoomScale,
-                                                scaleY = zoomScale,
-                                                translationX = panOffset.x,
-                                                translationY = panOffset.y
-                                            )
-                                    )
+
+                                        val pageBmp = renderedPages[pageIdx]
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .aspectRatio(pageAspect)
+                                                .shadow(6.dp, RoundedCornerShape(4.dp))
+                                                .background(Color.White, RoundedCornerShape(4.dp))
+                                                .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(4.dp)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (pageBmp != null) {
+                                                Image(
+                                                    bitmap = pageBmp.asImageBitmap(),
+                                                    contentDescription = "A4 PDF Page ${pageIdx + 1}",
+                                                    contentScale = ContentScale.FillWidth,
+                                                    modifier = Modifier.fillMaxSize()
+                                                )
+                                            } else {
+                                                CircularProgressIndicator(
+                                                    color = IndigoPrimary,
+                                                    modifier = Modifier.size(28.dp)
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
 
-                        isRenderingPage -> {
+                        else -> {
                             CircularProgressIndicator(color = IndigoPrimary, modifier = Modifier.size(28.dp))
                         }
                     }
@@ -1180,9 +1336,7 @@ fun PdfBookPreviewDialog(
                             IconButton(
                                 onClick = {
                                     if (currentPageIndex > 0) {
-                                        currentPageIndex--
-                                        zoomScale = 1f
-                                        panOffset = Offset.Zero
+                                        scope.launch { pageListState.animateScrollToItem(currentPageIndex - 1) }
                                     }
                                 },
                                 enabled = currentPageIndex > 0 && !isGenerating,
@@ -1204,9 +1358,7 @@ fun PdfBookPreviewDialog(
                             IconButton(
                                 onClick = {
                                     if (currentPageIndex < totalPages - 1) {
-                                        currentPageIndex++
-                                        zoomScale = 1f
-                                        panOffset = Offset.Zero
+                                        scope.launch { pageListState.animateScrollToItem(currentPageIndex + 1) }
                                     }
                                 },
                                 enabled = currentPageIndex < totalPages - 1 && !isGenerating,

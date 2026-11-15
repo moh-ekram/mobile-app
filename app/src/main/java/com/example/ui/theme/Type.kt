@@ -16,12 +16,11 @@ val PoppinsFontFamily = FontFamily(
 )
 
 val KalpurushFontFamily = FontFamily(
-    Font(R.font.kalpurush, FontWeight.Normal)
+    Font(R.font.aikya_regular, FontWeight.Normal)
 )
 
 val AikyaFontFamily = FontFamily(
-    Font(R.font.aikya_regular, FontWeight.Normal),
-    Font(R.font.aikya_bold, FontWeight.Bold)
+    Font(R.font.aikya_regular, FontWeight.Normal)
 )
 
 val TinosFontFamily = FontFamily(
